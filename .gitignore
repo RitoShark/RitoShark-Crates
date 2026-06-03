@@ -1,0 +1,31 @@
+# Rust build artifacts
+/target/
+**/target/
+**/*.rs.bk
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Local hash dictionaries / game data (never vendored)
+/hashes/
+*.wad.client
+*.bin
+
+# Test fixtures are opt-in per crate via tests/fixtures/.gitkeep
+# (large real game files are kept out of the repo)
+**/tests/fixtures/**
+!**/tests/fixtures/.gitkeep
+
+# Internal design notes / specs — kept local, not for publication
+/docs/superpowers/
+
+# Claude working guide (kept local, not tracked)
+CLAUDE.md
+
+# Build/test logs
+*.log

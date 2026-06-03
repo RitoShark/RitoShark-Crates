@@ -1,0 +1,11 @@
+[package]
+name = "rs_audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+rs_io = { workspace = true }

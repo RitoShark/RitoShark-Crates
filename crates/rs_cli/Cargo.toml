@@ -1,0 +1,16 @@
+[package]
+name = "rs_cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ritoshark"
+path = "src/main.rs"
+
+[dependencies]
+ritoshark = { workspace = true }
+rs_hash = { workspace = true }
+clap = { workspace = true }

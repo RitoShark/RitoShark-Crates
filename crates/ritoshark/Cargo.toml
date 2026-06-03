@@ -1,0 +1,35 @@
+[package]
+name = "ritoshark"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+rs_io = { workspace = true }
+rs_hash = { workspace = true }
+rs_math = { workspace = true }
+rs_file = { workspace = true }
+rs_bin = { workspace = true, optional = true }
+rs_wad = { workspace = true, optional = true }
+rs_tex = { workspace = true, optional = true }
+rs_mesh = { workspace = true, optional = true }
+rs_anim = { workspace = true, optional = true }
+rs_mapgeo = { workspace = true, optional = true }
+rs_rst = { workspace = true, optional = true }
+rs_rman = { workspace = true, optional = true }
+rs_audio = { workspace = true, optional = true }
+
+[features]
+default = ["bin", "wad", "tex", "mesh", "anim", "mapgeo", "rst", "rman", "audio"]
+full = ["default"]
+bin = ["dep:rs_bin"]
+wad = ["dep:rs_wad"]
+tex = ["dep:rs_tex"]
+mesh = ["dep:rs_mesh"]
+anim = ["dep:rs_anim"]
+mapgeo = ["dep:rs_mapgeo"]
+rst = ["dep:rs_rst"]
+rman = ["dep:rs_rman"]
+audio = ["dep:rs_audio"]
