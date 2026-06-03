@@ -2,11 +2,11 @@
 
 Reads and writes League of Legends `.mapgeo` (**OEGM**) environment geometry.
 
-This crate targets **OEGM version 17 only** — the current shipping format. Any other on-disk
-version is reported as `Error::UnsupportedVersion(version)` rather than mis-parsed. The reader
-covers the full top-level structure and the writer is its byte-exact inverse for everything it
-parses, so a read → write round-trip of a v17 file is byte-identical up to where parsing stops
-(see *Scope* below).
+This crate supports **OEGM versions 14, 17 and 18**. Any other on-disk version is reported as
+`Error::UnsupportedVersion(version)` rather than mis-parsed. The reader covers the **entire** file —
+including the trailing bucketed scene graphs and planar reflectors — and the writer is its
+byte-exact inverse, so a read → write round-trip of a supported file is byte-identical over the
+whole file (all three real samples round-trip in full).
 
 ## Format overview (OEGM)
 
@@ -15,7 +15,7 @@ bytes (no NUL terminator).
 
 ```
 magic            : "OEGM" (4 bytes)
-version          : u32                       // this crate accepts 17
+version          : u32                       // this crate accepts 14, 17, 18
 
 shader texture overrides
   count          : u32
@@ -67,25 +67,34 @@ models (meshes)
     baked_paint_scale_offset : 4 × f32       // scale (Vec2) then bias (Vec2)
 ```
 
-### Scope (what is parsed vs skipped)
+### Trailing sections
 
-Parsing stops cleanly **after the model list**. The trailing sections are intentionally **not**
-read or written by this MVP:
+After the model list the reader continues through the rest of the file:
 
-- the **bucketed scene graph** (`version >= 15`: a count then one quad-tree per entry; earlier
-  versions: a single graph),
-- the **planar reflectors** (`version >= 13`),
-- the per-mesh **light grid** that older versions embed.
+- the **bucketed scene graphs** (`version >= 15`: a count then one quad-tree per entry; earlier
+  versions: a single implicit graph). Each carries its bounds, bucket grid, vertex/index arrays,
+  per-bucket records and optional per-face visibility flags. Version 18 prefixes one extra `f32`.
+- the **planar reflectors** (`version >= 13`): a counted list of `(transform, plane, normal)`.
 
-Because of this, a full-file byte round-trip reproduces the original exactly **up to that point**;
-the bytes after the model list are dropped. The crate's `tests/real_files.rs` asserts the
-re-serialized output equals the source file's prefix byte-for-byte.
+Both are fully parsed and re-emitted, so `tests/real_files.rs` asserts the re-serialized output
+equals the **entire** source file byte-for-byte.
+
+### Per-version layout deltas
+
+| Field | v14 | v17 | v18 |
+|---|---|---|---|
+| shader overrides | implicit bare strings (v9/v11 samplers) | counted `[index, name]` | counted `[index, name]` |
+| mesh extra `u32` after layer | — | — | `unknown_v18` |
+| mesh visibility-controller hash | — | `u32` | `u32` |
+| mesh render flags | `u8` | `u16` | `u16` |
+| mesh paint data | single baked-paint channel | counted overrides + scale/bias | counted overrides + scale/bias |
+| scene graph list | single implicit graph | counted | counted, each with leading `f32` |
 
 ## Versioning
 
-Only `version == 17` is accepted. Every sampled real file confirms the on-disk version varies by
-map and patch (v14, v17 and v18 all appear in the wild — see `docs/real-files-report.md`), so
-callers should expect `UnsupportedVersion` for many inputs until more versions are implemented.
+Versions `14`, `17` and `18` are accepted; all three appear in the wild (see
+`docs/real-files-report.md`). The C# oracle additionally lists `5, 6, 7, 9, 11, 12, 13, 15`, which
+this crate does not yet exercise against real samples and reports as `UnsupportedVersion`.
 
 ## API
 
@@ -105,24 +114,25 @@ geo.to_path("out.mapgeo")?;
 ```
 
 Public types: `MapGeometry`, `MapModel`, `Submesh`, `VertexDescription`, `VertexElement`,
-`VertexBuffer`, `IndexBuffer`, `TextureOverride`, `AssetChannel`, and the `ElementName`,
-`ElementFormat`, `VertexUsage` enums. Vertex buffers are kept as raw bytes plus their declaration
-so callers can decode them with `VertexDescription::vertex_size` and the per-element byte sizes.
+`VertexBuffer`, `IndexBuffer`, `TextureOverride`, `AssetChannel`, `SceneGraph`, `GeometryBucket`,
+`PlanarReflector`, and the `ElementName`, `ElementFormat`, `VertexUsage` enums. Vertex buffers are
+kept as raw bytes plus their declaration so callers can decode them with
+`VertexDescription::vertex_size` and the per-element byte sizes.
 
 ## Fixtures
 
-Real `.mapgeo` files are copyrighted game assets and are **gitignored**. Drop sample files in the
-workspace-level `sample-files/` directory (a sibling of `crates/`). The real-file tests join
-`../../sample-files` relative to the crate and **skip cleanly** when the files are absent, so the
+Real `.mapgeo` files are copyrighted game assets and are **gitignored**. Sample files live in the
+workspace-level `Sample-Files/` directory (a sibling of `crates/`). The real-file tests join
+`../../Sample-Files` relative to the crate and **skip cleanly** when the files are absent, so the
 suite is green on a fresh checkout.
 
 ## Testing
 
 - `tests/smoke.rs` — a hand-built minimal v17 file: parse, reject bad magic / unsupported
   version, byte-exact round-trip, and a truncation test (must `Err`, never panic).
-- `tests/real_files.rs` — for each sample: print magic + version, then parse; v17 must yield a
-  non-empty model list and round-trip its prefix byte-for-byte, other versions must report
-  `UnsupportedVersion` carrying the exact on-disk version.
+- `tests/real_files.rs` — for each sample: print magic + version, then parse; supported versions
+  (14/17/18) must yield a non-empty model list and round-trip the **whole** file byte-for-byte,
+  other versions must report `UnsupportedVersion` carrying the exact on-disk version.
 
 ```bash
 cargo test -p rs_mapgeo

@@ -12,7 +12,7 @@ use rs_anim::{Animation, Skeleton, AnimTrack, AnimFrame, Joint};
 let skl  = Skeleton::from_path("aatrox.skl")?;
 let anim = Animation::from_path("aatrox_idle.anm")?;
 
-let bytes = anim.to_bytes()?;     // emits uncompressed r3d2anmd v4
+let bytes = anim.to_bytes()?;     // v5 in -> byte-exact v5 out; otherwise emits v4
 skl.to_path("out.skl")?;
 ```
 
@@ -39,8 +39,9 @@ Two on-disk shapes exist; this crate implements the **modern** one and rejects t
   indices, influences, skeleton name, asset name, bone names, plus reserved slots). Each joint
   record is 100 bytes: flags/id/parent, a 4-byte hash, a radius, a local
   (translation, scale, rotation) transform and an inverse-bind transform, then a relative offset
-  to its NUL-terminated name. Influences are a flat `u16` list of joint ids.
-  Round-trips byte-exactly.
+  to its NUL-terminated name. Influences are a flat `u16` list of joint ids (the C# oracle reads
+  these as signed `i16`; the bytes are identical). The joint-id-hash section is emitted ordered by
+  hash **ascending**, matching the C# `RigResource` writer. Round-trips byte-exactly.
 - **Legacy** — magic `r3d2sklt` (versions 1/2). Returned as `Error::UnsupportedVersion`.
 
 > No `.skl` sample ships in `sample-files/`, so the skeleton path is currently exercised only by
@@ -64,10 +65,17 @@ offsets (relative to byte 12) into shared data sections.
 - **v3 (legacy)** — per-track fixed 32-byte name (hashed with ELF), then a full
   rotation+translation per frame; scale is implicitly `(1,1,1)`.
 
-**Writing** always emits **v4** (full quaternions) so values survive a round-trip without
-quantization loss. The writer rebuilds the dedup'd vector/quaternion palettes, so write output is
-deterministic but is not byte-identical to a v5 input — equality is asserted on the decoded
-structure, not the bytes.
+**Writing is format-preserving for v5.** When a file is read from uncompressed v5, the reader keeps
+the raw sections (vector palette, the 48-bit quantized quaternion palette *as bytes*, joint hashes,
+and the per-frame palette-index triples) plus the header fields and the exact physical section
+order (`vecs -> quats -> jointHashes -> frames`, with the 12-byte post-header pad). The writer
+replays them, so `read -> write` is **byte-identical** for v5 (verified on the three real samples).
+
+If you mutate `tracks` on a v5-sourced animation, call `Animation::make_editable()` first to drop
+the preserved layout; the writer then rebuilds from the decoded tracks and emits **v4** (full
+quaternions, no quantization loss). Animations constructed in memory, or read from v3/v4/compressed,
+have no preserved layout and always write as v4. `Animation::is_byte_exact()` reports whether the
+preserved v5 layout is present.
 
 ### Compressed — `r3d2canm` (versions 1, 2, 3)  ✅ supported
 
@@ -103,7 +111,8 @@ Two bits pick the dropped largest-magnitude component; three 15-bit fields hold 
 |---|---|---|---|
 | `.skl` modern `0x22FD4FC3` | 0 | yes (byte-exact) | yes (byte-exact) |
 | `.skl` legacy `r3d2sklt` | 1, 2 | `UnsupportedVersion` | no |
-| `.anm` `r3d2anmd` | 3, 4, 5 | yes | as v4 |
+| `.anm` `r3d2anmd` v5 | 5 | yes | **byte-exact** (v4 after `make_editable`) |
+| `.anm` `r3d2anmd` v3/v4 | 3, 4 | yes | as v4 |
 | `.anm` `r3d2canm` | 1, 2, 3 | yes (resampled) | no (re-emit as v4) |
 | `.anm` `r3d2canm` | other | `UnsupportedVersion` | — |
 

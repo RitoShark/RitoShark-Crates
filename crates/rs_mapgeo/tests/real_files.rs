@@ -1,27 +1,27 @@
 //! Exercises the parser against real `.mapgeo` sample files. The files live outside the crate in
-//! a gitignored `sample-files/` directory, so every test skips cleanly when they are absent. For
-//! each file we first read the `OEGM` magic and the on-disk version, then attempt a full parse:
-//! version 17 must parse with a non-empty model list, every other version must be reported as
-//! `Error::UnsupportedVersion` carrying that exact version (never a panic, never a different error).
+//! a gitignored sample directory, so every test skips cleanly when they are absent. For each file
+//! we first read the `OEGM` magic and the on-disk version, then attempt a full parse. Supported
+//! versions (14, 17, 18) must parse with a non-empty model list and round-trip the *entire* file
+//! byte-for-byte; any other version must be reported as `Error::UnsupportedVersion` carrying that
+//! exact version (never a panic, never a different error).
 
 use std::path::{Path, PathBuf};
 
 use rs_io::{Parse, Serialize};
 use rs_mapgeo::{Error, MapGeometry};
 
+const SUPPORTED: &[u32] = &[14, 17, 18];
+
 fn sample_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sample-files")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Sample-Files")
 }
 
 fn read_sample(name: &str) -> Option<Vec<u8>> {
-    let path = sample_dir().join(name);
-    std::fs::read(&path).ok()
+    std::fs::read(sample_dir().join(name)).ok()
 }
 
-fn magic_and_version(bytes: &[u8]) -> (&[u8], u32) {
-    let magic = &bytes[..4];
-    let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-    (magic, version)
+fn on_disk_version(bytes: &[u8]) -> u32 {
+    u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]])
 }
 
 fn check_sample(name: &str) {
@@ -31,48 +31,52 @@ fn check_sample(name: &str) {
     };
 
     assert!(bytes.len() >= 8, "{name}: too small to hold a header");
-    let (magic, version) = magic_and_version(&bytes);
-    assert_eq!(magic, b"OEGM", "{name}: unexpected magic {magic:?}");
+    assert_eq!(&bytes[..4], b"OEGM", "{name}: unexpected magic");
+    let version = on_disk_version(&bytes);
     eprintln!("{name}: OEGM version {version}");
 
     match MapGeometry::from_bytes(&bytes) {
         Ok(geo) => {
-            assert_eq!(version, 17, "{name}: only version 17 should parse");
-            assert_eq!(geo.version, 17);
+            assert!(
+                SUPPORTED.contains(&version),
+                "{name}: parsed an unsupported version {version}"
+            );
+            assert_eq!(geo.version, version);
             assert!(
                 !geo.models.is_empty(),
                 "{name}: parsed but model list is empty"
             );
             eprintln!(
-                "{name}: parsed v17 - {} models, {} vertex buffers, {} index buffers",
+                "{name}: parsed v{version} - {} models, {} vertex buffers, {} index buffers, \
+                 {} scene graphs, {} planar reflectors",
                 geo.models.len(),
                 geo.vertex_buffers.len(),
                 geo.index_buffers.len(),
+                geo.scene_graphs.len(),
+                geo.planar_reflectors.len(),
             );
 
-            // The writer reproduces every field the reader consumed; because the reader stops after
-            // the model list, the re-serialized bytes must equal the original file's prefix exactly.
-            let out = geo.to_bytes().expect("re-serialize parsed v17");
-            assert!(
-                out.len() <= bytes.len(),
-                "{name}: writer emitted more bytes than the source file"
-            );
-            if let Some(offset) = out.iter().zip(&bytes).position(|(a, b)| a != b) {
-                panic!(
-                    "{name}: re-serialized prefix diverges at byte {offset} \
-                     (wrote {} bytes, source {} bytes)",
-                    out.len(),
-                    bytes.len()
-                );
-            }
-            eprintln!(
-                "{name}: byte-exact prefix round-trip over {} of {} bytes",
+            let out = geo.to_bytes().expect("re-serialize parsed file");
+            assert_eq!(
+                out.len(),
+                bytes.len(),
+                "{name}: re-serialized length {} != source length {}",
                 out.len(),
                 bytes.len()
             );
+            if let Some(offset) = out.iter().zip(&bytes).position(|(a, b)| a != b) {
+                panic!("{name}: re-serialized output diverges at byte {offset}");
+            }
+            eprintln!(
+                "{name}: byte-exact full round-trip over {} bytes",
+                out.len()
+            );
         }
         Err(Error::UnsupportedVersion(reported)) => {
-            assert_ne!(version, 17, "{name}: version 17 must not be rejected");
+            assert!(
+                !SUPPORTED.contains(&version),
+                "{name}: supported version {version} must not be rejected"
+            );
             assert_eq!(
                 reported, version,
                 "{name}: UnsupportedVersion should carry the on-disk version"

@@ -3,7 +3,7 @@ use std::io::{Read, Seek};
 use rs_io::{Parse, ReaderExt};
 
 use crate::error::{Error, Result};
-use crate::rman::{Bundle, Chunk, Directory, FileEntry, Rman};
+use crate::rman::{Bundle, Chunk, Directory, FileEntry, FileFlag, Rman};
 
 const MAGIC: [u8; 4] = *b"RMAN";
 const HEADER_LEN: u32 = 4 + 1 + 1 + 2 + 4 + 4 + 8 + 4;
@@ -40,34 +40,48 @@ impl Parse for Rman {
         let body = zstd::stream::decode_all(compressed.as_slice())
             .map_err(|e| Error::Decompress(e.to_string()))?;
 
-        let (bundles, files, directories) = parse_body(&body)?;
+        let parsed = parse_body(&body)?;
 
         Ok(Rman {
             version: (major, minor),
             flags,
             manifest_id,
-            bundles,
-            files,
-            directories,
+            bundles: parsed.bundles,
+            files: parsed.files,
+            directories: parsed.directories,
+            file_flags: parsed.file_flags,
         })
     }
 }
 
-fn parse_body(body: &[u8]) -> Result<(Vec<Bundle>, Vec<FileEntry>, Vec<Directory>)> {
+struct Body {
+    bundles: Vec<Bundle>,
+    files: Vec<FileEntry>,
+    directories: Vec<Directory>,
+    file_flags: Vec<FileFlag>,
+}
+
+fn parse_body(body: &[u8]) -> Result<Body> {
     let mut root = Cursor::new(body, 0);
     let header_len = root.read_i32()?;
     root.skip(header_len)?;
 
     let bundles_off = root.read_offset()?;
-    let _flags_off = root.read_offset()?;
+    let flags_off = root.read_offset()?;
     let files_off = root.read_offset()?;
     let dirs_off = root.read_offset()?;
 
     let bundles = parse_table(body, bundles_off, parse_bundle)?;
+    let file_flags = parse_table(body, flags_off, parse_flag)?;
     let files = parse_table(body, files_off, parse_file)?;
     let directories = parse_table(body, dirs_off, parse_directory)?;
 
-    Ok((bundles, files, directories))
+    Ok(Body {
+        bundles,
+        files,
+        directories,
+        file_flags,
+    })
 }
 
 fn parse_table<T>(
@@ -117,12 +131,29 @@ fn parse_chunks(mut cursor: Cursor<'_>) -> Result<Vec<Chunk>> {
     Ok(out)
 }
 
+/** Flag-table entries use a fixed body layout rather than indexed vtable lookups: after the
+self-relative vtable pointer (`i32`) come three reserved bytes, the flag `id` (`u8`) at entry
+offset 7, and a self-relative offset (`i32`) to the length-prefixed name at offset 8. */
+fn parse_flag(mut cursor: Cursor<'_>) -> Result<FileFlag> {
+    cursor.skip(4)?;
+    cursor.skip(3)?;
+    let id = cursor.read_u8()?;
+    let mut name_cursor = cursor.subcursor()?;
+    let len = name_cursor.read_i32()?;
+    let bytes = name_cursor.read_slice(len)?;
+    let name = std::str::from_utf8(bytes)
+        .map_err(|_| Error::Malformed("invalid utf-8 flag name"))?
+        .to_owned();
+    Ok(FileFlag { id, name })
+}
+
 fn parse_file(cursor: Cursor<'_>) -> Result<FileEntry> {
     let fields = cursor.fields()?;
     let id = fields.get_u64(0)?.ok_or(Error::Malformed("file id"))?;
     let directory_id = fields.get_u64(1)?;
     let size = fields.get_u32(2)?.ok_or(Error::Malformed("file size"))?;
     let name = fields.get_str(3)?.ok_or(Error::Malformed("file name"))?;
+    let flags_mask = fields.get_u64(4)?;
     let chunk_ids = match fields.offset_cursor(7)? {
         Some(c) => parse_chunk_ids(c)?,
         None => Vec::new(),
@@ -138,6 +169,7 @@ fn parse_file(cursor: Cursor<'_>) -> Result<FileEntry> {
         chunk_ids,
         link,
         permissions,
+        flags_mask,
     })
 }
 
@@ -206,6 +238,10 @@ impl<'a> Cursor<'a> {
         }
         self.offset = next;
         Ok(())
+    }
+
+    fn read_u8(&mut self) -> Result<u8> {
+        Ok(self.read_slice(1)?[0])
     }
 
     fn read_i32(&mut self) -> Result<i32> {

@@ -56,9 +56,29 @@ the duplicate flag and the 16-bit first-subchunk index are always present.
 | 4 | ZstdMulti (split sub-chunks) | yes |
 
 **ZstdMulti** stores one independent zstd frame per sub-chunk, concatenated end to end
-(optionally preceded by a stored prefix). The crate copies any pre-frame bytes verbatim and then
-streams the concatenated frames in order; the zstd reader decodes them one after another until the
-input is exhausted, so the external `.subchunktoc` table is not required to reassemble the chunk.
+(optionally preceded by a stored prefix). Two decode paths are provided:
+
+- **Streaming heuristic** (`chunk_data`): copy any pre-frame bytes verbatim, then stream the
+  concatenated frames in order, letting the zstd reader decode them one after another until the
+  input is exhausted. No external table is needed; it assumes the data section is exactly the
+  concatenated frames (true for every real chunk tested).
+- **Explicit `.subchunktoc`** (`chunk_data_with_toc`): size each sub-chunk from a parsed
+  `.subchunktoc` table, matching the C# oracle exactly. This handles arbitrary layouts (e.g. a
+  stored sub-chunk between two compressed frames) that the heuristic cannot.
+
+### The `.subchunktoc`
+
+The sub-chunk table is itself a chunk inside the WAD — a file whose lowercased path ends in
+`.subchunktoc` (the base name comes from the WAD's own path under `Game/`, so the caller supplies
+it). Its decompressed body is an array of 16-byte entries:
+
+| Field | Size | Notes |
+|---|---|---|
+| compressed size | 4 | sub-chunk bytes in the parent chunk's data section |
+| uncompressed size | 4 | sub-chunk size after decoding (equal to compressed ⇒ stored) |
+| checksum | 8 | sub-chunk's XXH3-64 |
+
+A zstd-multi chunk's `first subchunk index` + `subchunk count` select its run of this table.
 
 ## API
 
@@ -91,8 +111,49 @@ let raw = wad.chunk_raw(&wad.chunks[0])?;
 wad.to_path("out.wad.client")?;
 ```
 
+### Lookup
+
+```rust
+// By path hash (XXH64 of the lowercased path).
+let chunk = wad.chunk_by_hash(0x431712194fe05916);
+
+// By path: hashed for you via XXH64(lowercased).
+let chunk = wad.chunk_by_path("data/final/champions/azir.skl");
+```
+
+Both return `Option<&WadChunk>` and never panic on a missing key.
+
+### Bulk extraction
+
+```rust
+use std::collections::HashMap;
+
+// Decompress every chunk: path-hash -> decompressed bytes.
+let all: HashMap<u64, Vec<u8>> = wad.extract_all()?;
+
+// Decompress a chosen subset (unknown hashes are skipped).
+let some = wad.extract_selected([0x431712194fe05916, 0x0123_4567_89AB_CDEF])?;
+```
+
+Enable the `parallel` feature to decode chunks across a thread pool; the API is identical and the
+crate stays `#![forbid(unsafe_code)]`.
+
+### Explicit sub-chunk table
+
+```rust
+// Parse the archive's .subchunktoc (caller supplies the lowercased path).
+if let Some(toc) = wad.subchunk_toc_for_path("data/final/champions/azir.wad.subchunktoc")? {
+    // Decode a zstd-multi chunk with explicit per-sub-chunk sizes (oracle-exact).
+    let bytes = wad.chunk_data_with_toc(&wad.chunks[0], &toc)?;
+}
+```
+
+`chunk_data_with_toc` falls back to the normal path for non-multi chunks, so it is a safe drop-in
+for `chunk_data` whenever a TOC is available.
+
 `rs_wad::decompress(raw, compression, uncompressed_size)` decodes a raw chunk payload directly
-without a `Wad`.
+without a `Wad`; `rs_wad::decompress_zstd_multi_with_toc(raw, uncompressed_size, &subchunks)`
+decodes a multi chunk from an explicit sub-chunk slice.
 
 ### Round-trip contract
 

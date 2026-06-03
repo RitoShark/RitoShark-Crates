@@ -5,6 +5,7 @@ use rs_math::{Quat, Vec3};
 
 use crate::animation::{AnimFrame, AnimTrack, Animation};
 use crate::quantized::{decompress_quat, decompress_vec3};
+use crate::raw::RawV5;
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Default)]
@@ -47,12 +48,12 @@ impl Animation {
 
     fn read_v5<R: Read + Seek>(reader: &mut R) -> Result<Self> {
         let _resource_size = reader.read_u32()?;
-        let _format_token = reader.read_u32()?;
-        let _flags1 = reader.read_u32()?;
-        let _flags2 = reader.read_u32()?;
+        let format_token = reader.read_u32()?;
+        let flags1 = reader.read_u32()?;
+        let flags2 = reader.read_u32()?;
 
-        let _track_count = reader.read_u32()? as usize;
-        let frame_count = reader.read_u32()? as usize;
+        let track_count = reader.read_u32()?;
+        let frame_count = reader.read_u32()?;
         let frame_duration = reader.read_f32()?;
         let fps = if frame_duration != 0.0 {
             1.0 / frame_duration
@@ -61,8 +62,8 @@ impl Animation {
         };
 
         let joint_hashes_offset = reader.read_i32()?;
-        let _asset_name_offset = reader.read_i32()?;
-        let _time_offset = reader.read_i32()?;
+        let asset_name_offset = reader.read_i32()?;
+        let time_offset = reader.read_i32()?;
         let vecs_offset = reader.read_i32()?;
         let quats_offset = reader.read_i32()?;
         let frames_offset = reader.read_i32()?;
@@ -71,6 +72,7 @@ impl Animation {
             return Err(Error::Unsupported("anm v5 missing data section"));
         }
 
+        let frame_count = frame_count as usize;
         let joint_hash_count = section_count(frames_offset - joint_hashes_offset, 4);
         let vec_count = section_count(quats_offset - vecs_offset, 12);
         let quat_count = section_count(joint_hashes_offset - quats_offset, 6);
@@ -94,9 +96,11 @@ impl Animation {
         reader
             .seek(SeekFrom::Start(quats_offset as u64 + 12))
             .map_err(rs_io::Error::from)?;
+        let mut raw_quats = Vec::with_capacity(quat_count);
         let mut quats = Vec::with_capacity(quat_count);
         for _ in 0..quat_count {
             let bytes = reader.read_array::<6>()?;
+            raw_quats.push(bytes);
             quats.push(decompress_quat(&bytes).normalize());
         }
 
@@ -108,25 +112,52 @@ impl Animation {
             })
             .collect();
 
+        let mut frame_indices = Vec::with_capacity(frame_count * tracks.len());
         reader
             .seek(SeekFrom::Start(frames_offset as u64 + 12))
             .map_err(rs_io::Error::from)?;
         for frame_id in 0..frame_count {
             let time = frame_id as f32 * frame_duration;
             for track in tracks.iter_mut() {
-                let translate_id = reader.read_u16()? as usize;
-                let scale_id = reader.read_u16()? as usize;
-                let rotate_id = reader.read_u16()? as usize;
+                let translate_id = reader.read_u16()?;
+                let scale_id = reader.read_u16()?;
+                let rotate_id = reader.read_u16()?;
+                frame_indices.push([translate_id, scale_id, rotate_id]);
                 track.frames.push(AnimFrame {
                     time,
-                    rotation: quats.get(rotate_id).copied().unwrap_or(Quat::IDENTITY),
-                    translation: vecs.get(translate_id).copied().unwrap_or(Vec3::ZERO),
-                    scale: vecs.get(scale_id).copied().unwrap_or(Vec3::ONE),
+                    rotation: quats
+                        .get(rotate_id as usize)
+                        .copied()
+                        .unwrap_or(Quat::IDENTITY),
+                    translation: vecs
+                        .get(translate_id as usize)
+                        .copied()
+                        .unwrap_or(Vec3::ZERO),
+                    scale: vecs.get(scale_id as usize).copied().unwrap_or(Vec3::ONE),
                 });
             }
         }
 
-        Ok(Self { fps, tracks })
+        let raw = RawV5 {
+            format_token,
+            flags1,
+            flags2,
+            track_count,
+            frame_count: frame_count as u32,
+            frame_duration,
+            asset_name_offset,
+            time_offset,
+            vecs,
+            quats: raw_quats,
+            joint_hashes,
+            frame_indices,
+        };
+
+        Ok(Self {
+            fps,
+            tracks,
+            raw: Some(raw),
+        })
     }
 
     fn read_v4<R: Read + Seek>(reader: &mut R) -> Result<Self> {
@@ -207,7 +238,11 @@ impl Animation {
             }
         }
 
-        Ok(Self { fps, tracks })
+        Ok(Self {
+            fps,
+            tracks,
+            raw: None,
+        })
     }
 
     fn read_v3<R: Read + Seek>(reader: &mut R) -> Result<Self> {
@@ -237,7 +272,11 @@ impl Animation {
             tracks.push(AnimTrack { joint_hash, frames });
         }
 
-        Ok(Self { fps, tracks })
+        Ok(Self {
+            fps,
+            tracks,
+            raw: None,
+        })
     }
 }
 
@@ -398,7 +437,11 @@ impl Animation {
             });
         }
 
-        Ok(Self { fps, tracks })
+        Ok(Self {
+            fps,
+            tracks,
+            raw: None,
+        })
     }
 }
 

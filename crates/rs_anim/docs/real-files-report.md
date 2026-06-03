@@ -84,6 +84,54 @@ Findings:
   `compressed_animation_unknown_version_is_unsupported`, asserting an out-of-range version errors.
 - Refreshed the crate/module docs to state that compressed anm is now decoded.
 
+## Gap analysis vs C#
+
+Cross-read against `UncompressedAnimationAsset.cs`, `CompressedAnimationAsset.cs`,
+`CompressedFrame.cs`, `Animation.cs`, `ErrorMetric.cs`, `QuantizedQuaternion.cs`, and `RigResource.cs`.
+
+- **Uncompressed v5 layout** matches the oracle field-for-field. The only thing the C# reader
+  discards that we now keep is the *exact byte form* of each section: it normalizes the quaternion
+  palette on read (`Quaternion.Normalize(QuantizedQuaternion.Decompress(...))`) and never writes v5
+  back, so it cannot byte-round-trip a v5 file at all. We close that by preserving the raw sections.
+- **Physical layout.** Real v5 files place the first data section at byte 76 — a 64-byte header
+  plus a **12-byte zero pad** (the unused asset-name/time region; both offsets are 0). Section
+  offsets are stored relative to byte 12. Our writer reproduces the pad and the
+  `vecs -> quats -> jointHashes -> frames` order exactly.
+- **Compressed `r3d2canm`.** Header, `CompressedFrame` (`time:u16`, `jointId|type:u16`,
+  `value:ushort[3]`), `DecompressVector3` (`(max-min) * v/65535 + min`), and
+  `QuantizedQuaternion.Decompress` all match. `Duration` is the raw `max_time` f32; we map key time
+  to frames via `compressed_time/65535 * max_time * fps`. The quaternion codec (`quantized.rs`)
+  matches `QuantizedQuaternion` bit-for-bit (`a = v/32767*√2 - 1/√2`, max-index reconstruction).
+- **Skeleton joint-id-hash ordering (bug fixed).** The C# writer emits the joint-id-hash table
+  ordered by `Elf.HashLower(name)` **ascending** (`.OrderBy`). Our writer previously sorted
+  **descending**, which would corrupt byte-exactness on any real `.skl` with more than one joint.
+  Now sorted ascending. Validated by `skeleton_joint_index_section_sorted_by_hash_ascending`.
+- **ELF hash ownership.** The League bone-name ELF hash is currently inlined in `animation_read.rs`
+  (for v3 track names) and is the same hash the skeleton writer's joint-id-hash table is keyed on.
+  It is a foundation primitive shared with `.skn` bone names and **should move to `rs_hash`**
+  (alongside FNV1a/XXH64). Kept local to `rs_anim` for now per the crate-isolation rule.
+
+## What I implemented
+
+- **Format-preserving v5 writer.** Added `raw::RawV5`, populated by `read_v5`, replayed by
+  `write_v5`. `read -> write` is byte-exact for uncompressed v5; validated on all three real samples
+  in `tests/real_files.rs` (`written == original_bytes`).
+- **`Animation::is_byte_exact()` / `make_editable()`** to query and drop the preserved layout.
+- **Stronger compressed validation.** Added `compressed_animation_recovers_known_rotation`, which
+  builds a `r3d2canm` buffer from `compress_quat` of a non-identity rotation and asserts the reader
+  recovers it (within the codec's quantization), exercising the joint-id/transform-type bit packing
+  and the frame-stream offsets end to end.
+- **Skeleton joint-id-hash sort fix** + a regression test.
+
+## Remaining gaps
+
+- No real `.skl` or compressed `.anm` sample exists; those paths remain synthetic-only.
+- Compressed resampling is lerp/slerp, not League's spline/hot-frame sampler (lossy vs exact;
+  documented, acceptable for modding). No compressed *writer*.
+- v3/v4 still normalize to v4 on write (no real v3/v4 sample to make byte-exact against).
+- `RawV5` assumes the observed real-world layout (12-byte pad, asset/time offsets 0). A v5 file that
+  actually populated the asset-name/time sections would need those bytes preserved too.
+
 ## Improvements / TODO (priority order)
 
 1. ~~**Compressed `r3d2canm` reading**~~ — **done.** Remaining follow-up: validate against a real

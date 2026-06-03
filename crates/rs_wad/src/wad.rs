@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use rs_io::{ReaderExt, WriterExt};
 
-use crate::chunk::{WadChunk, WadCompression};
-use crate::decoder::decompress;
+use crate::chunk::{WadChunk, WadCompression, WadSubchunk};
+use crate::decoder::{decompress, decompress_zstd_multi_with_toc};
 use crate::error::{Error, Result};
 
 const MAGIC: u16 = 0x5752;
@@ -96,6 +97,113 @@ impl Wad {
     pub fn chunk_data(&self, chunk: &WadChunk) -> Result<Vec<u8>> {
         let raw = self.chunk_raw(chunk)?;
         decompress(raw, chunk.compression, chunk.uncompressed_size as usize)
+    }
+
+    /// Returns the chunk whose path hash equals `path_hash`, if present.
+    pub fn chunk_by_hash(&self, path_hash: u64) -> Option<&WadChunk> {
+        self.chunks.iter().find(|c| c.path_hash == path_hash)
+    }
+
+    /** Returns the chunk for `path`, hashing the lowercased path with XXH64 (seed 0) — the same
+    convention the archive uses for its path hashes — then looking it up by hash. */
+    pub fn chunk_by_path(&self, path: &str) -> Option<&WadChunk> {
+        self.chunk_by_hash(rs_hash::xxh64(path))
+    }
+
+    /** Parses the archive's `.subchunktoc` chunk into the explicit per-sub-chunk size table that
+    [`WadCompression::ZstdMulti`] chunks index by `subchunk_start`/`subchunk_count`. The chunk is
+    located by the XXH64 of the lowercased path ending in `.subchunktoc`; because the archive only
+    stores hashes, the path is supplied by the caller (its base name varies by archive). Returns
+    `Ok(None)` when no chunk matches that path. Each on-disk entry is 16 bytes. */
+    pub fn subchunk_toc_for_path(&self, subchunktoc_path: &str) -> Result<Option<Vec<WadSubchunk>>> {
+        match self.chunk_by_path(subchunktoc_path) {
+            Some(chunk) => Ok(Some(self.parse_subchunk_toc(chunk)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Parses the `.subchunktoc` `chunk` itself (already located) into its sub-chunk size table.
+    pub fn parse_subchunk_toc(&self, chunk: &WadChunk) -> Result<Vec<WadSubchunk>> {
+        let bytes = self.chunk_data(chunk)?;
+        if bytes.len() % WadSubchunk::ENTRY_LEN != 0 {
+            return Err(Error::Decompress(String::from(
+                "subchunktoc length is not a multiple of the 16-byte entry size",
+            )));
+        }
+        let mut toc = Vec::with_capacity(bytes.len() / WadSubchunk::ENTRY_LEN);
+        for entry in bytes.chunks_exact(WadSubchunk::ENTRY_LEN) {
+            let compressed_size = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
+            let uncompressed_size = u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]);
+            let checksum = u64::from_le_bytes([
+                entry[8], entry[9], entry[10], entry[11], entry[12], entry[13], entry[14], entry[15],
+            ]);
+            toc.push(WadSubchunk {
+                compressed_size,
+                uncompressed_size,
+                checksum,
+            });
+        }
+        Ok(toc)
+    }
+
+    /** Decompresses `chunk` using an explicit sub-chunk table for [`WadCompression::ZstdMulti`]
+    chunks. The `subchunk_toc` is the full table parsed by [`Wad::parse_subchunk_toc`]; the chunk's
+    `subchunk_start`/`subchunk_count` slice its own run out of it. Non-multi chunks ignore the table
+    and decode normally, so this is a safe drop-in for [`Wad::chunk_data`] when a TOC is available. */
+    pub fn chunk_data_with_toc(
+        &self,
+        chunk: &WadChunk,
+        subchunk_toc: &[WadSubchunk],
+    ) -> Result<Vec<u8>> {
+        if chunk.compression != WadCompression::ZstdMulti {
+            return self.chunk_data(chunk);
+        }
+        let start = chunk.subchunk_start as usize;
+        let end = start
+            .checked_add(chunk.subchunk_count as usize)
+            .filter(|&end| end <= subchunk_toc.len())
+            .ok_or_else(|| {
+                Error::Decompress(String::from("chunk subchunk range exceeds the subchunk toc"))
+            })?;
+        let raw = self.chunk_raw(chunk)?;
+        decompress_zstd_multi_with_toc(raw, chunk.uncompressed_size as usize, &subchunk_toc[start..end])
+    }
+
+    /** Extracts and decompresses every chunk, returning a map from path hash to decompressed bytes.
+    Duplicated chunks share data and resolve to identical bytes. When the `parallel` feature is on
+    the chunks decode across a thread pool; otherwise the work is sequential. */
+    pub fn extract_all(&self) -> Result<HashMap<u64, Vec<u8>>> {
+        self.extract_selected(self.chunks.iter().map(|c| c.path_hash))
+    }
+
+    /** Extracts and decompresses the chunks named by `path_hashes`, returning a map from path hash
+    to decompressed bytes. Unknown hashes are skipped. When the `parallel` feature is on the chunks
+    decode across a thread pool; otherwise the work is sequential. */
+    pub fn extract_selected(
+        &self,
+        path_hashes: impl IntoIterator<Item = u64>,
+    ) -> Result<HashMap<u64, Vec<u8>>> {
+        let targets: Vec<&WadChunk> = path_hashes
+            .into_iter()
+            .filter_map(|h| self.chunk_by_hash(h))
+            .collect();
+
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            targets
+                .par_iter()
+                .map(|c| Ok((c.path_hash, self.chunk_data(c)?)))
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            let mut out = HashMap::with_capacity(targets.len());
+            for c in targets {
+                out.insert(c.path_hash, self.chunk_data(c)?);
+            }
+            Ok(out)
+        }
     }
 }
 

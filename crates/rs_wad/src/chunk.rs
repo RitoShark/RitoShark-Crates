@@ -36,3 +36,19 @@ pub struct WadChunk {
     pub subchunk_start: u32,
     pub checksum: u64,
 }
+
+/** One entry of a `.subchunktoc` table. Each entry sizes one sub-chunk of a [`WadCompression::ZstdMulti`]
+chunk explicitly: `compressed_size` is the bytes the sub-chunk occupies in the parent chunk's data
+section and `uncompressed_size` is its size after decoding. A sub-chunk whose two sizes are equal is
+stored verbatim; otherwise it is an independent zstd frame. `checksum` holds the sub-chunk's xxh3-64.
+On disk each entry is 16 bytes: `compressed_size` (u32) + `uncompressed_size` (u32) + `checksum` (u64). */
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WadSubchunk {
+    pub compressed_size: u32,
+    pub uncompressed_size: u32,
+    pub checksum: u64,
+}
+
+impl WadSubchunk {
+    pub const ENTRY_LEN: usize = 16;
+}

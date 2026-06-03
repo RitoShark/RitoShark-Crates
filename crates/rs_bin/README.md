@@ -63,12 +63,32 @@ use rs_io::{Parse, Serialize};
 let bin = Bin::from_path("aatrox.bin")?;   // also from_bytes / from_reader
 let bytes = bin.to_bytes()?;               // also to_path / to_writer  (byte-exact)
 
-let text = rs_bin::to_text(&bin, None);    // #PROP_text printer (optional HashMapper)
+let text = rs_bin::to_text(&bin, None);          // #PROP_text printer (optional HashMapper)
+let bin2 = rs_bin::from_text(&text, None)?;      // #PROP_text parser  -> Bin
+assert_eq!(bin2.to_bytes()?, bytes);             // bin -> text -> bin is lossless
 ```
 
+### `#PROP_text` round-trip
+
+`to_text` renders the editable text form; `from_text` parses it back. The contract is
+`bin → text → bin` reconstructs the document exactly, so re-serializing is byte-identical to the
+original `.bin`. `from_text` is a hand-rolled recursive-descent parser matching ritobin's grammar:
+
+- header line `#PROP_text` / `#PTCH_text`, then `name: type = value` sections (`version`, `linked`,
+  `entries`, optional `patches`, and a tolerated `type` section);
+- every scalar and container type, with `list[t]` / `list2[t]` / `option[t]` / `map[k,v]` type
+  syntax, `Type { fields }` for embed/pointer, and `null` for null pointers;
+- hashes written as `0xHEX` **or** as a bareword/quoted string, which it hashes itself (FNV1a-32 for
+  hash/link/field/class names, XXH64 for `file` values);
+- `#` line comments and `,`-or-newline separators.
+
+Errors are reported as `Error::TextParse { line, message }`; the parser never panics.
+
 - [`Bin`] — a parsed document: `is_patch`, `patch_header` (the 8 raw `PTCH` bytes),
-  `version`, `linked` (ordered linked-file paths), `entries` (ordered).
+  `version`, `linked` (ordered linked-file paths), `entries` (ordered), `patches` (the ordered
+  `PTCH` trailing overrides; empty for plain `PROP`).
 - [`BinEntry`] — `path_hash`, `class_hash`, `fields: IndexMap<u32, BinValue>` (field order preserved).
+- [`BinPatch`] — one `PTCH` override record: `key_hash`, `path` (dotted target), `value`.
 - [`BinValue`] — the owned value enum (see [`src/bin.rs`]); map entries are an ordered
   `Vec<(key, value)>` so duplicate keys and order survive.
 - [`BinType`] — the on-disk type tag, with `is_container()` / `is_primitive()` helpers.
@@ -85,9 +105,9 @@ The crate implements the workspace-standard `Parse` / `Serialize` traits, which 
 | LIST/LIST2 distinction, ordered maps, null pointers, options | supported |
 | Linked files (version >= 2) | supported |
 | PTCH magic + 8 header bytes round-trip | supported |
-| **PTCH trailing patches / data-overrides section** | **not yet** — see `docs/real-files-report.md` |
-| `to_text` (`#PROP_text` printer) | supported (display only) |
-| `from_text` (`#PROP_text` parser) | **stubbed** — returns `Error::Unsupported` |
+| PTCH trailing patches / data-overrides section | supported (read + write + text) |
+| `to_text` (`#PROP_text` printer) | supported |
+| `from_text` (`#PROP_text` parser) | supported — full recursive-descent parser |
 
 ## Tests
 
@@ -95,11 +115,12 @@ The crate implements the workspace-standard `Parse` / `Serialize` traits, which 
 cargo test -p rs_bin
 ```
 
-- `tests/roundtrip.rs` — hand-built PROP buffers pinning the exact on-disk layout, plus
-  null-pointer, PTCH-header, and text-printer checks.
-- `tests/real_files.rs` — parses and byte-exact round-trips the real sample `.bin` files and
-  exercises the text printer. Sample files live in `sample-files/` at the workspace root and are
-  **gitignored**; the tests skip (and print `skip`) when a file is absent, so the suite stays green
-  without them.
+- `tests/roundtrip.rs` — hand-built PROP/PTCH buffers pinning the exact on-disk layout, plus
+  null-pointer, PTCH-header, PTCH-patches, text-printer, and text round-trip / idempotence checks.
+- `tests/real_files.rs` — for each real sample `.bin`: binary byte-exact round-trip **and** the full
+  text round-trip `from_path → to_text → from_text → to_bytes == original`, plus a
+  `text → from_text → to_text` idempotence check. Sample files live in `sample-files/` at the
+  workspace root and are **gitignored**; the tests skip (and print `skip`) when a file is absent, so
+  the suite stays green without them.
 
 Drop real `.bin` files into `RitoShark-Crates/sample-files/` to exercise the real-file suite.

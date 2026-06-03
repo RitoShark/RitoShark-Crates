@@ -1,4 +1,4 @@
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 use rs_io::{Parse, ReaderExt, Serialize, WriterExt};
 
@@ -60,6 +60,9 @@ impl Parse for Bnk {
     type Error = Error;
 
     fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self> {
+        let end = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(0))?;
+
         let mut sections = Vec::new();
         loop {
             let mut first = [0u8; 1];
@@ -71,8 +74,12 @@ impl Parse for Bnk {
             }
             let rest = reader.read_array::<3>()?;
             let tag = [first[0], rest[0], rest[1], rest[2]];
-            let size = reader.read_u32()? as usize;
-            let data = reader.read_bytes(size)?;
+            let size = reader.read_u32()? as u64;
+            let here = reader.stream_position()?;
+            if here + size > end {
+                return Err(Error::Truncated);
+            }
+            let data = reader.read_bytes(size as usize)?;
             sections.push(BnkSection { tag, data });
         }
         Ok(Self { sections })

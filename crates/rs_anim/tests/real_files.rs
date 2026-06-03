@@ -69,10 +69,26 @@ fn anm_real_files_parse() {
                     anim.frame_count()
                 );
 
-                // Round-trip: writer emits v4 (full quaternions), so re-reading yields the same
-                // poses. The frame palette is rebuilt, so we compare parsed structures, not bytes.
-                let bytes = anim.to_bytes().expect("write parsed anm");
-                let reparsed = Animation::from_bytes(&bytes).expect("re-read written anm");
+                // Byte-exact round-trip: uncompressed v5 preserves its raw sections, so writing
+                // must reproduce the original file bit-for-bit.
+                let original_bytes = std::fs::read(&path).expect("read sample bytes");
+                let written = anim.to_bytes().expect("write parsed anm");
+                if version == 5 {
+                    assert!(
+                        anim.is_byte_exact(),
+                        "{name}: v5 should preserve raw layout"
+                    );
+                    assert_eq!(
+                        written.len(),
+                        original_bytes.len(),
+                        "{name}: v5 written length differs"
+                    );
+                    assert!(
+                        written == original_bytes,
+                        "{name}: v5 round-trip is not byte-exact"
+                    );
+                }
+                let reparsed = Animation::from_bytes(&written).expect("re-read written anm");
                 assert_eq!(
                     anim.tracks().len(),
                     reparsed.tracks().len(),

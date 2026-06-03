@@ -13,3 +13,4 @@ rs_math = { workspace = true }
 image = { workspace = true }
 ddsfile = "0.5"
 texture2ddecoder = "0.1"
+texpresso = "2.0.2"

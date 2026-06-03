@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use ddsfile::{D3DFormat, Dds, DxgiFormat};
+use ddsfile::{
+    AlphaMode, Caps2, D3D10ResourceDimension, D3DFormat, Dds, DxgiFormat, NewDxgiParams,
+};
 use image::RgbaImage;
 
 use crate::decode::decode_block_format;
@@ -61,11 +63,10 @@ fn classify(dds: &Dds) -> Result<DdsKind> {
     Err(Error::UnsupportedFormat("dds: unknown pixel format".into()))
 }
 
-fn decode_dds_rgba(dds: &Dds) -> Result<RgbaImage> {
+fn decode_dds_surface(dds: &Dds, data: &[u8]) -> Result<RgbaImage> {
     let width = dds.get_width();
     let height = dds.get_height();
     let (w, h) = (width as usize, height as usize);
-    let data = dds.data.as_slice();
 
     match classify(dds)? {
         DdsKind::Bc1 => decode_block_format(TexFormat::Bc1, width, height, data),
@@ -128,16 +129,107 @@ impl Texture {
         };
         Ok(Texture::new(width, height, format, dds.data))
     }
+
+    /// Serialize this texture's full-resolution mip into a standalone `.dds` byte buffer. The
+    /// payload is decoded to RGBA8 and written as an uncompressed `R8G8B8A8_UNorm` surface, so
+    /// the output is a lossless representation of the decoded image that any DDS reader accepts.
+    pub fn to_dds_bytes(&self) -> Result<Vec<u8>> {
+        let img = self.decode_rgba()?;
+        rgba_to_dds(&img)?.to_bytes()
+    }
+
+    /// Write this texture as a `.dds` file at `path` (see [`Texture::to_dds_bytes`]).
+    pub fn save_dds(&self, path: impl AsRef<Path>) -> Result<()> {
+        std::fs::write(path, self.to_dds_bytes()?).map_err(rs_io::Error::from)?;
+        Ok(())
+    }
+}
+
+trait DdsBytes {
+    fn to_bytes(&self) -> Result<Vec<u8>>;
+}
+
+impl DdsBytes for Dds {
+    fn to_bytes(&self) -> Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        self.write(&mut buf)?;
+        Ok(buf)
+    }
+}
+
+/// Build an uncompressed `R8G8B8A8_UNorm` DDS surface from an RGBA8 image.
+fn rgba_to_dds(img: &RgbaImage) -> Result<Dds> {
+    let mut dds = Dds::new_dxgi(NewDxgiParams {
+        height: img.height(),
+        width: img.width(),
+        depth: None,
+        format: DxgiFormat::R8G8B8A8_UNorm,
+        mipmap_levels: None,
+        array_layers: None,
+        caps2: None,
+        is_cubemap: false,
+        resource_dimension: D3D10ResourceDimension::Texture2D,
+        alpha_mode: AlphaMode::Straight,
+    })?;
+    let raw = img.as_raw();
+    if raw.len() > dds.data.len() {
+        dds.data.resize(raw.len(), 0);
+    }
+    dds.data[..raw.len()].copy_from_slice(raw);
+    Ok(dds)
+}
+
+/// Serialize an [`RgbaImage`] to a standalone uncompressed `.dds` byte buffer.
+pub fn write_dds_bytes(img: &RgbaImage) -> Result<Vec<u8>> {
+    rgba_to_dds(img)?.to_bytes()
+}
+
+/// Write an [`RgbaImage`] to a `.dds` file at `path`.
+pub fn save_dds(img: &RgbaImage, path: impl AsRef<Path>) -> Result<()> {
+    std::fs::write(path, write_dds_bytes(img)?).map_err(rs_io::Error::from)?;
+    Ok(())
+}
+
+/// Decode every surface of a DDS buffer to RGBA8: a 2D texture yields one image; a cubemap
+/// yields its six faces (+X, -X, +Y, -Y, +Z, -Z) and an array texture yields one image per
+/// layer. The full-resolution mip of each layer is decoded.
+pub fn read_dds_faces_bytes(bytes: &[u8]) -> Result<Vec<RgbaImage>> {
+    let dds = Dds::read(bytes)?;
+    let layers = dds.get_num_array_layers().max(1);
+    let mut images = Vec::with_capacity(layers as usize);
+    for layer in 0..layers {
+        let data = dds
+            .get_data(layer)
+            .map_err(|e| Error::Decode(format!("dds layer {layer}: {e}")))?;
+        images.push(decode_dds_surface(&dds, data)?);
+    }
+    Ok(images)
+}
+
+/// Decode every surface of a DDS file at `path` (see [`read_dds_faces_bytes`]).
+pub fn read_dds_faces(path: impl AsRef<Path>) -> Result<Vec<RgbaImage>> {
+    let bytes = std::fs::read(path).map_err(rs_io::Error::from)?;
+    read_dds_faces_bytes(&bytes)
+}
+
+/// True when the DDS buffer describes a cubemap (six-face) surface.
+pub fn dds_is_cubemap(bytes: &[u8]) -> Result<bool> {
+    let dds = Dds::read(bytes)?;
+    Ok(dds.header.caps2.contains(Caps2::CUBEMAP))
 }
 
 /// Decode a DDS byte buffer straight to an RGBA8 image, including formats with no `.tex`
-/// equivalent such as BC2 and BC7.
+/// equivalent such as BC2 and BC7. For multi-surface DDS (cubemaps, arrays) this returns only
+/// the first surface; use [`read_dds_faces_bytes`] for all of them.
 pub fn read_dds_bytes(bytes: &[u8]) -> Result<RgbaImage> {
     let dds = Dds::read(bytes)?;
-    decode_dds_rgba(&dds)
+    let data = dds
+        .get_data(0)
+        .map_err(|e| Error::Decode(format!("dds layer 0: {e}")))?;
+    decode_dds_surface(&dds, data)
 }
 
-/// Decode a DDS file at `path` to an RGBA8 image.
+/// Decode a DDS file at `path` to an RGBA8 image (first surface only).
 pub fn read_dds(path: impl AsRef<Path>) -> Result<RgbaImage> {
     let bytes = std::fs::read(path).map_err(rs_io::Error::from)?;
     read_dds_bytes(&bytes)

@@ -20,8 +20,7 @@ fn round_trip(name: &str) {
         return;
     };
     let original = std::fs::read(&p).expect("read sample bytes");
-    let bin = Bin::from_path(&p)
-        .unwrap_or_else(|e| panic!("{name}: parse failed: {e}"));
+    let bin = Bin::from_path(&p).unwrap_or_else(|e| panic!("{name}: parse failed: {e}"));
     let out = bin
         .to_bytes()
         .unwrap_or_else(|e| panic!("{name}: serialize failed: {e}"));
@@ -57,6 +56,59 @@ fn aatrox_multi_high_round_trips() {
     round_trip(SAMPLES[2]);
 }
 
+/// Full text round-trip: `from_path` -> `to_text` -> `from_text` -> `to_bytes` must equal the
+/// original file bytes, and `text -> from_text -> to_text` must be idempotent.
+fn text_round_trip(name: &str) {
+    let Some(p) = sample(name) else {
+        eprintln!("skip {name}: sample file missing");
+        return;
+    };
+    let original = std::fs::read(&p).expect("read sample bytes");
+    let bin = Bin::from_path(&p).unwrap_or_else(|e| panic!("{name}: parse failed: {e}"));
+
+    let text = rs_bin::to_text(&bin, None);
+    let reparsed =
+        rs_bin::from_text(&text, None).unwrap_or_else(|e| panic!("{name}: from_text failed: {e}"));
+    assert_eq!(
+        reparsed, bin,
+        "{name}: text -> bin must reconstruct the bin"
+    );
+
+    let out = reparsed
+        .to_bytes()
+        .unwrap_or_else(|e| panic!("{name}: serialize failed: {e}"));
+    if out != original {
+        let first = out
+            .iter()
+            .zip(original.iter())
+            .position(|(a, b)| a != b)
+            .unwrap_or(out.len().min(original.len()));
+        panic!(
+            "{name}: text round-trip differs first at byte offset {first} (len {} vs {})",
+            out.len(),
+            original.len()
+        );
+    }
+
+    let text2 = rs_bin::to_text(&reparsed, None);
+    assert_eq!(text, text2, "{name}: text round-trip must be idempotent");
+}
+
+#[test]
+fn aatrox_text_round_trips() {
+    text_round_trip("aatrox.bin");
+}
+
+#[test]
+fn aatrox_multi_low_text_round_trips() {
+    text_round_trip(SAMPLES[1]);
+}
+
+#[test]
+fn aatrox_multi_high_text_round_trips() {
+    text_round_trip(SAMPLES[2]);
+}
+
 #[test]
 fn all_samples_parse_and_print_text() {
     for name in SAMPLES {
@@ -64,12 +116,11 @@ fn all_samples_parse_and_print_text() {
             eprintln!("skip {name}: sample file missing");
             continue;
         };
-        let bin = Bin::from_path(&p)
-            .unwrap_or_else(|e| panic!("{name}: parse failed: {e}"));
+        let bin = Bin::from_path(&p).unwrap_or_else(|e| panic!("{name}: parse failed: {e}"));
         let text = rs_bin::to_text(&bin, None);
         assert!(text.starts_with("#PROP_text\n"), "{name}: bad text header");
         assert!(
-            text.contains(&format!("version: {}", bin.version)),
+            text.contains(&format!("version: u32 = {}", bin.version)),
             "{name}: text missing version line"
         );
         assert!(

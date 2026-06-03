@@ -5,6 +5,7 @@ use rs_io::{Serialize, WriterExt};
 use rs_math::{Quat, Vec3};
 
 use crate::animation::Animation;
+use crate::raw::RawV5;
 use crate::{Error, Result};
 
 struct Palettes {
@@ -49,6 +50,72 @@ impl Palettes {
 
 impl Animation {
     fn write_to(&self, buf: &mut Cursor<Vec<u8>>) -> Result<()> {
+        if let Some(raw) = &self.raw {
+            return self.write_v5(buf, raw);
+        }
+        self.write_v4(buf)
+    }
+
+    /** Reproduces the original uncompressed `r3d2anmd` v5 bytes from the preserved [`RawV5`]
+    sections, emitting them in the on-disk physical order `vecs -> quats -> jointHashes -> frames`
+    and patching `resourceSize` to `fileSize - 12`. This makes `read -> write` byte-exact for v5. */
+    fn write_v5(&self, buf: &mut Cursor<Vec<u8>>, raw: &RawV5) -> Result<()> {
+        buf.write_bytes(b"r3d2anmd")?;
+        buf.write_u32(5)?;
+
+        buf.write_u32(0)?; // resource size, patched last
+        buf.write_u32(raw.format_token)?;
+        buf.write_u32(raw.flags1)?;
+        buf.write_u32(raw.flags2)?;
+
+        buf.write_u32(raw.track_count)?;
+        buf.write_u32(raw.frame_count)?;
+        buf.write_f32(raw.frame_duration)?;
+
+        let offsets_pos = buf.stream_position().map_err(rs_io::Error::from)?;
+        for _ in 0..6 {
+            buf.write_i32(0)?;
+        }
+        buf.write_bytes(&[0u8; 12])?;
+
+        let vecs_offset = buf.stream_position().map_err(rs_io::Error::from)? as i32 - 12;
+        for v in &raw.vecs {
+            buf.write_vec3(*v)?;
+        }
+
+        let quats_offset = buf.stream_position().map_err(rs_io::Error::from)? as i32 - 12;
+        for q in &raw.quats {
+            buf.write_bytes(q)?;
+        }
+
+        let joint_hashes_offset = buf.stream_position().map_err(rs_io::Error::from)? as i32 - 12;
+        for &h in &raw.joint_hashes {
+            buf.write_u32(h)?;
+        }
+
+        let frames_offset = buf.stream_position().map_err(rs_io::Error::from)? as i32 - 12;
+        for idx in &raw.frame_indices {
+            buf.write_u16(idx[0])?;
+            buf.write_u16(idx[1])?;
+            buf.write_u16(idx[2])?;
+        }
+
+        let file_size = buf.seek(SeekFrom::End(0)).map_err(rs_io::Error::from)? as u32;
+        buf.seek(SeekFrom::Start(12)).map_err(rs_io::Error::from)?;
+        buf.write_u32(file_size - 12)?;
+
+        buf.seek(SeekFrom::Start(offsets_pos))
+            .map_err(rs_io::Error::from)?;
+        buf.write_i32(joint_hashes_offset)?;
+        buf.write_i32(raw.asset_name_offset)?;
+        buf.write_i32(raw.time_offset)?;
+        buf.write_i32(vecs_offset)?;
+        buf.write_i32(quats_offset)?;
+        buf.write_i32(frames_offset)?;
+        Ok(())
+    }
+
+    fn write_v4(&self, buf: &mut Cursor<Vec<u8>>) -> Result<()> {
         let track_count = self.tracks.len();
         let frame_count = self
             .tracks

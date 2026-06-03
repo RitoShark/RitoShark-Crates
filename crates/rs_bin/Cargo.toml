@@ -12,3 +12,6 @@ rs_io = { workspace = true }
 rs_hash = { workspace = true }
 rs_math = { workspace = true }
 indexmap = { workspace = true }
+
+[dev-dependencies]
+rs_hash = { workspace = true }

@@ -86,9 +86,25 @@ fn parses_synthetic_body() {
     assert_eq!(file.directory_id, Some(2));
     assert_eq!(file.chunk_ids, vec![0xC001]);
     assert_eq!(file.permissions, 2);
+    assert_eq!(file.flags_mask, Some(0b1000));
 
     let paths = rman.file_paths();
     assert_eq!(paths, vec![("data/champions/champion.bin".to_string(), 250u64)]);
+
+    assert_eq!(rman.file_flags.len(), 1);
+    assert_eq!(rman.file_flags[0].id, 3);
+    assert_eq!(rman.file_flags[0].name, "en_US");
+    assert_eq!(rman.file_flag_names(file), vec!["en_US"]);
+    assert_eq!(rman.files_with_flag("en_US").len(), 1);
+    assert!(rman.files_with_flag("ko_KR").is_empty());
+
+    let ranges = rman.file_chunks(file);
+    assert_eq!(ranges.len(), 1);
+    assert_eq!(ranges[0].bundle_id, 0xB001);
+    assert_eq!(ranges[0].chunk_id, 0xC001);
+    assert_eq!(ranges[0].offset_in_bundle, 0);
+    assert_eq!(ranges[0].compressed_size, 100);
+    assert_eq!(ranges[0].uncompressed_size, 250);
 }
 
 #[test]
@@ -130,6 +146,10 @@ impl Body {
 
     fn u16(&mut self, v: u16) {
         self.buf.extend_from_slice(&v.to_le_bytes());
+    }
+
+    fn u8(&mut self, v: u8) {
+        self.buf.push(v);
     }
 
     /// Reserve a 4-byte offset slot; returns its absolute position so it can be patched later.
@@ -227,9 +247,25 @@ impl Body {
         let chunk_field_array = b.vtable(&[4, 12, 16]);
         b.patch_vtable(chunk_vtable_slot, chunk_field_array);
 
-        // ---- Flags table: empty ----
+        // ---- Flags table: one flag {id: 3, name: "en_US"} ----
+        // Flag entries use a fixed layout: vtable ptr (i32) + 3 reserved bytes + id (u8 @ +7)
+        // + self-relative name offset (i32 @ +8).
         b.patch(flags_slot, b.pos());
-        b.u32(0);
+        b.u32(1);
+        let flag_ptr = b.reserve();
+
+        let flag_entry = b.pos();
+        b.patch(flag_ptr, flag_entry);
+        let flag_vtable_slot = b.reserve(); // +0 vtable ptr
+        b.u8(0); // +4 reserved
+        b.u8(0); // +5 reserved
+        b.u8(0); // +6 reserved
+        b.u8(3); // +7 id
+        let flag_name_slot = b.reserve(); // +8 name (self-relative offset)
+        let flag_field_array = b.vtable(&[4, 7]);
+        b.patch_vtable(flag_vtable_slot, flag_field_array);
+        b.patch(flag_name_slot, b.pos());
+        b.string("en_US");
 
         // ---- Directories table: "data" (root) and "champions" (parent = data) ----
         b.patch(dirs_slot, b.pos());
@@ -271,9 +307,10 @@ impl Body {
         b.u64(2); // +12 directory id
         b.u32(250); // +20 size
         let file_name_slot = b.reserve(); // +24 name
-        let file_chunks_slot = b.reserve(); // +28 chunks
-        b.u32(2); // +32 permissions (u8 from first byte)
-        let file_field_array = b.vtable(&[4, 12, 20, 24, 0, 0, 0, 28, 0, 0, 0, 0, 32]);
+        b.u64(0b1000); // +28 flags mask (bit 3 -> flag id 3 "en_US")
+        let file_chunks_slot = b.reserve(); // +36 chunks
+        b.u32(2); // +40 permissions (u8 from first byte)
+        let file_field_array = b.vtable(&[4, 12, 20, 24, 28, 0, 0, 36, 0, 0, 0, 0, 40]);
         b.patch_vtable(file_vtable_slot, file_field_array);
 
         b.patch(file_name_slot, b.pos());

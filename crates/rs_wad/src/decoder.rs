@@ -1,6 +1,6 @@
 use std::io::{Cursor, Read};
 
-use crate::chunk::WadCompression;
+use crate::chunk::{WadCompression, WadSubchunk};
 use crate::error::{Error, Result};
 
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
@@ -39,6 +39,56 @@ fn decompress_zstd(raw: &[u8], uncompressed_size: usize) -> Result<Vec<u8>> {
     zstd::Decoder::new(Cursor::new(raw))
         .and_then(|mut d| d.read_exact(&mut out))
         .map_err(|e| Error::Decompress(e.to_string()))?;
+    Ok(out)
+}
+
+/** Decodes a [`WadCompression::ZstdMulti`] chunk using an explicit sub-chunk table, matching the
+C# oracle exactly. The `subchunks` slice must be the parent chunk's run of the `.subchunktoc`
+(`subchunk_start .. subchunk_start + subchunk_count`); each entry's `compressed_size` carves the
+next slice out of `raw` and each `uncompressed_size` advances the output. A sub-chunk whose two
+sizes are equal is copied verbatim; otherwise it is decoded as one independent zstd frame. This
+removes the streaming heuristic's assumption that the data section is exactly concatenated frames,
+so a stored sub-chunk sitting between two compressed ones is handled correctly. */
+pub fn decompress_zstd_multi_with_toc(
+    raw: &[u8],
+    uncompressed_size: usize,
+    subchunks: &[WadSubchunk],
+) -> Result<Vec<u8>> {
+    let mut out = vec![0u8; uncompressed_size];
+    let mut raw_offset = 0usize;
+    let mut out_offset = 0usize;
+
+    for sub in subchunks {
+        let csize = sub.compressed_size as usize;
+        let usize_ = sub.uncompressed_size as usize;
+
+        let raw_end = raw_offset
+            .checked_add(csize)
+            .filter(|&end| end <= raw.len())
+            .ok_or_else(|| Error::Decompress(String::from("subchunk compressed range exceeds chunk")))?;
+        let out_end = out_offset
+            .checked_add(usize_)
+            .filter(|&end| end <= out.len())
+            .ok_or_else(|| Error::Decompress(String::from("subchunk uncompressed range exceeds chunk")))?;
+
+        let src = &raw[raw_offset..raw_end];
+        if csize == usize_ {
+            out[out_offset..out_end].copy_from_slice(src);
+        } else {
+            zstd::Decoder::new(Cursor::new(src))
+                .and_then(|mut d| d.read_exact(&mut out[out_offset..out_end]))
+                .map_err(|e| Error::Decompress(e.to_string()))?;
+        }
+
+        raw_offset = raw_end;
+        out_offset = out_end;
+    }
+
+    if out_offset != out.len() {
+        return Err(Error::Decompress(String::from(
+            "subchunk table did not cover the whole chunk",
+        )));
+    }
     Ok(out)
 }
 

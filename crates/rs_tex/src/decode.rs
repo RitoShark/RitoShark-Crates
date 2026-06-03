@@ -31,6 +31,29 @@ fn bgra_bytes_to_rgba_image(width: u32, height: u32, data: &[u8]) -> Result<Rgba
         .ok_or_else(|| Error::Decode("bgra8 buffer does not match dimensions".into()))
 }
 
+/// Reorder a tightly packed RGBA16_SNORM buffer (four signed 16-bit channels per pixel mapped
+/// from `[-1, 1]` to `[0, 255]`) into an RGBA8 image of the given size.
+fn rgba16_snorm_to_rgba_image(width: u32, height: u32, data: &[u8]) -> Result<RgbaImage> {
+    let expected = (width as usize) * (height as usize) * 8;
+    if data.len() < expected {
+        return Err(Error::Decode(format!(
+            "rgba16_snorm payload too small: have {}, need {expected}",
+            data.len()
+        )));
+    }
+    let mut rgba = Vec::with_capacity(expected / 2);
+    for chan in data[..expected].chunks_exact(2) {
+        let mut s = i16::from_le_bytes([chan[0], chan[1]]);
+        if s == i16::MIN {
+            s = -i16::MAX;
+        }
+        let f = ((s as f32 / i16::MAX as f32) + 1.0) * 0.5;
+        rgba.push((f * 255.0 + 0.5).clamp(0.0, 255.0) as u8);
+    }
+    RgbaImage::from_raw(width, height, rgba)
+        .ok_or_else(|| Error::Decode("rgba16_snorm buffer does not match dimensions".into()))
+}
+
 /// Decode block-compressed bytes of the given format into an RGBA8 image.
 pub(crate) fn decode_block_format(
     format: TexFormat,
@@ -49,6 +72,7 @@ pub(crate) fn decode_block_format(
         TexFormat::Etc2 => texture2ddecoder::decode_etc2_rgb(data, w, h, &mut out),
         TexFormat::Etc2Eac => texture2ddecoder::decode_etc2_rgba8(data, w, h, &mut out),
         TexFormat::Bgra8 => return bgra_bytes_to_rgba_image(width, height, data),
+        TexFormat::Rgba16Snorm => return rgba16_snorm_to_rgba_image(width, height, data),
     };
     res.map_err(|e| Error::Decode(e.to_string()))?;
     bgra_u32_to_rgba_image(width, height, &out)

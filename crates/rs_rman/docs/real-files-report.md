@@ -89,36 +89,83 @@ every load-bearing detail:
    body. We parse once into owned `Vec`s, which is friendlier for tooling that holds
    the data; the price is up-front allocation, paid with pre-sized vectors.
 
-**Not yet surfaced (parity gap, low priority):** cdragon exposes the **flags table**
-(locale/platform codes such as `en_US`, `macos`) and each file's flag bitmask, plus
-per-chunk **bundle offsets** and the bundle/target byte ranges needed to actually
-download and reassemble a file. We parse bundles, chunks, files and directories but do
-not yet expose the flags table or compute download ranges.
+## Gap analysis vs cdragon-rman / C#
 
-## Improvements / TODO
+Comparing the prior rs_rman against cdragon-rman (the Rust oracle) left two real parity
+gaps, both now closed:
 
-1. **Expose the flags table and per-file flag mask** (file field 4). Needed to filter
-   which files belong to a given locale/platform — a real use case for release tooling.
-   cdragon already models this (`FileFlagEntry`, `FileFlagSet`).
-2. **Compute chunk download/target ranges.** Track each chunk's running offset within
-   its bundle and expose file → (bundle ranges, target ranges), mirroring cdragon's
-   `bundle_chunks` / `FileEntry::bundle_chunks`. This is the gateway to extraction.
-3. **Writing support.** Emit a byte-faithful FlatBuffer body + header so manifests can
-   be round-tripped. Large; deferred. Until then `to_writer` returns `Unsupported`.
+- **Flags table.** cdragon reads the manifest's second body table — a list of
+  `FileFlagEntry { id: u8, flag: &str }` locale/platform tags — and models each file's
+  optional `u64` flag mask (file field 4), with `FileFlagSet::iter` filtering tags by
+  `mask & (1 << id)`. rs_rman discarded that offset (`_flags_off`) and the file mask.
+- **Per-chunk bundle ranges.** cdragon assigns each chunk a running `bundle_offset`
+  (cumulative compressed size within its bundle) and exposes `bundle_chunks()` plus
+  `FileEntry::bundle_chunks`, the byte ranges needed to download and rebuild a file.
+  rs_rman parsed chunk ids and sizes but computed no offsets.
 
-## What I changed
+(The C# LeagueToolkit has no RMAN/manifest reader, so cdragon-rman is the sole oracle.)
 
-- **read.rs:** widened the version gate from `(major, minor) == (2, 0)` to
-  `major == 2` (any minor). The real game manifests are `2.1` and share the identical
-  body layout; the old gate rejected every real file. The exact minor is still stored
-  in `Rman::version`.
-- **tests/real_files.rs (new):** skip-if-missing harness that parses each real
-  manifest, asserts major version 2 and non-empty bundles/files/directories, checks
-  `file_paths()` returns one non-empty entry per file, and prints counts plus three
-  sample paths per file.
-- **tests/read.rs:** replaced the now-obsolete `rejects_unsupported_version` (which
-  expected `2.1` to be rejected) with `rejects_unsupported_major_version` (rejects
-  major 1) and added `accepts_minor_version_two_one` to lock in the new behaviour.
+A subtle layout detail confirmed against cdragon during this pass: **flag-table entries do
+not use the indexed vtable** that bundle/file/directory entries use. Their body is fixed —
+`i32` vtable pointer, three reserved bytes, the `id` (`u8`) at entry offset 7, then a
+self-relative `i32` to the length-prefixed name at offset 8. A first vtable-based attempt
+parsed the synthetic fixture but failed on every real manifest with a negative-offset
+error; switching to the fixed layout (as cdragon does) parses all three.
+
+## What I implemented
+
+1. **Flags table** (`FileFlag { id, name }`, `Rman::file_flags`). Parsed from the second
+   body offset with the fixed entry layout above. On the real samples this yields 30 / 29 /
+   27 tags — the full locale set (`ar_AE` … `zh_TW`) plus `windows` / `macos`.
+2. **Per-file flag mask** (`FileEntry::flags_mask: Option<u64>`, file field 4) and helpers
+   `Rman::file_flag_names(file)` and `Rman::files_with_flag(tag)` to resolve a file's tags
+   and filter files by a locale/platform tag.
+3. **Per-chunk byte ranges** (`ChunkRange { bundle_id, chunk_id, offset_in_bundle,
+   compressed_size, uncompressed_size }`). `Rman::chunk_index()` builds the chunk→range
+   lookup once (running compressed offset per bundle); `Rman::file_chunks(file)` and
+   `Rman::file_chunks_for(file, &index)` return a file's ordered chunk ranges.
+4. **Validation** (`tests/real_files.rs`). On all three manifests: the flags table parses
+   with sane non-empty names and in-range ids; `files_with_flag` matches a brute-force mask
+   count; and `file_chunks` is verified on **every** file (4706 / 4714 / 190) — order
+   preserved, each range contiguous within its bundle, and the uncompressed sizes summing
+   exactly to the declared file size.
+
+No body-walk bug was found in the existing bundle/file/directory path; it agrees with
+cdragon field-for-field. The one correctness fix this pass was the flag-entry layout
+(fixed-offset, not vtable), caught precisely because the new test runs against real files.
+
+## Remaining gaps
+
+1. **Writing support.** Emit a byte-faithful FlatBuffer body + header so manifests can
+   be round-tripped. The reader is eager and owned, so a writer would re-emit the vtable
+   tables (bundles / flags / files / directories) and re-zstd the body. Large; deferred.
+   Until then `to_writer` returns `Unsupported`. This is the headline missing piece versus
+   the workspace's lossless round-trip contract.
+2. **Actual extraction / download.** `file_chunks` gives the byte ranges, but fetching
+   bundle bytes from the CDN and zstd-decompressing each chunk into the target file is a
+   separate concern (network + a per-chunk frame decode) that belongs above this crate.
+3. **Unmodelled file fields.** Fields 5, 6, 8, 10, 11 are still unread (cdragon documents
+   only 11 as "set to 1 for localized WADs"). None are needed for paths, flags, or chunk
+   ranges, but a future writer must preserve them for a lossless round-trip.
+
+## What I changed (this pass)
+
+- **rman.rs:** added `FileFlag { id, name }`, `ChunkRange { … }`,
+  `FileEntry::flags_mask`, `Rman::file_flags`, and methods `file_flag_names`,
+  `files_with_flag`, `chunk_index`, `file_chunks`, `file_chunks_for`.
+- **read.rs:** parse the flags table from the second body offset (fixed entry layout,
+  not vtable) and read the file's flag mask (field 4). Added a `read_u8` cursor primitive.
+- **tests/read.rs:** extended the synthetic body with a flag entry and a file flag mask;
+  assert the flag table, `file_flag_names`, `files_with_flag`, and `file_chunks`.
+- **tests/real_files.rs:** added `verify_flags` and `verify_file_chunks`, validating the
+  flags table and the chunk byte-ranges (contiguity + size-sum) on every file.
+
+### Earlier pass (context)
+
+- **read.rs:** widened the version gate from `(2, 0)` to any `major == 2`; the real
+  manifests are `2.1` with an identical body layout, and the exact minor is preserved.
+- **tests/read.rs:** swapped `rejects_unsupported_version` for
+  `rejects_unsupported_major_version` and added `accepts_minor_version_two_one`.
 
 No source outside `rs_rman` was touched. `cargo test -p rs_rman` and
 `cargo clippy -p rs_rman --all-targets -- -D warnings` are both green.

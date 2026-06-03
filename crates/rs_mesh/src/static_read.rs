@@ -1,10 +1,10 @@
 use std::io::{Read, Seek, SeekFrom};
 
 use rs_io::{Parse, ReaderExt};
-use rs_math::{Vec2, Vec3};
+use rs_math::{Aabb, Vec2, Vec3};
 
 use crate::error::{Error, Result};
-use crate::static_mesh::{StaticMesh, StaticMeshFace, SCB_MAGIC, SCO_MAGIC};
+use crate::static_mesh::{SCB_MAGIC, SCO_MAGIC, StaticMesh, StaticMeshFace};
 
 impl Parse for StaticMesh {
     type Error = Error;
@@ -45,10 +45,9 @@ impl StaticMesh {
         let name = reader.read_fixed_string::<128>()?;
         let vertex_count = reader.read_u32()? as usize;
         let face_count = reader.read_u32()? as usize;
-        let _flags = reader.read_u32()?;
+        let flags = reader.read_u32()?;
 
-        let _bb_min = reader.read_vec3()?;
-        let _bb_max = reader.read_vec3()?;
+        let bounding_box = Aabb::new(reader.read_vec3()?, reader.read_vec3()?);
 
         let vertex_type = if major == 3 && minor == 2 {
             Some(reader.read_u32()?)
@@ -91,12 +90,23 @@ impl StaticMesh {
             });
         }
 
+        // Capture any post-face bytes verbatim: when `HasVcp` (bit 0) is set the game writes a
+        // per-face RGB color block here, and a local-origin/pivot pair may follow. The exact layout
+        // is not modelled, but keeping the raw tail makes the `.scb` round-trip byte-exact.
+        let mut trailing = Vec::new();
+        reader.read_to_end(&mut trailing)?;
+
         Ok(Self {
             name,
+            version: (major, minor),
+            flags,
+            bounding_box,
+            vertex_type,
             central,
             positions,
             colors,
             faces,
+            trailing,
         })
     }
 
@@ -156,10 +166,15 @@ impl StaticMesh {
 
         Ok(Self {
             name,
+            version: (0, 0),
+            flags: 0,
+            bounding_box: Aabb::new(Vec3::ZERO, Vec3::ZERO),
+            vertex_type: None,
             central,
             positions,
             colors: None,
             faces,
+            trailing: Vec::new(),
         })
     }
 }

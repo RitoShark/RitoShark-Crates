@@ -84,6 +84,21 @@ fn minimal_v17() -> Vec<u8> {
         b.extend_from_slice(&v.to_le_bytes());
     }
 
+    // scene graphs: 1 disabled bucketed-geometry graph
+    b.extend_from_slice(&1u32.to_le_bytes()); // scene graph count
+    b.extend_from_slice(&0u32.to_le_bytes()); // controller hash
+    for v in [0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0] {
+        b.extend_from_slice(&v.to_le_bytes()); // bounds + bucket size
+    }
+    b.extend_from_slice(&0u16.to_le_bytes()); // buckets per side
+    b.push(1u8); // is_disabled
+    b.push(0u8); // flags
+    b.extend_from_slice(&0u32.to_le_bytes()); // vertex count
+    b.extend_from_slice(&0u32.to_le_bytes()); // index count
+
+    // planar reflectors: none
+    b.extend_from_slice(&0u32.to_le_bytes());
+
     b
 }
 

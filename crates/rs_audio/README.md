@@ -43,13 +43,26 @@ guarantee — one sample `_audio.bnk` in our set contains only `BKHD`.)
 ### WPK — Wwise audio package
 
 ```
-[ "r3d2" magic ][ u32 version ][ u32 count ][ count * u32 entry-offset ]
-   then per entry: [ u32 data_offset ][ u32 size ][ u32 name_len ][ name_len * u16 UTF-16-LE ]
+[ "r3d2" magic ][ u32 version ][ u32 slot_count ][ slot_count * u32 entry-offset ]
+   then per live entry: [ u32 data_offset ][ u32 size ][ u32 name_len ][ name_len * u16 UTF-16-LE ]
    then the audio blobs.
 ```
 
-Each entry names a `.wem` and points at its bytes. The writer rebuilds a canonical layout:
-header, the entry-offset array, packed entries, then the audio blobs in order.
+Each entry names a `.wem` (League uses `"<id>.wem"`) and points at its bytes. The model is
+**layout-preserving**, not merely canonical:
+
+- **Dead slots.** Real packages can carry offset-table slots whose value is `0`, pointing at
+  nothing. `Wpk::dead_slots` records the *positions* of those zero slots so the table is rebuilt
+  with the same length and zero placement. (The Python reference silently drops them — lossy.)
+- **Blob alignment.** `WemEntry::align` captures any padding before each blob, measured against
+  where the canonical packing would place it, so real inter-blob alignment round-trips.
+
+With both captured, a real package re-serializes byte-for-byte even where a naive canonical
+writer would diverge. Construct fresh entries with `WemEntry::new(name, data)` (`align = 0`).
+
+> Status: validated by **synthetic** round-trip only — there is no real `.wpk` in our sample set
+> (see the report). The synthetic coverage exercises dead slots + alignment + the canonical path;
+> if a real `.wpk` uses layout our model cannot express, that is the one remaining unproven gap.
 
 ## API
 
@@ -72,10 +85,18 @@ let out = bnk.to_bytes()?;             // byte-identical to the input
 | `Bnk::wems() -> Vec<(u32, &[u8])>` | embedded wems via DIDX/DATA; empty if absent |
 | `Bnk::to_bytes` / `to_path` / `to_writer` | byte-exact serialize |
 | `Wpk::from_path` / … | parse a `.wpk` package |
+| `Wpk::wems() -> Vec<(Option<u32>, &str, &[u8])>` | per entry: parsed id (from `"<id>.wem"`), name, bytes |
 | `Wpk::to_bytes` / … | serialize a `.wpk` package |
 
-`wems()` borrows from the parsed `DATA` body; an out-of-range DIDX entry is skipped rather
-than panicking. There are no panics in library code; malformed input returns `Err`.
+`Bnk::wems()` borrows from the parsed `DATA` body; an out-of-range or misaligned DIDX entry is
+skipped rather than panicking.
+
+**Robustness.** There are no panics in library code; malformed input returns `Err`. Both readers
+bound every declared size and offset against the actual input length before allocating or
+slicing, so truncated sections, a DIDX size not a multiple of 12, offsets/sizes past EOF, a
+near-`u32::MAX` section/slot count, and zero-length DATA all yield a clean `Err` (or an
+empty/partial result) instead of a panic or a multi-gigabyte allocation. These cases are covered
+by the fuzz-style unit tests in `tests/roundtrip.rs`.
 
 ## Test fixtures
 

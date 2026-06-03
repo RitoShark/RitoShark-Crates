@@ -26,6 +26,31 @@ pub struct FileEntry {
     pub chunk_ids: Vec<u64>,
     pub link: Option<String>,
     pub permissions: u8,
+    /// Bitmask selecting which entries of the manifest flags table apply to this file.
+    /// Bit `n` set means the flag whose `id` is `n` (a locale or platform tag) is active.
+    pub flags_mask: Option<u64>,
+}
+
+/// One entry of the manifest flags table: a small numeric `id` paired with a locale
+/// (e.g. `en_US`) or platform (e.g. `windows`, `macos`) tag. A file's `flags_mask`
+/// references these by bit position `1 << id`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileFlag {
+    pub id: u8,
+    pub name: String,
+}
+
+/// One chunk of a file located within its CDN bundle. `offset_in_bundle` is the running
+/// start of this chunk's compressed bytes inside the bundle (chunks are concatenated in
+/// bundle order); `compressed_size` is its length there, and `uncompressed_size` its size
+/// once inflated into the target file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChunkRange {
+    pub bundle_id: u64,
+    pub chunk_id: u64,
+    pub offset_in_bundle: u32,
+    pub compressed_size: u32,
+    pub uncompressed_size: u32,
 }
 
 /// A directory node; full paths are reconstructed by walking `parent_id` up to the root.
@@ -45,6 +70,8 @@ pub struct Rman {
     pub bundles: Vec<Bundle>,
     pub files: Vec<FileEntry>,
     pub directories: Vec<Directory>,
+    /// Locale/platform flag table; each file's `flags_mask` selects entries from it.
+    pub file_flags: Vec<FileFlag>,
 }
 
 impl Rman {
@@ -89,6 +116,73 @@ impl Rman {
                 };
                 (path, f.size as u64)
             })
+            .collect()
+    }
+
+    /// Names of the flags (locale/platform tags) active for `file`, in flag-table order.
+    /// Empty when the file carries no mask or references no known flag.
+    pub fn file_flag_names(&self, file: &FileEntry) -> Vec<&str> {
+        let mask = match file.flags_mask {
+            Some(m) => m,
+            None => return Vec::new(),
+        };
+        self.file_flags
+            .iter()
+            .filter(|f| mask & (1u64 << f.id) != 0)
+            .map(|f| f.name.as_str())
+            .collect()
+    }
+
+    /// References to every file whose flag mask includes the flag named `tag`
+    /// (a locale such as `en_US` or a platform such as `windows`). Files with no mask
+    /// are excluded; an unknown `tag` yields an empty result.
+    pub fn files_with_flag(&self, tag: &str) -> Vec<&FileEntry> {
+        let bit = match self.file_flags.iter().find(|f| f.name == tag) {
+            Some(f) => 1u64 << f.id,
+            None => return Vec::new(),
+        };
+        self.files
+            .iter()
+            .filter(|f| f.flags_mask.is_some_and(|m| m & bit != 0))
+            .collect()
+    }
+
+    /// Index every chunk by id, recording the bundle it belongs to and its running byte
+    /// offset within that bundle (chunks concatenate in bundle order). Built once and
+    /// reused by [`Rman::file_chunks`] / [`Rman::file_chunks_for`].
+    pub fn chunk_index(&self) -> HashMap<u64, ChunkRange> {
+        let mut index = HashMap::new();
+        for bundle in &self.bundles {
+            let mut offset: u32 = 0;
+            for chunk in &bundle.chunks {
+                index.entry(chunk.id).or_insert(ChunkRange {
+                    bundle_id: bundle.id,
+                    chunk_id: chunk.id,
+                    offset_in_bundle: offset,
+                    compressed_size: chunk.compressed_size,
+                    uncompressed_size: chunk.uncompressed_size,
+                });
+                offset = offset.saturating_add(chunk.compressed_size);
+            }
+        }
+        index
+    }
+
+    /// Ordered chunk byte-ranges that reconstruct `file`: for each of the file's chunk ids
+    /// (in order), the bundle it lives in and its compressed range there plus uncompressed
+    /// size. Concatenating each chunk's decompressed bytes yields the file. Chunk ids with
+    /// no matching bundle chunk are skipped. Builds a fresh index each call; for many files
+    /// build [`Rman::chunk_index`] once and use [`Rman::file_chunks_for`].
+    pub fn file_chunks(&self, file: &FileEntry) -> Vec<ChunkRange> {
+        let index = self.chunk_index();
+        Self::file_chunks_for(file, &index)
+    }
+
+    /// Like [`Rman::file_chunks`] but against a prebuilt [`Rman::chunk_index`].
+    pub fn file_chunks_for(file: &FileEntry, index: &HashMap<u64, ChunkRange>) -> Vec<ChunkRange> {
+        file.chunk_ids
+            .iter()
+            .filter_map(|id| index.get(id).cloned())
             .collect()
     }
 }

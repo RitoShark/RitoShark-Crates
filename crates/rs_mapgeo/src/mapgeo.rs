@@ -1,4 +1,4 @@
-use rs_math::{Aabb, Mat4, Vec2};
+use rs_math::{Aabb, Mat4, Vec2, Vec3};
 
 /// Named vertex attribute, matching the OEGM `MAPGEOVertexElementName` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,6 +193,9 @@ pub struct MapModel {
     pub index_count: u32,
     pub index_buffer_id: i32,
     pub layer: u8,
+    /// `UnknownVersion18Int`, present only on version 18; ignored on write for other versions.
+    pub unknown_v18: u32,
+    /// Scene-graph path hash (`VisibilityControllerPathHash`); present only on version >= 15.
     pub bucket_grid_hash: u32,
     pub submeshes: Vec<Submesh>,
     pub disable_backface_culling: bool,
@@ -205,6 +208,51 @@ pub struct MapModel {
     pub stationary_light: AssetChannel,
     pub texture_overrides: Vec<TextureOverride>,
     pub baked_paint_scale_offset: [f32; 4],
+    /// The single baked-paint channel used by versions 12..=16 in place of the counted override
+    /// list. `None` for versions that use [`Self::texture_overrides`] (>= 17).
+    pub baked_paint: Option<AssetChannel>,
+}
+
+/// One bucket of a [`SceneGraph`] quad-tree leaf.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeometryBucket {
+    pub max_stick_out_x: f32,
+    pub max_stick_out_z: f32,
+    pub start_index: u32,
+    pub base_vertex: u32,
+    pub inside_face_count: u16,
+    pub sticking_out_face_count: u16,
+}
+
+/// The bucketed-geometry scene graph (`BucketedGeometry`) that trails the model list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneGraph {
+    pub controller_hash: u32,
+    /// An unknown leading `f32` present only on version 18; ignored for other versions.
+    pub unknown_v18: f32,
+    pub min_x: f32,
+    pub min_z: f32,
+    pub max_x: f32,
+    pub max_z: f32,
+    pub max_stick_out_x: f32,
+    pub max_stick_out_z: f32,
+    pub bucket_size_x: f32,
+    pub bucket_size_z: f32,
+    pub buckets_per_side: u16,
+    pub is_disabled: bool,
+    pub flags: u8,
+    pub vertices: Vec<Vec3>,
+    pub indices: Vec<u16>,
+    pub buckets: Vec<GeometryBucket>,
+    pub face_visibility_flags: Vec<u8>,
+}
+
+/// A planar reflector plane (`PlanarReflector`), present from version 13 onward.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlanarReflector {
+    pub transform: Mat4,
+    pub plane: Aabb,
+    pub normal: Vec3,
 }
 
 /// The top level of a parsed `.mapgeo` (OEGM) file.
@@ -216,6 +264,8 @@ pub struct MapGeometry {
     pub vertex_buffers: Vec<VertexBuffer>,
     pub index_buffers: Vec<IndexBuffer>,
     pub models: Vec<MapModel>,
+    pub scene_graphs: Vec<SceneGraph>,
+    pub planar_reflectors: Vec<PlanarReflector>,
 }
 
 impl MapGeometry {

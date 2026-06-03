@@ -3,7 +3,10 @@ use std::io::Write;
 use rs_io::{Serialize, WriterExt};
 
 use crate::error::{Error, Result};
-use crate::skinned::{SkinnedMesh, SkinnedMeshRange, SkinnedMeshVertex, SkinnedMeshVertexType, MAGIC};
+use crate::skinned::{
+    MAGIC, SkinnedMesh, SkinnedMeshRange, SkinnedMeshVertex, SkinnedMeshVertexType,
+};
+use crate::static_mesh::{SCB_MAGIC, StaticMesh, StaticMeshFace};
 
 impl Serialize for SkinnedMesh {
     type Error = Error;
@@ -46,6 +49,8 @@ impl Serialize for SkinnedMesh {
         for vertex in &self.vertices {
             write_vertex(w, vertex, self.vertex_type)?;
         }
+
+        w.write_bytes(&self.trailing)?;
 
         Ok(())
     }
@@ -94,4 +99,76 @@ fn write_fixed_string<W: Write, const N: usize>(w: &mut W, s: &str) -> Result<()
     let mut buf = [0u8; N];
     buf[..len].copy_from_slice(&bytes[..len]);
     w.write_bytes(&buf).map_err(Error::from)
+}
+
+impl Serialize for StaticMesh {
+    type Error = Error;
+
+    fn to_writer<W: Write>(&self, w: &mut W) -> Result<()> {
+        self.to_scb_writer(w)
+    }
+}
+
+impl StaticMesh {
+    /// Writes the binary `.scb` (`"r3d2Mesh"`) static mesh, reproducing the on-disk version, flags,
+    /// bounds, vertex-type word, and post-face tail verbatim so a read of a real file round-trips
+    /// byte-for-byte.
+    pub fn to_scb_writer<W: Write>(&self, w: &mut W) -> Result<()> {
+        let (major, minor) = if self.version == (0, 0) {
+            (3, 2)
+        } else {
+            self.version
+        };
+
+        w.write_bytes(SCB_MAGIC)?;
+        w.write_u16(major)?;
+        w.write_u16(minor)?;
+        write_fixed_string::<_, 128>(w, &self.name)?;
+        w.write_u32(self.positions.len() as u32)?;
+        w.write_u32(self.faces.len() as u32)?;
+        w.write_u32(self.flags)?;
+        w.write_vec3(self.bounding_box.min)?;
+        w.write_vec3(self.bounding_box.max)?;
+
+        if major == 3 && minor == 2 {
+            // Prefer the original vertex-type word; fall back to deriving it from the color block.
+            let vtype = self.vertex_type.unwrap_or(u32::from(self.colors.is_some()));
+            w.write_u32(vtype)?;
+        }
+
+        for &position in &self.positions {
+            w.write_vec3(position)?;
+        }
+
+        if let Some(colors) = &self.colors {
+            for color in colors {
+                w.write_bytes(color)?;
+            }
+        }
+
+        w.write_vec3(self.central)?;
+
+        for face in &self.faces {
+            write_scb_face(w, face)?;
+        }
+
+        w.write_bytes(&self.trailing)?;
+
+        Ok(())
+    }
+}
+
+fn write_scb_face<W: Write>(w: &mut W, face: &StaticMeshFace) -> Result<()> {
+    for &index in &face.indices {
+        w.write_u32(index)?;
+    }
+    write_fixed_string::<_, 64>(w, &face.material)?;
+    // UVs are stored as three U floats then three V floats (not interleaved).
+    for uv in &face.uvs {
+        w.write_f32(uv.x)?;
+    }
+    for uv in &face.uvs {
+        w.write_f32(uv.y)?;
+    }
+    Ok(())
 }

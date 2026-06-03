@@ -40,6 +40,22 @@ impl Serialize for Bin {
             writer.write_bytes(&body)?;
         }
 
+        if self.is_patch {
+            writer.write_u32(len_u32(self.patches.len(), "patch count")?)?;
+            for patch in &self.patches {
+                writer.write_u32(patch.key_hash)?;
+                let mut body = Vec::new();
+                body.write_u8(patch.value.ty().to_u8())?;
+                if patch.path.len() > u16::MAX as usize {
+                    return Err(Error::TooLarge("patch path"));
+                }
+                body.write_string_u16(&patch.path)?;
+                write_value(&mut body, &patch.value)?;
+                writer.write_u32(len_u32(body.len(), "patch length")?)?;
+                writer.write_bytes(&body)?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -96,9 +112,7 @@ fn write_value<W: Write>(writer: &mut W, value: &BinValue) -> Result<()> {
         BinValue::File(v) => writer.write_u64(*v)?,
         BinValue::Link(v) => writer.write_u32(*v)?,
         BinValue::Flag(v) => writer.write_bool(*v)?,
-        BinValue::List {
-            item, items, ..
-        } => {
+        BinValue::List { item, items, .. } => {
             writer.write_u8(item.to_u8())?;
             let mut body = Vec::new();
             body.write_u32(len_u32(items.len(), "list count")?)?;

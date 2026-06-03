@@ -3,7 +3,7 @@ use std::io::{Read, Seek};
 use indexmap::IndexMap;
 use rs_io::{Parse, ReaderExt};
 
-use crate::bin::{Bin, BinEntry, BinType, BinValue};
+use crate::bin::{Bin, BinEntry, BinPatch, BinType, BinValue};
 use crate::error::{Error, Result};
 
 const PROP: [u8; 4] = *b"PROP";
@@ -68,14 +68,39 @@ impl Parse for Bin {
             });
         }
 
+        let mut patches = Vec::new();
+        if is_patch {
+            let patch_count = reader.read_u32()? as usize;
+            patches.reserve(patch_count.min(1 << 20));
+            for _ in 0..patch_count {
+                patches.push(read_patch(reader)?);
+            }
+        }
+
         Ok(Bin {
             is_patch,
             patch_header,
             version,
             linked,
             entries,
+            patches,
         })
     }
+}
+
+fn read_patch<R: Read + Seek>(reader: &mut R) -> Result<BinPatch> {
+    let key_hash = reader.read_u32()?;
+    let length = reader.read_u32()? as u64;
+    let start = reader.stream_position()?;
+    let ty = BinType::from_u8(reader.read_u8()?)?;
+    let path = reader.read_string_u16()?;
+    let value = read_value(reader, ty)?;
+    check_size(reader, start, length)?;
+    Ok(BinPatch {
+        key_hash,
+        path,
+        value,
+    })
 }
 
 fn read_value<R: Read + Seek>(reader: &mut R, ty: BinType) -> Result<BinValue> {
@@ -92,7 +117,9 @@ fn read_value<R: Read + Seek>(reader: &mut R, ty: BinType) -> Result<BinValue> {
         BinType::U64 => BinValue::U64(reader.read_u64()?),
         BinType::F32 => BinValue::F32(reader.read_f32()?),
         BinType::Vec2 => BinValue::Vec2([reader.read_f32()?, reader.read_f32()?]),
-        BinType::Vec3 => BinValue::Vec3([reader.read_f32()?, reader.read_f32()?, reader.read_f32()?]),
+        BinType::Vec3 => {
+            BinValue::Vec3([reader.read_f32()?, reader.read_f32()?, reader.read_f32()?])
+        }
         BinType::Vec4 => BinValue::Vec4([
             reader.read_f32()?,
             reader.read_f32()?,

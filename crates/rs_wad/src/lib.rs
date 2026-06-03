@@ -15,8 +15,8 @@ mod decoder;
 mod error;
 mod wad;
 
-pub use chunk::{WadChunk, WadCompression};
-pub use decoder::decompress;
+pub use chunk::{WadChunk, WadCompression, WadSubchunk};
+pub use decoder::{decompress, decompress_zstd_multi_with_toc};
 pub use error::{Error, Result};
 pub use wad::Wad;
 

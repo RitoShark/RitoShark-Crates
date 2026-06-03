@@ -16,6 +16,7 @@ fn mips_use_block_layout(format: TexFormat) -> bool {
             | TexFormat::Bc7
             | TexFormat::Bc5
             | TexFormat::Bgra8
+            | TexFormat::Rgba16Snorm
     )
 }
 

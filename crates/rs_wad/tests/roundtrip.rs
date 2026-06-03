@@ -1,7 +1,7 @@
 use std::io::{Cursor, Write};
 
 use rs_io::{Parse, Serialize, WriterExt};
-use rs_wad::{decompress, Wad, WadChunk, WadCompression};
+use rs_wad::{decompress, decompress_zstd_multi_with_toc, Wad, WadChunk, WadCompression, WadSubchunk};
 
 const V3_TRAILER_LEN: usize = 256 + 8;
 
@@ -132,6 +132,35 @@ fn decompress_zstd_multi_with_raw_prefix() {
 
     let mut expected = prefix.to_vec();
     expected.extend_from_slice(tail);
+    assert_eq!(out, expected);
+}
+
+#[test]
+fn subchunk_toc_decode_mixed_stored_and_zstd() {
+    let a = b"first-zstd-subchunk-payload".to_vec();
+    let b = b"STORED-MIDDLE".to_vec();
+    let c = b"third-zstd-subchunk-payload".to_vec();
+
+    let a_z = zstd::encode_all(&a[..], 3).unwrap();
+    let c_z = zstd::encode_all(&c[..], 3).unwrap();
+
+    let mut raw = Vec::new();
+    raw.extend_from_slice(&a_z);
+    raw.extend_from_slice(&b);
+    raw.extend_from_slice(&c_z);
+
+    let toc = [
+        WadSubchunk { compressed_size: a_z.len() as u32, uncompressed_size: a.len() as u32, checksum: 0 },
+        WadSubchunk { compressed_size: b.len() as u32, uncompressed_size: b.len() as u32, checksum: 0 },
+        WadSubchunk { compressed_size: c_z.len() as u32, uncompressed_size: c.len() as u32, checksum: 0 },
+    ];
+
+    let total = a.len() + b.len() + c.len();
+    let out = decompress_zstd_multi_with_toc(&raw, total, &toc).unwrap();
+
+    let mut expected = a.clone();
+    expected.extend_from_slice(&b);
+    expected.extend_from_slice(&c);
     assert_eq!(out, expected);
 }
 

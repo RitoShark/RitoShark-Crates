@@ -1,104 +1,78 @@
 # rs_mapgeo — real-file report
 
-Results of running `rs_mapgeo` against the real `.mapgeo` samples in the workspace
-`sample-files/` directory. The crate parses **OEGM version 17 only**; everything else is reported
-as `Error::UnsupportedVersion`.
+Results of running `rs_mapgeo` against the real `.mapgeo` samples in the workspace `Sample-Files/`
+directory. The crate now supports **OEGM versions 14, 17 and 18**; everything else is reported as
+`Error::UnsupportedVersion`.
 
 ## Per-file results
 
-| File | Magic | OEGM version | Parsed? | Result |
-|---|---|---|---|---|
-| `bloom.mapgeo` | OEGM | **17** | yes | 1551 models, 1722 vertex buffers, 676 index buffers; byte-exact prefix round-trip over 38,302,200 of 42,881,463 bytes |
-| `spectator_only_banners.mapgeo` | OEGM | **18** | no | `UnsupportedVersion(18)` |
-| `ultbook.mapgeo` | OEGM | **14** | no | `UnsupportedVersion(14)` |
+| File | OEGM version | Parsed? | Round-trip |
+|---|---|---|---|
+| `ultbook.mapgeo` | **14** | yes | byte-exact, full file (20,045,042 bytes) |
+| `bloom.mapgeo` | **17** | yes | byte-exact, full file (42,881,463 bytes) |
+| `spectator_only_banners.mapgeo` | **18** | yes | byte-exact, full file (92,592,365 bytes) |
 
-The version byte is the `u32` directly after the 4-byte `OEGM` magic. Only `bloom.mapgeo` is the
-v17 format this crate targets; the other two are different on-disk versions and are rejected
-cleanly (no panic, the error carries the exact version).
+All three real samples now `read → to_bytes → ==` **byte-for-byte over the entire file**, including
+the trailing scene graphs and planar reflectors. (`spectator_only_banners.mapgeo` has 28 scene
+graphs and 0 reflectors; `bloom.mapgeo` previously dropped ~4.5 MB of tail — that tail is now fully
+parsed and re-emitted.)
 
-The ~4.5 MB tail of `bloom.mapgeo` that is not round-tripped is the bucketed scene graph and
-planar reflectors, which this MVP intentionally does not parse (see README *Scope*). The writer
-reproduces everything up to and including the model list byte-for-byte.
+## Gap analysis vs C#
 
-## Versions we are missing (needed by the samples)
+The C# `LeagueToolkit` `EnvironmentAsset` is the oracle. Its reader handles versions
+`5, 6, 7, 9, 11, 12, 13, 14, 15, 17, 18`; its **writer is hardcoded to version 17**, so for v14 and
+v18 the oracle is *not* a byte-exact round-trip reference — it would re-emit those files as v17. To
+guarantee lossless round-trips on every version we read, this crate preserves every byte the oracle
+discards and re-emits it version-correctly:
 
-The samples alone require two more versions on top of v17:
+- **v14 baked-paint channel.** The oracle reads the single `version >= 12 && < 17` baked-paint
+  channel (path + scale + bias) and keeps only its path as a sampler-0 override, discarding the
+  scale/bias. We keep the whole `AssetChannel` (`MapModel::baked_paint`) and re-emit it verbatim.
+- **v18 mesh `unknown_v18` `u32`** (after the mesh layer byte) — preserved per mesh.
+- **v18 scene-graph leading `f32`** (one per `BucketedGeometry`, before the bounds) — the oracle
+  reads it into a throwaway local; we store it on `SceneGraph::unknown_v18` and re-emit it. This was
+  the last 112-byte (28 graphs × 4) discrepancy on `spectator_only_banners.mapgeo`.
 
-- **v18** (`spectator_only_banners.mapgeo`)
-- **v14** (`ultbook.mapgeo`)
+## What I implemented
 
-The trusted C# oracle accepts the full set `5, 6, 7, 9, 11, 12, 13, 14, 15, 17, 18`. The two
-versions the samples exercise are the priority.
+1. **OEGM v18 reader + writer.** Mesh body adds the `unknown_v18` `u32` after the layer byte
+   (gated `version >= 18`); the scene graph adds its leading `f32`. Everything else equals v17.
+   → unlocks `spectator_only_banners.mapgeo`.
+2. **OEGM v14 reader + writer.** Implicit sampler strings (bare `BAKED_DIFFUSE_TEXTURE` from v9 and
+   `..._ALPHA` from v11, no count/index); per-mesh `u8` render flags (the `u16` form starts at
+   v16); no visibility-controller hash (that is `>= 15`); a single baked-paint channel instead of
+   the counted override list + scale/bias; and a single implicit scene graph (the counted list is
+   `>= 15`). → unlocks `ultbook.mapgeo`.
+3. **v17 (and shared) trailing sections.** The bucketed scene graphs (bounds, bucket grid,
+   vertex/index arrays, per-bucket records, optional per-face visibility flags) and the planar
+   reflectors (`transform, plane, normal`) are now fully parsed and round-tripped, so `bloom.mapgeo`
+   round-trips in full rather than just up to the model list.
 
-## Cross-check vs the C# oracle (v17 path)
+## Field-by-field version matrix (mirrors the C# oracle)
 
-Field-by-field, our v17 reader/writer matches the oracle's v17 path exactly:
+| Section | v14 | v17 | v18 |
+|---|---|---|---|
+| shader/sampler overrides | implicit bare strings (v9 + v11) | counted `[i32 index, str]` | counted `[i32 index, str]` |
+| vertex decl / buffers / index buffers | identical (15-slot padded decls, `u8` layer ≥ 13) | identical | identical |
+| mesh: layer byte (≥ 13) | yes | yes | yes |
+| mesh: `unknown_v18` (≥ 18) | — | — | `u32` |
+| mesh: controller hash (≥ 15) | — | `u32` | `u32` |
+| mesh: transition byte (≥ 14) + render flags | byte + `u8` | byte + `u16` (≥ 16) | byte + `u16` |
+| mesh: paint | one baked-paint channel | counted overrides + scale/bias | counted overrides + scale/bias |
+| scene graphs | single implicit graph | counted list | counted, each with leading `f32` |
+| planar reflectors (≥ 13) | counted list | counted list | counted list |
 
-- **Header** — magic + `u32` version. ✔
-- **Shader texture overrides** — `count: u32`, then `[index: i32, name: sized-string]`. ✔
-- **Vertex declarations** — `usage: u32`, `element_count: u32`, `[name: u32, format: u32]`, then
-  the unused tail up to 15 slots. ✔ (see *What I changed* — padding content was the first bug)
-- **Vertex buffers** — `layer: u8` (present because v17 ≥ 13), `size: u32`, raw bytes. ✔
-- **Index buffers** — `layer: u8`, `size: u32`, `u16` indices. ✔
-- **Model** — vertex_count, vertex_buffer_count, vertex_description_id, buffer ids, index_count,
-  index_buffer_id, `layer: u8` (≥ 13), `visibility_controller_hash: u32` (≥ 15), submeshes,
-  `disable_backface_culling: bool`, bounds (Box), transform (row-major 4×4), `quality: u8`,
-  `layer_transition: u8` (≥ 14), `render_flags: u16` (`u16` because v17 ≥ 16), baked-light and
-  stationary-light channels, texture-override list (≥ 17), then baked-paint scale + bias Vec2s. ✔
+## Remaining gaps
 
-Discrepancies found and what they meant:
+- **Versions 5, 6, 7, 9, 11, 12, 13, 15** are still `UnsupportedVersion` — no real samples to
+  validate against, and several carry features this crate does not yet model (separate point
+  lights `< 7`, spherical-harmonics light probes `< 9`, embedded mesh names `<= 11`, the
+  `version == 5` special-case that omits `DisableBackfaceCulling`). The reader/writer are already
+  structured by version gates, so adding them is mostly filling these branches once a fixture
+  exists.
+- **Light grid** (older embedded per-mesh grid) is not modeled; none of the three samples use it.
 
-1. **Vertex-declaration padding is not zero.** The 15-slot element table fills its unused tail
-   with the default element `(Position, XYZW_Float32)` = `(0, 3)`, not zero bytes. Our writer was
-   emitting zeros, so round-trip diverged at byte 108. The oracle's writer emits exactly this
-   default element.
-2. **`layer_transition` is a byte enum, not a bool.** The field after `quality` is the
-   visibility-transition behavior (values 0/1/2 in the oracle). Our model stored it as a `bool`
-   named `is_bush`, which collapsed the value `2` seen in `bloom.mapgeo` down to `1` on write,
-   diverging at byte ~37.99 M. It is now a `u8`.
+## Foundation needs
 
-Both were within-crate model/serialization bugs, not layout misunderstandings; the byte positions
-of every field already matched the oracle.
-
-## How versions differ (for the next implementer)
-
-From the C# oracle, the deltas that matter for the sampled versions:
-
-- **v18 vs v17** — after the per-mesh `layer` byte (and before the visibility-controller hash)
-  there is an extra `u32` (the oracle calls it `UnknownVersion18Int`). Everything else in the mesh
-  body matches v17. The top-level layout (scene graphs ≥ 15, planar reflectors ≥ 13) is the same.
-- **v14 vs v17** — shader texture overrides are **not** a counted list: v9 adds one implicit
-  `BAKED_DIFFUSE_TEXTURE` sampler string and v11 adds `BAKED_DIFFUSE_TEXTURE_ALPHA`, both read as
-  bare sized-strings (no index, no count). Mesh body differences: no `visibility_controller_hash`
-  (that is ≥ 15); `render_flags` is a **`u8`** (the `u16` form starts at v16); the field after
-  `quality` is still the transition byte at ≥ 14; per-mesh texture overrides use the older single
-  baked-paint channel (≥ 12, < 17) rather than the counted override list (≥ 17), and there is no
-  trailing baked-paint scale/bias pair. The scene graph for < 15 is a single graph, not a counted
-  list.
-
-## Improvements / TODO (priority order)
-
-1. **Add OEGM v18** — the closest delta to v17 (one extra mesh `u32`). Unlocks
-   `spectator_only_banners.mapgeo`. Gate the field on `version >= 18` in both reader and writer
-   and add a v18 fixture round-trip.
-2. **Add OEGM v14** — larger delta (implicit sampler strings, `u8` render flags, single baked-paint
-   channel, no controller hash, single scene graph). Unlocks `ultbook.mapgeo`.
-3. **Parse (and round-trip) the trailing scene graph + planar reflectors** so v17 files round-trip
-   in full, not just up to the model list. This is the largest remaining correctness gap against
-   the lossless-round-trip contract; today ~4.5 MB of `bloom.mapgeo` is dropped on write.
-
-## What I changed
-
-- Added `tests/real_files.rs`: skip-if-missing helper joining `../../sample-files`; prints magic +
-  version for every sample, asserts v17 parses with a non-empty model list and round-trips its
-  prefix byte-for-byte, and asserts other versions report `UnsupportedVersion(version)`.
-- **Fixed the vertex-declaration writer** to emit the default `(Position, XYZW_Float32)` element
-  for each unused slot instead of zero bytes (`src/write.rs`).
-- **Changed the model's `is_bush: bool` field to `layer_transition: u8`** across the data type,
-  reader, and writer so the visibility-transition byte round-trips losslessly
-  (`src/mapgeo.rs`, `src/read.rs`, `src/write.rs`).
-- Updated `tests/smoke.rs` so the hand-built minimal file uses the real default-element padding,
-  keeping the byte-exact round-trip test valid.
-
-After these changes `cargo test -p rs_mapgeo` is green (3 real-file tests + 5 smoke tests), and
-`bloom.mapgeo` (v17) round-trips byte-for-byte over its entire parsed prefix.
+None. `rs_io`'s `ReaderExt`/`WriterExt` already cover every primitive used here (`u8/u16/u32/i32/
+f32`, sized strings, `mtx44`). No changes to other crates were required.

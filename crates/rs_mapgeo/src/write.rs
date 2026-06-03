@@ -1,38 +1,39 @@
 /*!
-The writer is the byte-exact inverse of the version 17 reader for the top-level structure it
-parses: header, texture overrides, vertex declarations, vertex/index buffers, and the model list.
-It reproduces the same field order and padding, so a parsed file re-serializes identically up to
-the model list. It does not emit the bucketed scene graph or planar reflectors, which the reader
-does not consume either. Any non-target version is rejected with `Error::UnsupportedVersion`.
+The writer is the byte-exact inverse of the reader for every version it supports (14, 17, 18). It
+reproduces the same field order, padding and per-version layout: the implicit sampler strings, `u8`
+render-flag word and single baked-paint channel of version 14; the extra mesh `u32` of version 18;
+and the trailing bucketed scene graphs and planar reflectors of all three. A parsed file therefore
+re-serializes identically. Any unsupported version is rejected with `Error::UnsupportedVersion`.
 */
 
 use std::io::Write;
 
 use rs_io::WriterExt;
-use rs_math::{Vec2, Vec3};
+use rs_math::{Mat4, Vec2, Vec3};
 
 use crate::error::{Error, Result};
 use crate::mapgeo::{
-    AssetChannel, ElementFormat, ElementName, MapGeometry, MapModel, VertexDescription,
+    AssetChannel, ElementFormat, ElementName, MapGeometry, MapModel, PlanarReflector, SceneGraph,
+    VertexDescription,
 };
 
-const TARGET_VERSION: u32 = 17;
 const MAX_VERTEX_ELEMENTS: usize = 15;
+
+fn is_supported(version: u32) -> bool {
+    matches!(version, 14 | 17 | 18)
+}
 
 impl MapGeometry {
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
-        if self.version != TARGET_VERSION {
-            return Err(Error::UnsupportedVersion(self.version));
+        let version = self.version;
+        if !is_supported(version) {
+            return Err(Error::UnsupportedVersion(version));
         }
 
         writer.write_bytes(MapGeometry::magic())?;
-        writer.write_u32(self.version)?;
+        writer.write_u32(version)?;
 
-        writer.write_u32(self.texture_overrides.len() as u32)?;
-        for ov in &self.texture_overrides {
-            writer.write_u32(ov.index)?;
-            writer.write_string_u32(&ov.path)?;
-        }
+        write_shader_overrides(writer, self, version)?;
 
         writer.write_u32(self.vertex_descriptions.len() as u32)?;
         for desc in &self.vertex_descriptions {
@@ -57,11 +58,36 @@ impl MapGeometry {
 
         writer.write_u32(self.models.len() as u32)?;
         for model in &self.models {
-            write_model(writer, model)?;
+            write_model(writer, model, version)?;
         }
+
+        write_scene_graphs(writer, &self.scene_graphs, version)?;
+        write_planar_reflectors(writer, &self.planar_reflectors, version)?;
 
         Ok(())
     }
+}
+
+fn write_shader_overrides<W: Write>(writer: &mut W, geo: &MapGeometry, version: u32) -> Result<()> {
+    if version >= 17 {
+        writer.write_u32(geo.texture_overrides.len() as u32)?;
+        for ov in &geo.texture_overrides {
+            writer.write_u32(ov.index)?;
+            writer.write_string_u32(&ov.path)?;
+        }
+        return Ok(());
+    }
+
+    /* Versions 9..=16 store the sampler strings implicitly: one bare string from version 9 and a
+    second from version 11, with no count and no index. */
+    let mut iter = geo.texture_overrides.iter();
+    if version >= 9 {
+        writer.write_string_u32(iter.next().map_or("", |ov| ov.path.as_str()))?;
+    }
+    if version >= 11 {
+        writer.write_string_u32(iter.next().map_or("", |ov| ov.path.as_str()))?;
+    }
+    Ok(())
 }
 
 fn write_vertex_description<W: Write>(writer: &mut W, desc: &VertexDescription) -> Result<()> {
@@ -87,7 +113,7 @@ fn write_vertex_description<W: Write>(writer: &mut W, desc: &VertexDescription) 
     Ok(())
 }
 
-fn write_model<W: Write>(writer: &mut W, model: &MapModel) -> Result<()> {
+fn write_model<W: Write>(writer: &mut W, model: &MapModel, version: u32) -> Result<()> {
     writer.write_u32(model.vertex_count)?;
     writer.write_u32(model.vertex_buffer_ids.len() as u32)?;
     writer.write_u32(model.vertex_description_id)?;
@@ -98,8 +124,15 @@ fn write_model<W: Write>(writer: &mut W, model: &MapModel) -> Result<()> {
     writer.write_u32(model.index_count)?;
     writer.write_i32(model.index_buffer_id)?;
 
-    writer.write_u8(model.layer)?;
-    writer.write_u32(model.bucket_grid_hash)?;
+    if version >= 13 {
+        writer.write_u8(model.layer)?;
+    }
+    if version >= 18 {
+        writer.write_u32(model.unknown_v18)?;
+    }
+    if version >= 15 {
+        writer.write_u32(model.bucket_grid_hash)?;
+    }
 
     writer.write_u32(model.submeshes.len() as u32)?;
     for submesh in &model.submeshes {
@@ -119,20 +152,110 @@ fn write_model<W: Write>(writer: &mut W, model: &MapModel) -> Result<()> {
 
     writer.write_u8(model.quality)?;
     writer.write_u8(model.layer_transition)?;
-    writer.write_u16(model.render_flags)?;
+    if version >= 16 {
+        writer.write_u16(model.render_flags)?;
+    } else {
+        writer.write_u8(model.render_flags as u8)?;
+    }
 
     write_channel(writer, &model.baked_light)?;
     write_channel(writer, &model.stationary_light)?;
 
-    writer.write_u32(model.texture_overrides.len() as u32)?;
-    for ov in &model.texture_overrides {
-        writer.write_u32(ov.index)?;
-        writer.write_string_u32(&ov.path)?;
-    }
-    for &v in &model.baked_paint_scale_offset {
-        writer.write_f32(v)?;
+    if version >= 17 {
+        writer.write_u32(model.texture_overrides.len() as u32)?;
+        for ov in &model.texture_overrides {
+            writer.write_u32(ov.index)?;
+            writer.write_string_u32(&ov.path)?;
+        }
+        for &v in &model.baked_paint_scale_offset {
+            writer.write_f32(v)?;
+        }
+    } else if version >= 12 {
+        if let Some(channel) = &model.baked_paint {
+            write_channel(writer, channel)?;
+        } else {
+            write_channel(writer, &AssetChannel::empty())?;
+        }
     }
 
+    Ok(())
+}
+
+fn write_scene_graphs<W: Write>(writer: &mut W, graphs: &[SceneGraph], version: u32) -> Result<()> {
+    if version >= 15 {
+        writer.write_u32(graphs.len() as u32)?;
+    }
+    for graph in graphs {
+        write_scene_graph(writer, graph, version)?;
+    }
+    Ok(())
+}
+
+fn write_scene_graph<W: Write>(writer: &mut W, graph: &SceneGraph, version: u32) -> Result<()> {
+    if version >= 15 {
+        writer.write_u32(graph.controller_hash)?;
+    }
+    if version >= 18 {
+        writer.write_f32(graph.unknown_v18)?;
+    }
+
+    writer.write_f32(graph.min_x)?;
+    writer.write_f32(graph.min_z)?;
+    writer.write_f32(graph.max_x)?;
+    writer.write_f32(graph.max_z)?;
+    writer.write_f32(graph.max_stick_out_x)?;
+    writer.write_f32(graph.max_stick_out_z)?;
+    writer.write_f32(graph.bucket_size_x)?;
+    writer.write_f32(graph.bucket_size_z)?;
+
+    writer.write_u16(graph.buckets_per_side)?;
+    writer.write_bool(graph.is_disabled)?;
+    writer.write_u8(graph.flags)?;
+
+    writer.write_u32(graph.vertices.len() as u32)?;
+    writer.write_u32(graph.indices.len() as u32)?;
+
+    if graph.is_disabled {
+        return Ok(());
+    }
+
+    for &vertex in &graph.vertices {
+        write_vec3(writer, vertex)?;
+    }
+    for &index in &graph.indices {
+        writer.write_u16(index)?;
+    }
+    for bucket in &graph.buckets {
+        writer.write_f32(bucket.max_stick_out_x)?;
+        writer.write_f32(bucket.max_stick_out_z)?;
+        writer.write_u32(bucket.start_index)?;
+        writer.write_u32(bucket.base_vertex)?;
+        writer.write_u16(bucket.inside_face_count)?;
+        writer.write_u16(bucket.sticking_out_face_count)?;
+    }
+    if graph.flags & 1 != 0 {
+        for &flag in &graph.face_visibility_flags {
+            writer.write_u8(flag)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_planar_reflectors<W: Write>(
+    writer: &mut W,
+    reflectors: &[PlanarReflector],
+    version: u32,
+) -> Result<()> {
+    if version < 13 {
+        return Ok(());
+    }
+    writer.write_u32(reflectors.len() as u32)?;
+    for reflector in reflectors {
+        write_mat4(writer, &reflector.transform)?;
+        write_vec3(writer, reflector.plane.min)?;
+        write_vec3(writer, reflector.plane.max)?;
+        write_vec3(writer, reflector.normal)?;
+    }
     Ok(())
 }
 
@@ -140,6 +263,11 @@ fn write_channel<W: Write>(writer: &mut W, channel: &AssetChannel) -> Result<()>
     writer.write_string_u32(&channel.path)?;
     write_vec2(writer, channel.scale)?;
     write_vec2(writer, channel.offset)?;
+    Ok(())
+}
+
+fn write_mat4<W: Write>(writer: &mut W, m: &Mat4) -> Result<()> {
+    writer.write_mtx44(&m.to_cols_array())?;
     Ok(())
 }
 

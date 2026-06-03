@@ -184,12 +184,23 @@ pub struct BinEntry {
     pub fields: IndexMap<u32, BinValue>,
 }
 
+/// One record of a `PTCH` override's trailing patches section: a keyed override that targets the
+/// dotted `path` of some field and supplies a replacement `value`. The on-disk record is a `u32`
+/// key hash, a `u32` body length, then a value type tag, the `path` string, and the value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BinPatch {
+    pub key_hash: u32,
+    pub path: String,
+    pub value: BinValue,
+}
+
 /// A parsed `.bin`/PROP document.
 ///
 /// `is_patch` selects the `PTCH` magic and its extra header; `patch_header` holds the 8 raw header
 /// bytes that follow a `PTCH` magic so they round-trip verbatim. `version` is the format version;
 /// `linked` is the ordered list of linked-file paths (version >= 2); `entries` preserves entry
-/// order, each carrying its class hash and ordered fields.
+/// order, each carrying its class hash and ordered fields. `patches` is the ordered trailing
+/// override section that only a `PTCH` file carries (empty for plain `PROP`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bin {
     pub is_patch: bool,
@@ -197,6 +208,7 @@ pub struct Bin {
     pub version: u32,
     pub linked: Vec<String>,
     pub entries: Vec<BinEntry>,
+    pub patches: Vec<BinPatch>,
 }
 
 impl Bin {
@@ -207,6 +219,7 @@ impl Bin {
             version: 3,
             linked: Vec::new(),
             entries: Vec::new(),
+            patches: Vec::new(),
         }
     }
 }

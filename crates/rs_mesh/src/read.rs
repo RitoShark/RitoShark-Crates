@@ -5,7 +5,7 @@ use rs_math::{Aabb, Sphere, Vec3};
 
 use crate::error::{Error, Result};
 use crate::skinned::{
-    SkinnedMesh, SkinnedMeshRange, SkinnedMeshVertex, SkinnedMeshVertexType, MAGIC,
+    MAGIC, SkinnedMesh, SkinnedMeshRange, SkinnedMeshVertex, SkinnedMeshVertexType,
 };
 
 impl Parse for SkinnedMesh {
@@ -86,6 +86,11 @@ impl Parse for SkinnedMesh {
             vertices.push(read_vertex(reader, vertex_type)?);
         }
 
+        // Preserve any bytes after the vertex buffer verbatim (the 12-byte zero "end tab" the game
+        // appends on major-4 files) so the round-trip stays byte-exact.
+        let mut trailing = Vec::new();
+        reader.read_to_end(&mut trailing)?;
+
         Ok(Self {
             major,
             minor,
@@ -96,6 +101,7 @@ impl Parse for SkinnedMesh {
             ranges,
             indices,
             vertices,
+            trailing,
         })
     }
 }

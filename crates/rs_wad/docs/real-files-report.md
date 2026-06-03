@@ -74,30 +74,69 @@ flag entirely. This was corrected to the uniform layout; the round-trip stays by
   (`value >> 4` after `& 15`), so it always reports 0. `rs_wad` reads `subchunk_count` from the raw
   type byte and reports the true counts (e.g. 2–3 per multi chunk in Azir).
 
-## Improvements / TODO
+## Gap analysis vs C#
 
-1. **Subchunk TOC awareness (correctness for edge cases).** The current zstd-multi decode trusts
-   that the concatenated-frame heuristic covers the whole chunk. To match the oracle exactly for
-   any conceivable layout (e.g. a stored sub-chunk that is not a zstd frame, sitting *between* two
-   compressed frames), add optional parsing of the `.subchunktoc` entry so each sub-chunk is sized
-   explicitly. No sample chunk needs this today, but it removes the last heuristic.
-2. **Convenience lookup + extraction API.** Add `Wad::chunk_by_hash(u64)` (and a path-string
-   helper that hashes via XXH64) plus a `rayon`-gated bulk extractor, as promised in the workspace
-   design. Today callers must scan `wad.chunks` themselves.
-3. **mmap-backed zero-copy reads.** `from_reader` copies the whole data section into a `Vec`. For
+Measured `rs_wad`'s public surface against the C# `WadFile`/`WadChunk` oracle:
+
+| C# capability | rs_wad before | rs_wad now |
+|---|---|---|
+| `FindChunk(ulong)` | scan `wad.chunks` by hand | `chunk_by_hash(u64) -> Option<&WadChunk>` |
+| `FindChunk(string)` (XXH64 lowercased) | none | `chunk_by_path(&str)` (hashes via `rs_hash::xxh64`) |
+| `Subchunks` / `LoadChunkDecompressed` for `ZstdChunked` via `.subchunktoc` | streaming heuristic only | explicit `.subchunktoc` parse + per-sub-chunk decode |
+| bulk `LoadChunkDecompressed` over many chunks | none | `extract_all` / `extract_selected` (rayon-gated) |
+| 32-byte v3 TOC layout (`is_duplicated` + u16 index) | already corrected (prior pass) | unchanged, matches oracle |
+
+The C# reader derives the `.subchunktoc` path from the WAD's own location under `Game/`
+(`Path.ChangeExtension(relativePath, "subchunktoc")`) and looks it up by XXH64. We confirmed this on
+the real Azir archive: the chunk `data/final/champions/azir.wad.subchunktoc` exists and
+`chunk_by_path` resolves it. The decode (stored sub-chunk ⇒ copy, else one zstd frame) mirrors the
+oracle's `DecompressZstdChunkedChunk`.
+
+No new TOC/v3 bug was found versus the oracle; the previously-fixed single-layout v3 entry remains
+correct, and a synthetic mixed stored/zstd sub-chunk test guards the explicit path.
+
+## What I implemented
+
+- **Lookup API.** `Wad::chunk_by_hash(u64)` and `Wad::chunk_by_path(&str)` (XXH64 of the lowercased
+  path), both `Option<&WadChunk>`, never panicking.
+- **`.subchunktoc` support.** `WadSubchunk` (16-byte entry), `Wad::parse_subchunk_toc(&chunk)` and
+  `Wad::subchunk_toc_for_path(&str)` to load the table, `Wad::chunk_data_with_toc(&chunk, &toc)` and
+  the free `decompress_zstd_multi_with_toc` to decode a multi chunk with explicit sub-chunk sizes.
+- **Bulk extractor.** `Wad::extract_all()` and `Wad::extract_selected(hashes)` returning
+  `HashMap<u64, Vec<u8>>`, gated behind a new `parallel` feature (rayon); sequential by default, no
+  `unsafe`.
+- **Real-file validation.** New tests in `tests/real_files.rs`: `azir_lookup_and_extract` (look up
+  by hash + by the real subchunktoc path, decompress, assert lengths, bulk-extract a subset) and
+  `azir_subchunktoc_decode` (decode 200 real zstd-multi chunks via the explicit TOC and assert
+  byte-identical to the heuristic). Verified on real data: the Azir TOC has 3243 entries (matching
+  the highest sub-chunk index referenced) and explicit-vs-heuristic mismatches were 0.
+
+## Remaining gaps / TODO
+
+1. **mmap-backed zero-copy reads.** `from_reader` copies the whole data section into a `Vec`. For
    the `from_path` route, borrow from the mmap and slice chunk ranges directly to avoid the
-   multi-MB copy, while keeping the owned form for the in-memory editing case.
+   multi-MB copy, while keeping the owned form for the in-memory editing case. The bulk extractor
+   would then decode straight from the borrowed slices.
+2. **`.subchunktoc` path derivation.** `subchunk_toc_for_path` takes the caller-supplied lowercased
+   path because the archive stores only hashes and the base name comes from the WAD's location under
+   `Game/`. A higher-level mount that knows the on-disk path (like C#'s `WadFile`) could derive and
+   load it automatically. A hash-dictionary-driven scan for any chunk whose resolved name ends in
+   `.subchunktoc` is the other option once `rs_hash::HashMapper` dictionaries are wired in.
+3. **`chunk_by_hash` is a linear scan.** Fine for the few-thousand-entry archives here and it keeps
+   the round-trip-preserving `Vec` order as the single source of truth, but a mount layer could
+   build a `HashMap` index for hot repeated lookups.
+4. **Lookup duplicate handling.** The TOC may legally contain duplicate path hashes (`is_duplicated`
+   chunks); `chunk_by_hash` returns the first. C# rejects duplicates outright. Neither sample has
+   any, so this is untested against real data.
 
-## What I changed
+## Earlier changes (prior pass)
 
 - **Fixed the v3.4 TOC layout.** Removed the fabricated 24-bit subchunk-start reading/writing and
   unified all v3 minors on the oracle's `is_duplicated (u8) + first_subchunk_index (u16)` layout.
   Round-trip remains byte-exact; the synthetic v3.4 round-trip test still passes unchanged.
 - **Added `tests/real_files.rs`** with a skip-if-missing helper: parses both real archives, asserts
-  a whole-file byte-exact round-trip, and decompresses a sample of chunks (including 200 zstd-multi
-  chunks from Azir), asserting decompressed length matches `uncompressed_size`.
-- **Updated the crate / decoder docs** to describe the real single-layout v3 entry and the
-  concatenated-frame zstd-multi mechanism (no false 24-bit field).
-- **Added this report and `README.md`.**
+  a whole-file byte-exact round-trip, and decompresses a sample of chunks.
+- **Added the crate `README.md` and this report.**
 
-All `cargo test -p rs_wad` tests pass (14 total: 12 roundtrip/unit + 2 real-file).
+All `cargo test -p rs_wad` pass (default and `--features parallel`): 13 roundtrip/unit + 4 real-file,
+and `cargo clippy -p rs_wad --all-targets -- -D warnings` is clean in both configurations.

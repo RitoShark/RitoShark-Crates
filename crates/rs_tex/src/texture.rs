@@ -4,34 +4,38 @@ byte, two unknown bytes, and a mipmap flag, followed by the mip chain stored sma
 Block-compressed payloads (ETC/BC) decode to a BGRA value per pixel, reordered into RGBA.
 */
 
-/// The League `.tex` extended format byte. Values match the on-disk encoding: ETC variants
-/// `1..=3`, the DXT/BC block formats `10..=14`, and uncompressed BGRA8 at `20`.
+/// The League `.tex` extended format byte. Values match the on-disk encoding used by the
+/// production `.tex` codecs: ETC variants `1..=3` (where `2` carries EAC alpha and `3` is plain
+/// ETC2 RGB), the DXT/BC block formats `10..=14`, uncompressed BGRA8 at `20`, and the rarely
+/// seen 16-bit signed-normalised `21`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TexFormat {
     Etc1 = 1,
-    Etc2 = 2,
-    Etc2Eac = 3,
+    Etc2Eac = 2,
+    Etc2 = 3,
     Bc1 = 10,
     Bc1Alt = 11,
     Bc3 = 12,
     Bc7 = 13,
     Bc5 = 14,
     Bgra8 = 20,
+    Rgba16Snorm = 21,
 }
 
 impl TexFormat {
     pub fn from_u8(value: u8) -> Option<Self> {
         Some(match value {
             1 => TexFormat::Etc1,
-            2 => TexFormat::Etc2,
-            3 => TexFormat::Etc2Eac,
+            2 => TexFormat::Etc2Eac,
+            3 => TexFormat::Etc2,
             10 => TexFormat::Bc1,
             11 => TexFormat::Bc1Alt,
             12 => TexFormat::Bc3,
             13 => TexFormat::Bc7,
             14 => TexFormat::Bc5,
             20 => TexFormat::Bgra8,
+            21 => TexFormat::Rgba16Snorm,
             _ => return None,
         })
     }
@@ -43,21 +47,22 @@ impl TexFormat {
     /// Side length in pixels of one encoded block; `1` for uncompressed formats.
     pub fn block_size(self) -> usize {
         match self {
-            TexFormat::Bgra8 => 1,
+            TexFormat::Bgra8 | TexFormat::Rgba16Snorm => 1,
             _ => 4,
         }
     }
 
-    /// Number of bytes one encoded block occupies on disk.
+    /// Number of bytes one encoded block (or, for uncompressed formats, one pixel) occupies.
     pub fn bytes_per_block(self) -> usize {
         match self {
             TexFormat::Etc1 | TexFormat::Bc1 | TexFormat::Bc1Alt => 8,
-            TexFormat::Etc2
-            | TexFormat::Etc2Eac
+            TexFormat::Etc2Eac
+            | TexFormat::Etc2
             | TexFormat::Bc3
             | TexFormat::Bc7
             | TexFormat::Bc5 => 16,
             TexFormat::Bgra8 => 4,
+            TexFormat::Rgba16Snorm => 8,
         }
     }
 

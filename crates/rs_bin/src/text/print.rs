@@ -9,9 +9,13 @@ use crate::bin::{Bin, BinType, BinValue};
 /// `mapper` when present; unresolved hashes fall back to `0x%08x` (or `0x%016x` for file hashes).
 pub fn to_text(bin: &Bin, mapper: Option<&HashMapper>) -> String {
     let mut out = String::new();
-    let header = if bin.is_patch { "#PTCH_text" } else { "#PROP_text" };
+    let header = if bin.is_patch {
+        "#PTCH_text"
+    } else {
+        "#PROP_text"
+    };
     let _ = writeln!(out, "{header}");
-    let _ = writeln!(out, "version: {}", bin.version);
+    let _ = writeln!(out, "version: u32 = {}", bin.version);
 
     if !bin.linked.is_empty() {
         let _ = writeln!(out, "linked: list[string] = {{");
@@ -34,6 +38,28 @@ pub fn to_text(bin: &Bin, mapper: Option<&HashMapper>) -> String {
         out.push_str("    }\n");
     }
     out.push_str("}\n");
+
+    if bin.is_patch {
+        let _ = writeln!(out, "patches: map[hash,embed] = {{");
+        for patch in &bin.patches {
+            out.push_str("    ");
+            push_hash32(&mut out, patch.key_hash, mapper);
+            out.push_str(" = patch {\n");
+            indent(&mut out, 2);
+            out.push_str("path: string = ");
+            push_string(&mut out, &patch.path);
+            out.push('\n');
+            indent(&mut out, 2);
+            out.push_str("value: ");
+            push_type(&mut out, &patch.value);
+            out.push_str(" = ");
+            push_value(&mut out, &patch.value, 2, mapper);
+            out.push('\n');
+            out.push_str("    }\n");
+        }
+        out.push_str("}\n");
+    }
+
     out
 }
 

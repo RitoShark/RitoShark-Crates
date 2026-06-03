@@ -73,7 +73,12 @@ fn build_skn(major: u16, vtype: u32) -> Vec<u8> {
     // vertices
     for k in 0..3 {
         let f = k as f32;
-        basic_vertex(&mut buf, [f, f + 1.0, f + 2.0], [0.0, 1.0, 0.0], [f, 1.0 - f]);
+        basic_vertex(
+            &mut buf,
+            [f, f + 1.0, f + 2.0],
+            [0.0, 1.0, 0.0],
+            [f, 1.0 - f],
+        );
         if vtype >= 1 {
             buf.extend_from_slice(&[255, 128, 64, 255]); // color
             if vtype == 2 {
@@ -152,7 +157,11 @@ fn skn_bad_version_errs() {
 }
 
 fn build_scb(vertex_type: Option<u32>) -> Vec<u8> {
-    let (major, minor) = if vertex_type.is_some() { (3u16, 2u16) } else { (3, 1) };
+    let (major, minor) = if vertex_type.is_some() {
+        (3u16, 2u16)
+    } else {
+        (3, 1)
+    };
     let mut buf = Vec::new();
     buf.extend_from_slice(b"r3d2Mesh");
     buf.write_u16(major).unwrap();
@@ -215,6 +224,22 @@ fn scb_v32_color_parses() {
     let mesh = StaticMesh::from_bytes(&bytes).expect("parse scb color");
     assert_eq!(mesh.colors().unwrap().len(), 3);
     assert_eq!(mesh.colors().unwrap()[0], [1, 2, 3, 4]);
+}
+
+#[test]
+fn scb_v31_byte_exact_roundtrip() {
+    let bytes = build_scb(None);
+    let mesh = StaticMesh::from_bytes(&bytes).expect("parse scb");
+    let out = mesh.to_bytes().expect("write scb");
+    assert_eq!(out, bytes, "byte-exact .scb round-trip (3.1)");
+}
+
+#[test]
+fn scb_v32_color_byte_exact_roundtrip() {
+    let bytes = build_scb(Some(1));
+    let mesh = StaticMesh::from_bytes(&bytes).expect("parse scb color");
+    let out = mesh.to_bytes().expect("write scb color");
+    assert_eq!(out, bytes, "byte-exact .scb round-trip (3.2 color)");
 }
 
 #[test]

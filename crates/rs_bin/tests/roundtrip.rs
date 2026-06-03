@@ -79,7 +79,10 @@ fn parsed_structure_matches_expectations() {
     let e0 = &bin.entries[0];
     assert_eq!(e0.path_hash, 0x0A0A_0A0A);
     assert_eq!(e0.class_hash, 0x1111_1111);
-    assert_eq!(e0.fields.get(&0xAAAA_AAAA), Some(&BinValue::U32(0xDEAD_BEEF)));
+    assert_eq!(
+        e0.fields.get(&0xAAAA_AAAA),
+        Some(&BinValue::U32(0xDEAD_BEEF))
+    );
     match e0.fields.get(&0xBBBB_BBBB) {
         Some(BinValue::List {
             is_list2,
@@ -119,10 +122,12 @@ fn patch_header_round_trips() {
     bytes.extend_from_slice(&3u32.to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes()); // linked count
     bytes.extend_from_slice(&0u32.to_le_bytes()); // entry count
+    bytes.extend_from_slice(&0u32.to_le_bytes()); // patches count (PTCH always has this section)
 
     let bin = Bin::from_bytes(&bytes).expect("parse");
     assert!(bin.is_patch);
     assert_eq!(bin.patch_header, [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert!(bin.patches.is_empty());
     assert_eq!(bin.to_bytes().expect("serialize"), bytes);
 }
 
@@ -146,6 +151,7 @@ fn null_pointer_round_trips() {
             class_hash: 2,
             fields,
         }],
+        patches: Vec::new(),
     };
     let bytes = bin.to_bytes().expect("serialize");
     let reparsed = Bin::from_bytes(&bytes).expect("parse");
@@ -158,7 +164,110 @@ fn text_printer_emits_header_and_fields() {
     let bin = Bin::from_bytes(&sample_prop()).expect("parse");
     let text = rs_bin::to_text(&bin, None);
     assert!(text.starts_with("#PROP_text\n"));
-    assert!(text.contains("version: 3"));
+    assert!(text.contains("version: u32 = 3"));
     assert!(text.contains("0xaaaaaaaa: u32 = 3735928559"));
     assert!(text.contains("list[u16]"));
+}
+
+#[test]
+fn text_round_trip_reconstructs_bin() {
+    let bin = Bin::from_bytes(&sample_prop()).expect("parse");
+    let text = rs_bin::to_text(&bin, None);
+    let reparsed = rs_bin::from_text(&text, None).expect("parse text");
+    assert_eq!(reparsed, bin, "bin -> text -> bin must reconstruct exactly");
+    assert_eq!(
+        reparsed.to_bytes().expect("serialize"),
+        sample_prop(),
+        "text round-trip must re-serialize byte-identically"
+    );
+}
+
+#[test]
+fn text_round_trip_is_idempotent() {
+    let bin = Bin::from_bytes(&sample_prop()).expect("parse");
+    let text1 = rs_bin::to_text(&bin, None);
+    let bin2 = rs_bin::from_text(&text1, None).expect("parse text");
+    let text2 = rs_bin::to_text(&bin2, None);
+    assert_eq!(text1, text2, "text -> bin -> text must be stable");
+}
+
+#[test]
+fn text_parser_accepts_comments_and_barewords() {
+    let text = "\
+#PROP_text
+# a comment line
+version: u32 = 3
+entries: map[hash,embed] = {
+    0x0a0a0a0a = SomeClass {  # trailing comment
+        someField: u32 = 7
+        flagField: flag = true
+        nested: pointer = null
+    }
+}
+";
+    let bin = rs_bin::from_text(text, None).expect("parse");
+    assert_eq!(bin.version, 3);
+    assert_eq!(bin.entries.len(), 1);
+    let e = &bin.entries[0];
+    assert_eq!(e.path_hash, 0x0a0a_0a0a);
+    assert_eq!(e.class_hash, rs_hash::fnv1a("SomeClass"));
+    assert_eq!(
+        e.fields.get(&rs_hash::fnv1a("someField")),
+        Some(&BinValue::U32(7))
+    );
+    assert_eq!(
+        e.fields.get(&rs_hash::fnv1a("flagField")),
+        Some(&BinValue::Flag(true))
+    );
+    assert_eq!(
+        e.fields.get(&rs_hash::fnv1a("nested")),
+        Some(&BinValue::Pointer {
+            class: 0,
+            fields: IndexMap::new()
+        })
+    );
+}
+
+#[test]
+fn ptch_patches_round_trip_binary_and_text() {
+    // PTCH with one trailing patch record exercising the override section + its text form.
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"PTCH");
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(b"PROP");
+    bytes.extend_from_slice(&3u32.to_le_bytes()); // version
+    bytes.extend_from_slice(&0u32.to_le_bytes()); // linked count
+    bytes.extend_from_slice(&0u32.to_le_bytes()); // entry count
+    // patches: count 1
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&0xCAFE_BABEu32.to_le_bytes()); // patch key
+    // body: type u32, path "a.b", value 42
+    let path = b"a.b";
+    let mut body = Vec::new();
+    body.push(BinType::U32.to_u8());
+    body.extend_from_slice(&(path.len() as u16).to_le_bytes());
+    body.extend_from_slice(path);
+    body.extend_from_slice(&42u32.to_le_bytes());
+    bytes.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&body);
+
+    let bin = Bin::from_bytes(&bytes).expect("parse ptch");
+    assert!(bin.is_patch);
+    assert_eq!(bin.patches.len(), 1);
+    assert_eq!(bin.patches[0].key_hash, 0xCAFE_BABE);
+    assert_eq!(bin.patches[0].path, "a.b");
+    assert_eq!(bin.patches[0].value, BinValue::U32(42));
+    assert_eq!(
+        bin.to_bytes().expect("serialize"),
+        bytes,
+        "ptch binary round-trip"
+    );
+
+    let text = rs_bin::to_text(&bin, None);
+    assert!(text.starts_with("#PTCH_text\n"));
+    assert!(text.contains("patches: map[hash,embed] = {"));
+    let reparsed = rs_bin::from_text(&text, None).expect("parse ptch text");
+    assert_eq!(reparsed, bin, "ptch text round-trip");
+    assert_eq!(reparsed.to_bytes().expect("serialize"), bytes);
 }

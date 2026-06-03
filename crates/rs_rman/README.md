@@ -27,6 +27,15 @@ Body (zstd-compressed FlatBuffer):
   each entry: a vtable (self-relative i32) + indexed fields
 ```
 
+The **flags table** lists the locale/platform tags a release ships (`en_US`, `ko_KR`,
+`windows`, `macos`, ...), each with a small numeric id. Every file may carry a `u64`
+flags mask whose set bit `1 << id` selects the matching tag, which is how a single
+manifest serves many locales: tooling filters files down to the locale/platform it wants.
+
+Each chunk lives at a running compressed byte offset inside its bundle (chunks are
+concatenated in bundle order). A file is rebuilt by decompressing its ordered chunks and
+concatenating the results; the uncompressed sizes sum to the file's declared size.
+
 Files are reassembled by concatenating the decompressed contents of their ordered
 chunk ids; chunks live inside bundles. Full file paths are reconstructed by joining a
 file's basename onto its directory's chain of parents up to the root.
@@ -62,9 +71,38 @@ for (path, size) in rman.file_paths() {
 | `Rman::from_path(path)` | mmap a file and parse it |
 | `rman.file_paths() -> Vec<(String, u64)>` | full file paths with extracted sizes |
 
+### Flags (locale / platform)
+
+| Method | Purpose |
+|---|---|
+| `rman.file_flags` | the parsed flags table: `Vec<FileFlag { id, name }>` |
+| `file.flags_mask` | `Option<u64>` bitmask referencing flag ids via `1 << id` |
+| `rman.file_flag_names(&file) -> Vec<&str>` | the tags active on one file |
+| `rman.files_with_flag("en_US") -> Vec<&FileEntry>` | filter files by a locale/platform tag |
+
+### Chunk byte-ranges (the gateway to extraction)
+
+| Method | Purpose |
+|---|---|
+| `rman.file_chunks(&file) -> Vec<ChunkRange>` | ordered chunks rebuilding the file |
+| `rman.chunk_index() -> HashMap<u64, ChunkRange>` | build the chunk lookup once |
+| `Rman::file_chunks_for(&file, &index)` | resolve a file against a prebuilt index |
+
+```rust
+for c in rman.file_chunks(&file) {
+    // download bytes [offset_in_bundle .. offset_in_bundle + compressed_size]
+    // from bundle `c.bundle_id`, decompress to `c.uncompressed_size` bytes.
+}
+```
+
+`ChunkRange` carries `bundle_id`, `chunk_id`, `offset_in_bundle`, `compressed_size`,
+`uncompressed_size`. Chunks are returned in file order; their `uncompressed_size`s sum to
+`file.size`. For bulk work build `chunk_index()` once and reuse it via `file_chunks_for`.
+
 Public fields expose the parsed structure directly: `version`, `flags`, `manifest_id`,
 `bundles` (each with `chunks`), `files` (`name`, `size`, `directory_id`, `chunk_ids`,
-`link`, `permissions`), and `directories` (`id`, `parent_id`, `name`).
+`link`, `permissions`, `flags_mask`), `directories` (`id`, `parent_id`, `name`), and
+`file_flags`.
 
 ## Writing
 

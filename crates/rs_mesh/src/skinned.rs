@@ -113,6 +113,10 @@ pub struct SkinnedMesh {
     pub ranges: Vec<SkinnedMeshRange>,
     pub indices: Vec<u16>,
     pub vertices: Vec<SkinnedMeshVertex>,
+    /// Opaque bytes that follow the vertex buffer. Real major-4 files written by the game append a
+    /// 12-byte zero "end tab" here; keeping the raw bytes lets `from_reader` -> `to_writer` stay
+    /// byte-exact regardless of the (unspecified) meaning of that tail.
+    pub trailing: Vec<u8>,
 }
 
 impl SkinnedMesh {
