@@ -47,7 +47,7 @@ impl Wad {
         let chunk_count = reader.read_u32()? as usize;
         let mut chunks = Vec::with_capacity(chunk_count);
         for _ in 0..chunk_count {
-            chunks.push(read_chunk(reader, minor)?);
+            chunks.push(read_chunk(reader)?);
         }
 
         let data = read_to_end(reader)?;
@@ -68,7 +68,7 @@ impl Wad {
         writer.write_bytes(&self.header_trailer)?;
         writer.write_u32(self.chunks.len() as u32)?;
         for chunk in &self.chunks {
-            write_chunk(writer, chunk, self.version.1)?;
+            write_chunk(writer, chunk)?;
         }
         writer.write_bytes(&self.data)?;
         Ok(())
@@ -99,7 +99,7 @@ impl Wad {
     }
 }
 
-fn read_chunk<R: Read>(reader: &mut R, minor: u8) -> Result<WadChunk> {
+fn read_chunk<R: Read>(reader: &mut R) -> Result<WadChunk> {
     let path_hash = reader.read_u64()?;
     let data_offset = reader.read_u32()?;
     let compressed_size = reader.read_u32()?;
@@ -110,13 +110,8 @@ fn read_chunk<R: Read>(reader: &mut R, minor: u8) -> Result<WadChunk> {
     let compression = WadCompression::from_u8(type_subchunk & 0x0F)
         .ok_or(Error::UnsupportedCompression(type_subchunk & 0x0F))?;
 
-    let (is_duplicated, subchunk_start) = if minor >= 4 {
-        (false, read_subchunk_start_24(reader)?)
-    } else {
-        let dup = reader.read_u8()? != 0;
-        let start = reader.read_u16()? as u32;
-        (dup, start)
-    };
+    let is_duplicated = reader.read_u8()? != 0;
+    let subchunk_start = reader.read_u16()? as u32;
 
     let checksum = reader.read_u64()?;
 
@@ -133,7 +128,7 @@ fn read_chunk<R: Read>(reader: &mut R, minor: u8) -> Result<WadChunk> {
     })
 }
 
-fn write_chunk<W: Write>(writer: &mut W, chunk: &WadChunk, minor: u8) -> Result<()> {
+fn write_chunk<W: Write>(writer: &mut W, chunk: &WadChunk) -> Result<()> {
     writer.write_u64(chunk.path_hash)?;
     writer.write_u32(chunk.data_offset)?;
     writer.write_u32(chunk.compressed_size)?;
@@ -142,28 +137,10 @@ fn write_chunk<W: Write>(writer: &mut W, chunk: &WadChunk, minor: u8) -> Result<
     let type_subchunk = (chunk.subchunk_count << 4) | (chunk.compression as u8 & 0x0F);
     writer.write_u8(type_subchunk)?;
 
-    if minor >= 4 {
-        write_subchunk_start_24(writer, chunk.subchunk_start)?;
-    } else {
-        writer.write_u8(chunk.is_duplicated as u8)?;
-        writer.write_u16(chunk.subchunk_start as u16)?;
-    }
+    writer.write_u8(chunk.is_duplicated as u8)?;
+    writer.write_u16(chunk.subchunk_start as u16)?;
 
     writer.write_u64(chunk.checksum)?;
-    Ok(())
-}
-
-fn read_subchunk_start_24<R: Read>(reader: &mut R) -> Result<u32> {
-    let hi = reader.read_u8()? as u32;
-    let lo = reader.read_u8()? as u32;
-    let mid = reader.read_u8()? as u32;
-    Ok((hi << 16) | (mid << 8) | lo)
-}
-
-fn write_subchunk_start_24<W: Write>(writer: &mut W, start: u32) -> Result<()> {
-    writer.write_u8(((start >> 16) & 0xFF) as u8)?;
-    writer.write_u8((start & 0xFF) as u8)?;
-    writer.write_u8(((start >> 8) & 0xFF) as u8)?;
     Ok(())
 }
 

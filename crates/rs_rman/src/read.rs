@@ -18,7 +18,7 @@ impl Parse for Rman {
         }
         let major = reader.read_u8()?;
         let minor = reader.read_u8()?;
-        if (major, minor) != (2, 0) {
+        if major != 2 {
             return Err(Error::UnsupportedVersion(major, minor));
         }
 

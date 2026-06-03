@@ -14,6 +14,16 @@ impl Serialize for Rst {
 
         let mut blob: Vec<u8> = Vec::new();
         let mut offsets: IndexMap<&str, u64> = IndexMap::with_capacity(self.entries.len());
+
+        for text in &self.blob_order {
+            offsets.entry(text.as_str()).or_insert_with(|| {
+                let off = blob.len() as u64;
+                blob.extend_from_slice(text.as_bytes());
+                blob.push(0);
+                off
+            });
+        }
+
         let mut table = Vec::with_capacity(self.entries.len());
         for (hash, text) in &self.entries {
             let offset = *offsets.entry(text.as_str()).or_insert_with(|| {

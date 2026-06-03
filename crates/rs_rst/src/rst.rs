@@ -12,13 +12,34 @@ pub const DEFAULT_VERSION: u8 = 5;
 /// truncated to [`hash_bits`](Rst::hash_bits). `font_config` holds the optional v2 configuration
 /// string and `mode` the single byte present before v5, both retained so unsupported-feature files
 /// still round-trip byte-for-byte.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The string blob in a real file lays its distinct strings out in an order that is independent of
+/// the entry table, so reproducing it byte-for-byte requires remembering that layout. `blob_order`
+/// captures the exact sequence of distinct strings as they appear in the source blob; the writer
+/// emits those first, then appends any string not present in it. Tables built in memory leave it
+/// empty, in which case the writer falls back to first-seen entry order.
+#[derive(Debug, Clone)]
 pub struct Rst {
     pub version: u8,
     pub font_config: Option<String>,
     pub mode: u8,
     pub entries: Vec<(u64, String)>,
+    pub(crate) blob_order: Vec<String>,
 }
+
+/// Two tables are equal when their logical content matches. `blob_order` is an internal hint that
+/// only reproduces the source blob layout byte-for-byte and never changes which strings a key
+/// resolves to, so it is deliberately excluded from equality.
+impl PartialEq for Rst {
+    fn eq(&self, other: &Self) -> bool {
+        self.version == other.version
+            && self.font_config == other.font_config
+            && self.mode == other.mode
+            && self.entries == other.entries
+    }
+}
+
+impl Eq for Rst {}
 
 impl Rst {
     pub fn new() -> Self {
@@ -27,6 +48,7 @@ impl Rst {
             font_config: None,
             mode: 0,
             entries: Vec::new(),
+            blob_order: Vec::new(),
         }
     }
 
@@ -39,11 +61,11 @@ impl Rst {
     }
 
     /// Number of low bits the key hash is truncated to for `version`, or `None` if the version is
-    /// not supported. v2/v3 use 40 bits, v4/v5 use 39.
+    /// not supported. v2/v3 use 40 bits, v4/v5 use 38.
     pub fn hash_bits_for(version: u8) -> Option<u32> {
         match version {
             2 | 3 => Some(40),
-            4 | 5 => Some(39),
+            4 | 5 => Some(38),
             _ => None,
         }
     }

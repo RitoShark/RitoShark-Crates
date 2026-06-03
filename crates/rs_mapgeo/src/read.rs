@@ -169,7 +169,7 @@ fn read_model<R: Read>(reader: &mut R, id: usize) -> Result<MapModel> {
     let transform = read_mat4(reader)?;
 
     let quality = reader.read_u8()?;
-    let is_bush = reader.read_bool()?;
+    let layer_transition = reader.read_u8()?;
     let render_flags = reader.read_u16()?;
 
     let baked_light = read_channel(reader)?;
@@ -203,7 +203,7 @@ fn read_model<R: Read>(reader: &mut R, id: usize) -> Result<MapModel> {
         bounds,
         transform,
         quality,
-        is_bush,
+        layer_transition,
         render_flags,
         baked_light,
         stationary_light,

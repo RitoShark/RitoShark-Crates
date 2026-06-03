@@ -199,7 +199,7 @@ pub struct MapModel {
     pub bounds: Aabb,
     pub transform: Mat4,
     pub quality: u8,
-    pub is_bush: bool,
+    pub layer_transition: u8,
     pub render_flags: u16,
     pub baked_light: AssetChannel,
     pub stationary_light: AssetChannel,

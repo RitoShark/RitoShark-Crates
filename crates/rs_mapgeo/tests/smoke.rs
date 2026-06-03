@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use rs_io::{Parse, Serialize};
+use rs_io::Parse;
 use rs_mapgeo::{Error, MapGeometry};
 
 /// Builds the smallest valid OEGM v17 file: one vertex declaration, one vertex buffer, one
@@ -20,7 +20,11 @@ fn minimal_v17() -> Vec<u8> {
     b.extend_from_slice(&1u32.to_le_bytes()); // element count
     b.extend_from_slice(&0u32.to_le_bytes()); // name = Position
     b.extend_from_slice(&2u32.to_le_bytes()); // format = XYZ_Float32
-    b.extend_from_slice(&vec![0u8; 14 * 8]); // padding for the 14 unused elements
+    // padding: the 14 unused element slots default to (Position=0, XYZW_Float32=3)
+    for _ in 0..14 {
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&3u32.to_le_bytes());
+    }
 
     // vertex buffers: 1 buffer, layer 0, 12 bytes (one XYZ vertex)
     b.extend_from_slice(&1u32.to_le_bytes());
@@ -62,7 +66,7 @@ fn minimal_v17() -> Vec<u8> {
         b.extend_from_slice(&v.to_le_bytes());
     }
     b.push(31u8); // quality
-    b.push(0u8); // is_bush
+    b.push(0u8); // layer transition behavior
     b.extend_from_slice(&0u16.to_le_bytes()); // render flags
     // baked light channel: empty path + scale + offset
     b.extend_from_slice(&0u32.to_le_bytes());

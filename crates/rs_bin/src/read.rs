@@ -137,7 +137,7 @@ fn read_list<R: Read + Seek>(reader: &mut R, is_list2: bool) -> Result<BinValue>
 fn read_map<R: Read + Seek>(reader: &mut R) -> Result<BinValue> {
     let key = BinType::from_u8(reader.read_u8()?)?;
     let value = BinType::from_u8(reader.read_u8()?)?;
-    if key.is_container() {
+    if !key.is_primitive() {
         return Err(Error::NestedContainer(key.to_u8()));
     }
     if value.is_container() {

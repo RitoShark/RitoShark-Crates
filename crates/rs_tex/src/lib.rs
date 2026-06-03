@@ -8,8 +8,8 @@ into RGBA, while uncompressed BGRA8 is reordered directly, both yielding an `Rgb
 parsing reads the header, resolves the pixel format, and decodes the main image.
 */
 
-mod decode;
 mod dds;
+mod decode;
 mod error;
 mod read;
 mod texture;

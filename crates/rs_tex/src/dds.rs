@@ -118,6 +118,7 @@ impl Texture {
         let format = match classify(&dds)? {
             DdsKind::Bc1 => TexFormat::Bc1,
             DdsKind::Bc3 => TexFormat::Bc3,
+            DdsKind::Bc7 => TexFormat::Bc7,
             DdsKind::Bgra8 => TexFormat::Bgra8,
             other => {
                 return Err(Error::UnsupportedFormat(format!(

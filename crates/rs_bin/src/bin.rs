@@ -73,9 +73,15 @@ impl BinType {
         self as u8
     }
 
-    /// True for the container tags (high bit set): list, map, struct, option.
+    /// True only for the nesting container tags that may not appear as a container element type:
+    /// list, list2, map, and option. Pointer, embed, link, and flag are complex but legal elements.
     pub fn is_container(self) -> bool {
-        self.to_u8() & 0x80 != 0
+        matches!(self, Self::List | Self::List2 | Self::Map | Self::Option)
+    }
+
+    /// True for the primitive tags (high bit clear, `0..=18`); these are the only legal map keys.
+    pub fn is_primitive(self) -> bool {
+        self.to_u8() & 0x80 == 0
     }
 }
 

@@ -6,7 +6,7 @@ fn write_padded(buf: &mut Vec<u8>, s: &str, n: usize) {
     let bytes = s.as_bytes();
     let len = bytes.len().min(n);
     buf.extend_from_slice(&bytes[..len]);
-    buf.extend(std::iter::repeat(0u8).take(n - len));
+    buf.extend(std::iter::repeat_n(0u8, n - len));
 }
 
 fn basic_vertex(buf: &mut Vec<u8>, pos: [f32; 3], n: [f32; 3], uv: [f32; 2]) {

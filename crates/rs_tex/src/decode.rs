@@ -43,6 +43,8 @@ pub(crate) fn decode_block_format(
     let res: core::result::Result<(), &'static str> = match format {
         TexFormat::Bc1 | TexFormat::Bc1Alt => texture2ddecoder::decode_bc1(data, w, h, &mut out),
         TexFormat::Bc3 => texture2ddecoder::decode_bc3(data, w, h, &mut out),
+        TexFormat::Bc7 => texture2ddecoder::decode_bc7(data, w, h, &mut out),
+        TexFormat::Bc5 => texture2ddecoder::decode_bc5(data, w, h, &mut out),
         TexFormat::Etc1 => texture2ddecoder::decode_etc1(data, w, h, &mut out),
         TexFormat::Etc2 => texture2ddecoder::decode_etc2_rgb(data, w, h, &mut out),
         TexFormat::Etc2Eac => texture2ddecoder::decode_etc2_rgba8(data, w, h, &mut out),

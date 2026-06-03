@@ -10,7 +10,12 @@ pub const TEX_MAGIC: u32 = 0x0058_4554;
 fn mips_use_block_layout(format: TexFormat) -> bool {
     matches!(
         format,
-        TexFormat::Bc1 | TexFormat::Bc1Alt | TexFormat::Bc3 | TexFormat::Bgra8
+        TexFormat::Bc1
+            | TexFormat::Bc1Alt
+            | TexFormat::Bc3
+            | TexFormat::Bc7
+            | TexFormat::Bc5
+            | TexFormat::Bgra8
     )
 }
 

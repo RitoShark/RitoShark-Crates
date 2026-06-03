@@ -5,7 +5,7 @@ Block-compressed payloads (ETC/BC) decode to a BGRA value per pixel, reordered i
 */
 
 /// The League `.tex` extended format byte. Values match the on-disk encoding: ETC variants
-/// `1..=3`, the DXT/BC block formats `10..=12`, and uncompressed BGRA8 at `20`.
+/// `1..=3`, the DXT/BC block formats `10..=14`, and uncompressed BGRA8 at `20`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TexFormat {
@@ -15,6 +15,8 @@ pub enum TexFormat {
     Bc1 = 10,
     Bc1Alt = 11,
     Bc3 = 12,
+    Bc7 = 13,
+    Bc5 = 14,
     Bgra8 = 20,
 }
 
@@ -27,6 +29,8 @@ impl TexFormat {
             10 => TexFormat::Bc1,
             11 => TexFormat::Bc1Alt,
             12 => TexFormat::Bc3,
+            13 => TexFormat::Bc7,
+            14 => TexFormat::Bc5,
             20 => TexFormat::Bgra8,
             _ => return None,
         })
@@ -48,7 +52,11 @@ impl TexFormat {
     pub fn bytes_per_block(self) -> usize {
         match self {
             TexFormat::Etc1 | TexFormat::Bc1 | TexFormat::Bc1Alt => 8,
-            TexFormat::Etc2 | TexFormat::Etc2Eac | TexFormat::Bc3 => 16,
+            TexFormat::Etc2
+            | TexFormat::Etc2Eac
+            | TexFormat::Bc3
+            | TexFormat::Bc7
+            | TexFormat::Bc5 => 16,
             TexFormat::Bgra8 => 4,
         }
     }

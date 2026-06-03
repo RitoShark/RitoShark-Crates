@@ -135,7 +135,9 @@ impl Parse for Skeleton {
             .seek(SeekFrom::Start(4))
             .map_err(rs_io::Error::from)?;
         let magic = reader.read_u32()?;
-        reader.seek(SeekFrom::Start(0)).map_err(rs_io::Error::from)?;
+        reader
+            .seek(SeekFrom::Start(0))
+            .map_err(rs_io::Error::from)?;
         if magic == Self::MAGIC {
             Self::read(reader)
         } else {

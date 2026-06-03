@@ -12,7 +12,9 @@ use rs_io::WriterExt;
 use rs_math::{Vec2, Vec3};
 
 use crate::error::{Error, Result};
-use crate::mapgeo::{AssetChannel, MapGeometry, MapModel, VertexDescription};
+use crate::mapgeo::{
+    AssetChannel, ElementFormat, ElementName, MapGeometry, MapModel, VertexDescription,
+};
 
 const TARGET_VERSION: u32 = 17;
 const MAX_VERTEX_ELEMENTS: usize = 15;
@@ -75,8 +77,13 @@ fn write_vertex_description<W: Write>(writer: &mut W, desc: &VertexDescription) 
         writer.write_u32(element.format as u32)?;
     }
 
-    let padding = (MAX_VERTEX_ELEMENTS - element_count) * 8;
-    writer.write_bytes(&vec![0u8; padding])?;
+    /* The on-disk declaration always reserves 15 element slots; the game fills the unused tail
+    with a default element (Position, XYZW_Float32 = 0, 3) rather than zero bytes, so the writer
+    must reproduce that pattern to round-trip byte-for-byte. */
+    for _ in element_count..MAX_VERTEX_ELEMENTS {
+        writer.write_u32(ElementName::Position as u32)?;
+        writer.write_u32(ElementFormat::XyzwFloat32 as u32)?;
+    }
     Ok(())
 }
 
@@ -111,7 +118,7 @@ fn write_model<W: Write>(writer: &mut W, model: &MapModel) -> Result<()> {
     writer.write_mtx44(&model.transform.to_cols_array())?;
 
     writer.write_u8(model.quality)?;
-    writer.write_bool(model.is_bush)?;
+    writer.write_u8(model.layer_transition)?;
     writer.write_u16(model.render_flags)?;
 
     write_channel(writer, &model.baked_light)?;

@@ -50,7 +50,12 @@ impl Palettes {
 impl Animation {
     fn write_to(&self, buf: &mut Cursor<Vec<u8>>) -> Result<()> {
         let track_count = self.tracks.len();
-        let frame_count = self.tracks.iter().map(|t| t.frames.len()).max().unwrap_or(0);
+        let frame_count = self
+            .tracks
+            .iter()
+            .map(|t| t.frames.len())
+            .max()
+            .unwrap_or(0);
 
         let frame_duration = if self.fps != 0.0 { 1.0 / self.fps } else { 0.0 };
 

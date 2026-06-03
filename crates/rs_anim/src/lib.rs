@@ -5,8 +5,9 @@ handles the modern `0x22FD4FC3` format: a flat joint list with local and inverse
 the skin-influence list, and skeleton/asset names, round-tripping byte-for-byte. The animation side
 reads the uncompressed `r3d2anmd` container in versions 3, 4, and 5, expanding the shared
 vector/quaternion palettes into explicit per-joint keyframes, and writes version 4 so frame values
-survive a round-trip without quantization loss. Legacy skeletons and the compressed `r3d2canm`
-animation container are reported as errors rather than parsed.
+survive a round-trip without quantization loss. It also decodes the compressed `r3d2canm`
+container (versions 1-3): the sparse, per-component quantized keyframe stream is dequantized and
+resampled into the same explicit per-joint keyframes. Legacy skeletons are reported as errors.
 */
 
 mod animation;

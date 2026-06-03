@@ -41,8 +41,16 @@ impl Parse for Rst {
         reader.read_to_end(&mut blob)?;
 
         let mut entries = Vec::with_capacity(count);
-        for (hash, offset) in raw {
+        for &(hash, offset) in &raw {
             entries.push((hash, read_string_at(&blob, offset)?));
+        }
+
+        let mut distinct_offsets: Vec<usize> = raw.iter().map(|&(_, off)| off).collect();
+        distinct_offsets.sort_unstable();
+        distinct_offsets.dedup();
+        let mut blob_order = Vec::with_capacity(distinct_offsets.len());
+        for offset in distinct_offsets {
+            blob_order.push(read_string_at(&blob, offset)?);
         }
 
         Ok(Rst {
@@ -50,18 +58,17 @@ impl Parse for Rst {
             font_config,
             mode,
             entries,
+            blob_order,
         })
     }
 }
 
 fn read_string_at(blob: &[u8], offset: usize) -> Result<String> {
-    let start = blob.get(offset..).ok_or_else(|| {
-        Error::Io(rs_io::Error::UnexpectedEof {
-            offset,
-            needed: 1,
-            available: blob.len(),
-        })
-    })?;
+    let start = blob.get(offset..).ok_or(Error::Io(rs_io::Error::UnexpectedEof {
+        offset,
+        needed: 1,
+        available: blob.len(),
+    }))?;
     let end = start.iter().position(|&b| b == 0).unwrap_or(start.len());
     Ok(String::from_utf8(start[..end].to_vec()).map_err(rs_io::Error::from)?)
 }

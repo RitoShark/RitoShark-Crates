@@ -39,8 +39,8 @@ impl AnimTrack {
 /// A League animation (`.anm`).
 ///
 /// Holds one [`AnimTrack`] per animated joint. Reading supports the uncompressed `r3d2anmd`
-/// container (versions 3, 4, 5); writing emits version 4 (full quaternions) so values round-trip
-/// without quantization loss. The compressed `r3d2canm` container is not yet decoded.
+/// container (versions 3, 4, 5) and the compressed `r3d2canm` container (versions 1-3); writing
+/// emits uncompressed version 4 (full quaternions) so values round-trip without quantization loss.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Animation {
     pub fps: f32,

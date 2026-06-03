@@ -1,4 +1,4 @@
-use rs_math::Quat;
+use rs_math::{Quat, Vec3};
 
 const SQRT_2: f32 = std::f32::consts::SQRT_2;
 const ONE_DIV_SQRT2: f32 = SQRT_2 / 2.0;
@@ -25,6 +25,19 @@ pub fn decompress_quat(bytes: &[u8; 6]) -> Quat {
         2 => Quat::from_xyzw(a, b, d, c),
         _ => Quat::from_xyzw(a, b, c, d),
     }
+}
+
+/** Expands a 48-bit (6 byte) quantized vector: three `u16` channels mapped linearly from the
+per-component `min`/`max` bounds carried in the compressed animation header. */
+pub fn decompress_vec3(min: Vec3, max: Vec3, bytes: &[u8; 6]) -> Vec3 {
+    let x = (bytes[0] as u32 | ((bytes[1] as u32) << 8)) as f32;
+    let y = (bytes[2] as u32 | ((bytes[3] as u32) << 8)) as f32;
+    let z = (bytes[4] as u32 | ((bytes[5] as u32) << 8)) as f32;
+    Vec3::new(
+        (max.x - min.x) / 65535.0 * x + min.x,
+        (max.y - min.y) / 65535.0 * y + min.y,
+        (max.z - min.z) / 65535.0 * z + min.z,
+    )
 }
 
 /** Packs a quaternion into League 48-bit (6 byte) quantized form: the largest-magnitude component

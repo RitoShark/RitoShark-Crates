@@ -6,9 +6,12 @@ use crate::error::{Error, Result};
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
 
 /** Decompresses one chunk's raw bytes according to its [`WadCompression`]. `None` copies the
-input; `Gzip` inflates with flate2; `Zstd` decodes a single frame; `ZstdMulti` copies any raw
-prefix that precedes the first zstd frame and decodes the remainder. `uncompressed_size` sizes the
-output buffer up front. `Satellite` is unsupported and returns [`Error::UnsupportedCompression`]. */
+input; `Gzip` inflates with flate2; `Zstd` decodes a single frame. `ZstdMulti` holds one zstd
+frame per subchunk concatenated end to end (optionally after a stored prefix); the decoder copies
+any bytes before the first frame verbatim and then streams the concatenated frames in order, which
+the zstd reader decodes one after another until the input is exhausted. `uncompressed_size` sizes
+the output buffer up front. `Satellite` is unsupported and returns
+[`Error::UnsupportedCompression`]. */
 pub fn decompress(
     raw: &[u8],
     compression: WadCompression,

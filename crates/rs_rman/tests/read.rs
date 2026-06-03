@@ -30,11 +30,19 @@ fn rejects_bad_magic() {
 }
 
 #[test]
-fn rejects_unsupported_version() {
+fn rejects_unsupported_major_version() {
     let mut bytes = wrap(&[0u8; 4]);
-    bytes[5] = 1; // minor -> 2.1
+    bytes[4] = 1; // major -> 1.0
     let err = Rman::from_bytes(&bytes).unwrap_err();
-    assert!(matches!(err, Error::UnsupportedVersion(2, 1)));
+    assert!(matches!(err, Error::UnsupportedVersion(1, 0)));
+}
+
+#[test]
+fn accepts_minor_version_two_one() {
+    let mut bytes = wrap(&Body::empty_tables());
+    bytes[5] = 1; // minor -> 2.1, the version real game manifests use
+    let rman = Rman::from_bytes(&bytes).unwrap();
+    assert_eq!(rman.version, (2, 1));
 }
 
 #[test]
