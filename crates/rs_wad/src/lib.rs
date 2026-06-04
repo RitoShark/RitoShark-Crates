@@ -4,8 +4,9 @@ the chunk table of contents and captures the ECDSA-signature/checksum header spa
 data section verbatim, so writing reproduces the archive byte-for-byte. Chunk payloads are read by
 absolute offset from that captured data section and decompressed on demand: stored, gzip
 (flate2), zstd, and the zstd-multi split-frame encoding are supported; the satellite encoding is
-not. Versions 2 and 3 parse; every v3 minor shares one 32-byte table-entry layout (the
-duplicate flag and 16-bit first-subchunk index), so v3.4 reads with the same code path as v3.0.
+not. Versions 2 and 3 parse. The 32-byte table entry has two layouts that differ only in their
+3-byte subchunk region: v3.0–3.3 store an `is_duplicated` flag (u8) plus a 16-bit first-subchunk
+index, while v3.4+ drops the flag (always false) and widens the index to 24 bits (packed hi/lo/mi).
 
 It also *builds* archives: [`WadBuilder`] streams a v3.4 WAD from loose files, zstd-compressing and
 deduplicating chunks and laying out a sorted table of contents. [`compress`] is the symmetric
