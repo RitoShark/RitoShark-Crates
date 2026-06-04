@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rs_anim::{Animation, Error};
+use rs_anim::Animation;
 use rs_io::{Parse, Serialize};
 
 fn sample_dir() -> Option<PathBuf> {
@@ -8,18 +8,83 @@ fn sample_dir() -> Option<PathBuf> {
     dir.is_dir().then_some(dir)
 }
 
-const ANM_FILES: &[&str] = &[
+const UNCOMPRESSED_ANM_FILES: &[&str] = &[
     "aatrox__skin07_ult_attack1.anm",
     "aatrox_sheath_run_haste.anm",
     "dance_windup.anm",
 ];
 
-fn magic_version(path: &Path) -> ([u8; 8], u32) {
+const COMPRESSED_ANM_FILES: &[&str] = &[
+    "compressed_507c1f34b053b389.anm",
+    "compressed_e890878834c561be.anm",
+    "compressed_e63f4f2e8c074937.anm",
+];
+
+fn magic(path: &Path) -> [u8; 8] {
     let bytes = std::fs::read(path).expect("read sample bytes");
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[..8]);
-    let version = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
-    (magic, version)
+    magic
+}
+
+/// Parses, round-trips byte-for-byte, and sanity-checks every decoded pose: rotations must be
+/// unit-length and every translation/scale channel finite. Applies to both containers.
+fn check_anm(name: &str, path: &Path, expected_magic: &[u8; 8]) {
+    assert_eq!(
+        &magic(path),
+        expected_magic,
+        "{name}: unexpected container magic"
+    );
+
+    let anim = Animation::from_path(path).expect("parse anm");
+    assert!(anim.is_byte_exact(), "{name}: source bytes not preserved");
+    assert!(
+        !anim.tracks().is_empty(),
+        "{name}: expected at least one track"
+    );
+    for track in anim.tracks() {
+        assert!(
+            !track.frames.is_empty(),
+            "{name}: track {:#010x} has no frames",
+            track.joint_hash
+        );
+        for frame in &track.frames {
+            let q = frame.rotation;
+            let len = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt();
+            assert!(
+                len.is_finite() && (len - 1.0).abs() < 1e-3,
+                "{name}: non-unit rotation {q:?} in track {:#010x}",
+                track.joint_hash
+            );
+            for c in [
+                frame.translation.x,
+                frame.translation.y,
+                frame.translation.z,
+                frame.scale.x,
+                frame.scale.y,
+                frame.scale.z,
+            ] {
+                assert!(c.is_finite(), "{name}: non-finite vector channel {c}");
+            }
+        }
+    }
+
+    let original = std::fs::read(path).expect("read sample bytes");
+    let written = anim.to_bytes().expect("write parsed anm");
+    assert!(written == original, "{name}: round-trip is not byte-exact");
+
+    let reparsed = Animation::from_bytes(&written).expect("re-read written anm");
+    assert_eq!(
+        anim.tracks().len(),
+        reparsed.tracks().len(),
+        "{name}: track count changed across round-trip"
+    );
+
+    eprintln!(
+        "{name}: parsed {} tracks, fps {:.3}",
+        anim.tracks().len(),
+        anim.fps
+    );
 }
 
 #[test]
@@ -29,97 +94,21 @@ fn anm_real_files_parse() {
         return;
     };
 
-    for name in ANM_FILES {
+    for name in UNCOMPRESSED_ANM_FILES {
         let path = dir.join(name);
         if !path.is_file() {
             eprintln!("missing sample {name}; skipping");
             continue;
         }
+        check_anm(name, &path, b"r3d2anmd");
+    }
 
-        let (magic, version) = magic_version(&path);
-        eprintln!(
-            "{name}: magic={:?} version={version}",
-            std::str::from_utf8(&magic)
-        );
-
-        match Animation::from_path(&path) {
-            Ok(anim) => {
-                assert_eq!(
-                    &magic, b"r3d2anmd",
-                    "{name}: only uncompressed anm should parse successfully"
-                );
-                assert!(
-                    !anim.tracks().is_empty(),
-                    "{name}: expected at least one track"
-                );
-                assert!(
-                    anim.frame_count() > 0,
-                    "{name}: expected at least one frame"
-                );
-                for track in anim.tracks() {
-                    assert!(
-                        !track.frames.is_empty(),
-                        "{name}: track {:#010x} has no frames",
-                        track.joint_hash
-                    );
-                }
-                eprintln!(
-                    "{name}: parsed {} tracks x {} frames",
-                    anim.tracks().len(),
-                    anim.frame_count()
-                );
-
-                // Byte-exact round-trip: every accepted container preserves its source bytes, so
-                // writing an unedited animation must reproduce the original file bit-for-bit.
-                let original_bytes = std::fs::read(&path).expect("read sample bytes");
-                let written = anim.to_bytes().expect("write parsed anm");
-                assert!(
-                    anim.is_byte_exact(),
-                    "{name}: parsed animation should preserve source bytes"
-                );
-                assert_eq!(
-                    written.len(),
-                    original_bytes.len(),
-                    "{name}: written length differs"
-                );
-                assert!(
-                    written == original_bytes,
-                    "{name}: round-trip is not byte-exact"
-                );
-                let _ = version;
-                let reparsed = Animation::from_bytes(&written).expect("re-read written anm");
-                assert_eq!(
-                    anim.tracks().len(),
-                    reparsed.tracks().len(),
-                    "{name}: track count changed across round-trip"
-                );
-                for original in anim.tracks() {
-                    let got = reparsed
-                        .tracks()
-                        .iter()
-                        .find(|t| t.joint_hash == original.joint_hash)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "{name}: track {:#010x} missing after round-trip",
-                                original.joint_hash
-                            )
-                        });
-                    assert_eq!(
-                        original.frames.len(),
-                        got.frames.len(),
-                        "{name}: frame count changed for track {:#010x}",
-                        original.joint_hash
-                    );
-                }
-            }
-            Err(Error::Unsupported(msg)) => {
-                assert_eq!(
-                    &magic, b"r3d2canm",
-                    "{name}: only compressed anm is expected to be Unsupported (got {msg})"
-                );
-                eprintln!("{name}: compressed (r3d2canm) — Unsupported as expected");
-            }
-            Err(e) => panic!("{name}: unexpected error: {e}"),
+    for name in COMPRESSED_ANM_FILES {
+        let path = dir.join(name);
+        if !path.is_file() {
+            eprintln!("missing sample {name}; skipping");
+            continue;
         }
+        check_anm(name, &path, b"r3d2canm");
     }
 }

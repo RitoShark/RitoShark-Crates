@@ -14,6 +14,25 @@ fn bgra_u32_to_rgba_image(width: u32, height: u32, pixels: &[u32]) -> Result<Rgb
         .ok_or_else(|| Error::Decode("decoded buffer does not match dimensions".into()))
 }
 
+/** Convert a `texture2ddecoder` BC5 result into an RGBA8 normal-map image. BC5 stores only two
+channels (the X/Y of a tangent-space normal); the decoder leaves blue and alpha empty. We carry the
+two stored channels into R/G, reconstruct the third from the unit-length constraint
+`z = sqrt(1 - x² - y²)` with the centered `(z + 1) * 127.5` display mapping every normal-map tool
+uses, and force alpha opaque so the result is not fully transparent. */
+fn bc5_u32_to_rgba_image(width: u32, height: u32, pixels: &[u32]) -> Result<RgbaImage> {
+    let mut rgba = Vec::with_capacity(pixels.len() * 4);
+    for &px in pixels {
+        let [_, g, r, _] = px.to_le_bytes();
+        let xf = (r as f32 - 127.5) / 127.5;
+        let yf = (g as f32 - 127.5) / 127.5;
+        let zf = (1.0 - xf * xf - yf * yf).max(0.0).sqrt();
+        let b = ((zf + 1.0) * 127.5).clamp(0.0, 255.0) as u8;
+        rgba.extend_from_slice(&[r, g, b, 255]);
+    }
+    RgbaImage::from_raw(width, height, rgba)
+        .ok_or_else(|| Error::Decode("decoded buffer does not match dimensions".into()))
+}
+
 /// Reorder a tightly packed BGRA8 byte buffer into an RGBA8 image of the given size.
 fn bgra_bytes_to_rgba_image(width: u32, height: u32, data: &[u8]) -> Result<RgbaImage> {
     let expected = (width as usize) * (height as usize) * 4;
@@ -67,7 +86,11 @@ pub(crate) fn decode_block_format(
         TexFormat::Bc1 | TexFormat::Bc1Alt => texture2ddecoder::decode_bc1(data, w, h, &mut out),
         TexFormat::Bc3 => texture2ddecoder::decode_bc3(data, w, h, &mut out),
         TexFormat::Bc7 => texture2ddecoder::decode_bc7(data, w, h, &mut out),
-        TexFormat::Bc5 => texture2ddecoder::decode_bc5(data, w, h, &mut out),
+        TexFormat::Bc5 => {
+            texture2ddecoder::decode_bc5(data, w, h, &mut out)
+                .map_err(|e| Error::Decode(e.to_string()))?;
+            return bc5_u32_to_rgba_image(width, height, &out);
+        }
         TexFormat::Etc1 => texture2ddecoder::decode_etc1(data, w, h, &mut out),
         TexFormat::Etc2 => texture2ddecoder::decode_etc2_rgb(data, w, h, &mut out),
         TexFormat::Etc2Eac => texture2ddecoder::decode_etc2_rgba8(data, w, h, &mut out),
@@ -86,5 +109,26 @@ impl Texture {
             .largest_mip()
             .ok_or_else(|| Error::Decode("texture has no mip data".into()))?;
         decode_block_format(self.format, self.width, self.height, data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bc5_reconstructs_blue_and_is_opaque() {
+        // A 4x4 BC5 block whose red and green sub-blocks both encode a constant 128 (mid-axis):
+        // each BC4 sub-block is `[endpoint0, endpoint1, 6 index bytes]`; equal endpoints make every
+        // texel resolve to the endpoint value regardless of the indices.
+        let block = [128u8, 128, 0, 0, 0, 0, 0, 0, 128, 128, 0, 0, 0, 0, 0, 0];
+        let img = decode_block_format(TexFormat::Bc5, 4, 4, &block).expect("decode bc5");
+        for px in img.pixels() {
+            let [r, g, b, a] = px.0;
+            assert_eq!(a, 255, "BC5 alpha must be opaque, not transparent");
+            assert!(b >= 250, "BC5 blue must be reconstructed (~255), got {b}");
+            assert!((r as i32 - 128).abs() <= 1, "BC5 red ~128, got {r}");
+            assert!((g as i32 - 128).abs() <= 1, "BC5 green ~128, got {g}");
+        }
     }
 }

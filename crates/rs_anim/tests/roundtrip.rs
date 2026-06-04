@@ -151,26 +151,33 @@ fn compressed_animation_unknown_version_is_unsupported() {
     assert!(matches!(err, rs_anim::Error::UnsupportedVersion(7)));
 }
 
-/// A hand-built minimal `r3d2canm` (version 3): one joint, three sparse keyframes (rotation at
-/// frame 0, scale at frame 1, translation at frame 2). The reader must decode the header,
-/// dequantize each component, and evaluate three explicit output frames per joint.
-const SYNTHETIC_CANM: &[u8] = &[
-    0x72, 0x33, 0x64, 0x32, 0x63, 0x61, 0x6e, 0x6d, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
-    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40,
-    0x00, 0x00, 0x20, 0x41, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x20, 0x41, 0x00, 0x00, 0x00, 0x40,
-    0x00, 0x00, 0x20, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40,
-    0x00, 0x00, 0x00, 0x40, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x74, 0x00, 0x00, 0x00,
-    0xdd, 0xcc, 0xbb, 0xaa, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x20, 0x00, 0x70, 0xff, 0xff,
-    0x00, 0x40, 0xff, 0x7f, 0xff, 0x7f, 0xff, 0x7f, 0xff, 0x7f, 0x00, 0x80, 0xff, 0x7f, 0xff, 0x7f,
-    0xff, 0x7f,
-];
-
 #[test]
 fn compressed_animation_parses() {
-    let anim = Animation::from_bytes(SYNTHETIC_CANM).expect("read synthetic compressed anm");
+    use rs_anim::quantized::compress_quat;
+
+    // A realistic, time-sorted clip: one joint, four keyframes per channel spread evenly across the
+    // timeline. Rotation holds identity; translation and scale hold the midpoint of their [0, 2]
+    // bounds (=> ~1.0 on every channel). Constant curves let the Catmull-Rom evaluator be checked
+    // against an exact expected value at any sampled frame regardless of the hot-window state.
+    let rotation = compress_quat(Quat::from_xyzw(0.0, 0.0, 0.0, 1.0));
+    let midpoint = [0xff, 0x7f, 0xff, 0x7f, 0xff, 0x7f];
+    let times = [0u16, 21845, 43690, 65535];
+    let mut records = Vec::new();
+    for &time in &times {
+        records.push((time, 0x0000, rotation)); // rotation
+        records.push((time, 0x4000, midpoint)); // translation
+        records.push((time, 0x8000, midpoint)); // scale
+    }
+
+    let buf = build_canm(
+        0xAABB_CCDD,
+        1.0,
+        2.0,
+        (Vec3::ZERO, Vec3::splat(2.0)),
+        (Vec3::ZERO, Vec3::splat(2.0)),
+        &records,
+    );
+    let anim = Animation::from_bytes(&buf).expect("read synthetic compressed anm");
 
     assert_eq!(anim.fps, 2.0);
     assert_eq!(anim.tracks().len(), 1, "one joint expected");
@@ -180,26 +187,23 @@ fn compressed_animation_parses() {
     // max_time(1.0) * fps(2.0) = 2 -> 3 output frames (0, 1, 2).
     assert_eq!(track.frames.len(), 3, "three evaluated frames expected");
 
-    // Frame 0 holds the rotation key (identity quaternion).
-    let r = track.frames[0].rotation;
-    assert!(
-        (r.w.abs() - 1.0).abs() < 1e-3,
-        "frame 0 rotation should be ~identity, got {r:?}"
-    );
-
-    // Translation key sits at frame 2 with all channels at midpoint of [0, 2] => ~1.0.
-    let t = track.frames[2].translation;
-    assert!(
-        (t.x - 1.0).abs() < 0.05 && (t.y - 1.0).abs() < 0.05 && (t.z - 1.0).abs() < 0.05,
-        "frame 2 translation should be ~(1,1,1), got {t:?}"
-    );
-
-    // Scale key at frame 1, midpoint of [0, 2] => ~1.0 on every channel.
-    let s = track.frames[1].scale;
-    assert!(
-        (s.x - 1.0).abs() < 0.05 && (s.y - 1.0).abs() < 0.05 && (s.z - 1.0).abs() < 0.05,
-        "frame 1 scale should be ~(1,1,1), got {s:?}"
-    );
+    for (i, frame) in track.frames.iter().enumerate() {
+        let r = frame.rotation;
+        assert!(
+            (r.w.abs() - 1.0).abs() < 1e-3,
+            "frame {i} rotation should be ~identity, got {r:?}"
+        );
+        let t = frame.translation;
+        assert!(
+            (t.x - 1.0).abs() < 0.05 && (t.y - 1.0).abs() < 0.05 && (t.z - 1.0).abs() < 0.05,
+            "frame {i} translation should be ~(1,1,1), got {t:?}"
+        );
+        let s = frame.scale;
+        assert!(
+            (s.x - 1.0).abs() < 0.05 && (s.y - 1.0).abs() < 0.05 && (s.z - 1.0).abs() < 0.05,
+            "frame {i} scale should be ~(1,1,1), got {s:?}"
+        );
+    }
 }
 
 /// Builds a one-joint `r3d2canm` (version 3) from a list of `(compressed_time, transform_type,
@@ -251,7 +255,21 @@ fn build_canm(
         header.extend_from_slice(&bits.to_le_bytes());
         header.extend_from_slice(&value);
     }
-    header.extend_from_slice(&[0u8; 24]); // jump cache (ignored by the reader)
+
+    // One jump cache covering t=0: for each transform type the four-keyframe window seeds from the
+    // first frame of that type (rotation 0..8, translation 8..16, scale 16..24), as u16 frame ids.
+    let first_of = |ty: u16| {
+        records
+            .iter()
+            .position(|&(_, bits, _)| bits >> 14 == ty)
+            .unwrap_or(0) as u16
+    };
+    for ty in 0u16..3 {
+        let idx = first_of(ty);
+        for _ in 0..4 {
+            header.extend_from_slice(&idx.to_le_bytes());
+        }
+    }
     header.extend_from_slice(&joint_hash.to_le_bytes());
     header
 }
@@ -348,8 +366,14 @@ fn uncompressed_v4_round_trips_byte_exact() {
 #[test]
 fn uncompressed_v3_round_trips_byte_exact() {
     let frames = [
-        (Quat::from_xyzw(0.0, 0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 0.0)),
-        (Quat::from_xyzw(0.5, 0.5, 0.5, 0.5), Vec3::new(1.0, 2.0, 3.0)),
+        (
+            Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, 0.0),
+        ),
+        (
+            Quat::from_xyzw(0.5, 0.5, 0.5, 0.5),
+            Vec3::new(1.0, 2.0, 3.0),
+        ),
     ];
     let buf = build_anmd_v3("L_Hand", 30, &frames);
     let anim = Animation::from_bytes(&buf).expect("read synthetic v3 anm");
@@ -376,7 +400,10 @@ fn compressed_round_trips_byte_exact() {
         &records,
     );
     let anim = Animation::from_bytes(&buf).expect("read compressed anm");
-    assert!(anim.is_byte_exact(), "compressed should preserve source bytes");
+    assert!(
+        anim.is_byte_exact(),
+        "compressed should preserve source bytes"
+    );
     let written = anim.to_bytes().expect("write compressed anm");
     assert_eq!(written, buf, "compressed read -> write must be byte-exact");
 }
