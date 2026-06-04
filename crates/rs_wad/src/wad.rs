@@ -7,9 +7,9 @@ use crate::chunk::{WadChunk, WadCompression, WadSubchunk};
 use crate::decoder::{decompress, decompress_zstd_multi_with_toc};
 use crate::error::{Error, Result};
 
-const MAGIC: u16 = 0x5752;
-const CHUNK_ENTRY_LEN: usize = 32;
-const V3_TRAILER_LEN: usize = 256 + 8;
+pub(crate) const MAGIC: u16 = 0x5752;
+pub(crate) const CHUNK_ENTRY_LEN: usize = 32;
+pub(crate) const V3_TRAILER_LEN: usize = 256 + 8;
 const V2_TRAILER_LEN: usize = 1 + 83 + 8 + 2 + 2;
 
 /** A mounted WAD archive: the `version` major/minor, the parsed chunk table, the verbatim header
@@ -236,7 +236,7 @@ fn read_chunk<R: Read>(reader: &mut R) -> Result<WadChunk> {
     })
 }
 
-fn write_chunk<W: Write>(writer: &mut W, chunk: &WadChunk) -> Result<()> {
+pub(crate) fn write_chunk<W: Write>(writer: &mut W, chunk: &WadChunk) -> Result<()> {
     writer.write_u64(chunk.path_hash)?;
     writer.write_u32(chunk.data_offset)?;
     writer.write_u32(chunk.compressed_size)?;

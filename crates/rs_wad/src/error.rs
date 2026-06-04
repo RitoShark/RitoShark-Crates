@@ -10,6 +10,8 @@ pub enum Error {
     UnsupportedCompression(u8),
     #[error("decompression failed: {0}")]
     Decompress(String),
+    #[error("wad build failed: {0}")]
+    Build(String),
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

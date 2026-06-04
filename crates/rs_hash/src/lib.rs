@@ -19,4 +19,4 @@ pub use elf::{elf, elf_lower};
 pub use error::{Error, Result};
 pub use fnv::fnv1a;
 pub use mapper::HashMapper;
-pub use xx::{xxh3_64, xxh64};
+pub use xx::{xxh3_128_bytes, xxh3_64, xxh3_64_bytes, xxh64};

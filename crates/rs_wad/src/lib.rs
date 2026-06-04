@@ -6,17 +6,26 @@ absolute offset from that captured data section and decompressed on demand: stor
 (flate2), zstd, and the zstd-multi split-frame encoding are supported; the satellite encoding is
 not. Versions 2 and 3 parse; every v3 minor shares one 32-byte table-entry layout (the
 duplicate flag and 16-bit first-subchunk index), so v3.4 reads with the same code path as v3.0.
+
+It also *builds* archives: [`WadBuilder`] streams a v3.4 WAD from loose files, zstd-compressing and
+deduplicating chunks and laying out a sorted table of contents. [`compress`] is the symmetric
+counterpart to [`decompress`]. Built archives are valid and round-trip exactly, but are not
+byte-identical to other tools because zstd encoder choices differ.
 */
 
 #![forbid(unsafe_code)]
 
+mod builder;
 mod chunk;
 mod decoder;
+mod encoder;
 mod error;
 mod wad;
 
+pub use builder::WadBuilder;
 pub use chunk::{WadChunk, WadCompression, WadSubchunk};
 pub use decoder::{decompress, decompress_zstd_multi_with_toc};
+pub use encoder::{compress, DEFAULT_ZSTD_LEVEL};
 pub use error::{Error, Result};
 pub use wad::Wad;
 
