@@ -29,6 +29,23 @@ pub struct FileEntry {
     /// Bitmask selecting which entries of the manifest flags table apply to this file.
     /// Bit `n` set means the flag whose `id` is `n` (a locale or platform tag) is active.
     pub flags_mask: Option<u64>,
+    /** Verbatim copies of the file-entry fields the reader does not interpret (FlatBuffer
+    field indices 5, 6, 8, 10, 11). Riot's encoder emits some of these on real manifests —
+    field 11 (a `u16`, observed as `1`/`2`) marks localized WADs — so they are captured and
+    re-emitted to keep the read→write→read model identical and lose nothing. The remaining
+    indices are unused by every shipped manifest seen but are modelled the same way for safety. */
+    pub extra: FileExtra,
+}
+
+/// Preserved-but-uninterpreted file-entry fields, kept so writing loses no data (see
+/// [`FileEntry::extra`]). Each is `None` when the corresponding FlatBuffer slot is absent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FileExtra {
+    pub field5: Option<u32>,
+    pub field6: Option<u32>,
+    pub field8: Option<u32>,
+    pub field10: Option<u32>,
+    pub field11: Option<u16>,
 }
 
 /// One entry of the manifest flags table: a small numeric `id` paired with a locale

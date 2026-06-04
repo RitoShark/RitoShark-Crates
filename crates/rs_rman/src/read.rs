@@ -3,7 +3,7 @@ use std::io::{Read, Seek};
 use rs_io::{Parse, ReaderExt};
 
 use crate::error::{Error, Result};
-use crate::rman::{Bundle, Chunk, Directory, FileEntry, FileFlag, Rman};
+use crate::rman::{Bundle, Chunk, Directory, FileEntry, FileExtra, FileFlag, Rman};
 
 const MAGIC: [u8; 4] = *b"RMAN";
 const HEADER_LEN: u32 = 4 + 1 + 1 + 2 + 4 + 4 + 8 + 4;
@@ -160,6 +160,13 @@ fn parse_file(cursor: Cursor<'_>) -> Result<FileEntry> {
     };
     let link = fields.get_str(9)?.filter(|s| !s.is_empty());
     let permissions = fields.get_u8(12)?.unwrap_or(0);
+    let extra = FileExtra {
+        field5: fields.get_u32(5)?,
+        field6: fields.get_u32(6)?,
+        field8: fields.get_u32(8)?,
+        field10: fields.get_u32(10)?,
+        field11: fields.get_u16(11)?,
+    };
 
     Ok(FileEntry {
         id,
@@ -170,6 +177,7 @@ fn parse_file(cursor: Cursor<'_>) -> Result<FileEntry> {
         link,
         permissions,
         flags_mask,
+        extra,
     })
 }
 
@@ -327,6 +335,16 @@ impl<'a> Fields<'a> {
     fn get_u8(&self, field: u8) -> Result<Option<u8>> {
         match self.field_at(field)? {
             Some(at) => Ok(Some(self.cursor(0).slice(at, 1)?[0])),
+            None => Ok(None),
+        }
+    }
+
+    fn get_u16(&self, field: u8) -> Result<Option<u16>> {
+        match self.field_at(field)? {
+            Some(at) => {
+                let s = self.cursor(0).slice(at, 2)?;
+                Ok(Some(u16::from_le_bytes([s[0], s[1]])))
+            }
             None => Ok(None),
         }
     }

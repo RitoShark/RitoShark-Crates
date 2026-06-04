@@ -106,42 +106,59 @@ Cross-read against `UncompressedAnimationAsset.cs`, `CompressedAnimationAsset.cs
   ordered by `Elf.HashLower(name)` **ascending** (`.OrderBy`). Our writer previously sorted
   **descending**, which would corrupt byte-exactness on any real `.skl` with more than one joint.
   Now sorted ascending. Validated by `skeleton_joint_index_section_sorted_by_hash_ascending`.
-- **ELF hash ownership.** The League bone-name ELF hash is currently inlined in `animation_read.rs`
-  (for v3 track names) and is the same hash the skeleton writer's joint-id-hash table is keyed on.
-  It is a foundation primitive shared with `.skn` bone names and **should move to `rs_hash`**
-  (alongside FNV1a/XXH64). Kept local to `rs_anim` for now per the crate-isolation rule.
+- **ELF hash ownership (done).** The League bone-name ELF hash now lives in `rs_hash`
+  (`elf` / `elf_lower`, alongside FNV1a/XXH64). `animation_read.rs` calls `rs_hash::elf_lower` for v3
+  track names; the inlined copy was removed. `elf_lower` lowercases ASCII first, matching the C#
+  `Elf.HashLower` used by `RigResource`/`Joint` and `pyritofile`'s `Elf`.
 
 ## What I implemented
 
-- **Format-preserving v5 writer.** Added `raw::RawV5`, populated by `read_v5`, replayed by
-  `write_v5`. `read -> write` is byte-exact for uncompressed v5; validated on all three real samples
-  in `tests/real_files.rs` (`written == original_bytes`).
-- **`Animation::is_byte_exact()` / `make_editable()`** to query and drop the preserved layout.
-- **Stronger compressed validation.** Added `compressed_animation_recovers_known_rotation`, which
-  builds a `r3d2canm` buffer from `compress_quat` of a non-identity rotation and asserts the reader
-  recovers it (within the codec's quantization), exercising the joint-id/transform-type bit packing
-  and the frame-stream offsets end to end.
-- **Skeleton joint-id-hash sort fix** + a regression test.
+- **Shared ELF hash.** Removed the inlined `fn elf` from `animation_read.rs` and switched the v3
+  track-name → joint-hash derivation to `rs_hash::elf_lower`. This is a **correctness fix**: the old
+  inlined hash did *not* lowercase, but the C# oracle (`RigResource`/`Joint` → `Elf.HashLower`) and
+  `pyritofile` (`Elf`) both lowercase first, so any mixed-case v3 track name previously produced the
+  wrong joint hash. The `.skl` joint-id-hash table already sorts ascending by the stored (lowercased
+  ELF) hash, matching `RigResource`'s `.OrderBy(Elf.HashLower)`. A new
+  `joint_hash_matches_oracle_hash_lower` test pins `elf_lower("root") == 0x00079664` and
+  case-insensitivity.
+- **Format-preserving writers for every accepted container — no lossy normalization.** Replaced the
+  v5-only `raw::RawV5` with `raw::RawAnim`, which holds the **complete source byte buffer**.
+  `Animation::from_reader` reads the whole stream into that buffer, decodes the tracks from a cursor
+  over it, and keeps the buffer. An unedited `read -> write` replays it verbatim, so the round-trip
+  is byte-exact for uncompressed **v3, v4, v5** *and* compressed **`r3d2canm`**. The previous write
+  path that re-emitted v3/v4/compressed as uncompressed v4 is gone for unmodified files; there is no
+  `Unsupported` stub on the write path. `make_editable()` drops the buffer to opt into a v4 re-emit
+  from the decoded tracks (full quaternions, no quantization loss); `is_byte_exact()` reports whether
+  the buffer is still present.
+- **Tests.** Kept the three real v5 samples byte-exact (`tests/real_files.rs` now asserts
+  byte-exactness for *every* parsed file, not just v5). Added synthetic `r3d2anmd` v3 and v4 builders
+  and a compressed `r3d2canm` builder, each with a `read -> to_bytes -> ==` byte-exact test
+  (`uncompressed_v3_round_trips_byte_exact`, `uncompressed_v4_round_trips_byte_exact`,
+  `compressed_round_trips_byte_exact`), plus `make_editable_drops_byte_exact_layout` and the
+  joint-hash oracle test.
+- **Stronger compressed validation.** `compressed_animation_recovers_known_rotation` builds a
+  `r3d2canm` buffer from `compress_quat` of a non-identity rotation and asserts the reader recovers
+  it (within the codec's quantization).
+- **Skeleton joint-id-hash sort fix** (ascending by hash) + a regression test (from a prior pass).
 
 ## Remaining gaps
 
-- No real `.skl` or compressed `.anm` sample exists; those paths remain synthetic-only.
-- Compressed resampling is lerp/slerp, not League's spline/hot-frame sampler (lossy vs exact;
-  documented, acceptable for modding). No compressed *writer*.
-- v3/v4 still normalize to v4 on write (no real v3/v4 sample to make byte-exact against).
-- `RawV5` assumes the observed real-world layout (12-byte pad, asset/time offsets 0). A v5 file that
-  actually populated the asset-name/time sections would need those bytes preserved too.
+- No real `.skl` or compressed `.anm` sample exists; those paths remain synthetic-only. Byte-exact
+  passthrough of an *unmodified* compressed file is guaranteed by source-byte preservation, but
+  re-emitting an *edited* compressed model (re-quantizing + re-deriving jump caches/error metrics) is
+  not implemented — `make_editable` falls back to uncompressed v4, which is lossless for the values.
+- Compressed resampling on read is lerp/slerp, not League's spline/hot-frame sampler (lossy vs
+  exact; documented, acceptable for modding). This only affects the decoded tracks, never the
+  byte-exact passthrough.
+- Skeleton legacy `r3d2sklt` reads still return `UnsupportedVersion` (honest — no sample exists).
 
 ## Improvements / TODO (priority order)
 
-1. ~~**Compressed `r3d2canm` reading**~~ — **done.** Remaining follow-up: validate against a real
-   compressed file once one is available, and consider matching League's spline interpolation
-   instead of lerp/slerp for exact fidelity.
-2. **Add real fixtures for the uncovered paths.** There is no `.skl` sample and no compressed
-   `.anm` sample. The skeleton reader/writer and the new compressed reader are only synthetically
-   tested. Drop a real `.skl` and a real compressed `.anm` into `sample-files/` and extend
-   `real_files.rs`.
-3. **Compressed/full byte-exact round-trip is not yet a contract.** Writing always re-emits as
-   uncompressed v4, so `read → write` is not byte-identical for v3/v5/compressed inputs. If
-   lossless byte round-trip per container becomes a requirement, add format-preserving writers
-   (v5 palette writer, compressed writer) rather than always normalizing to v4.
+1. **Add real fixtures for the uncovered paths.** There is no `.skl` sample and no real compressed
+   `.anm` sample. The skeleton reader/writer and the compressed reader/passthrough are only
+   synthetically tested. Drop a real `.skl` and a real compressed `.anm` into `sample-files/` and
+   extend `real_files.rs`.
+2. **Edited-compressed re-emit.** If round-tripping a *modified* compressed animation back to
+   `r3d2canm` (rather than falling back to v4) becomes a requirement, implement a compressed writer
+   (component-keyed quantization, jump-cache + error-metric synthesis). Today edits emit v4, which is
+   lossless for the decoded values.

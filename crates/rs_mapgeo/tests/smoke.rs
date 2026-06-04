@@ -134,11 +134,12 @@ fn rejects_bad_magic() {
 #[test]
 fn rejects_unsupported_version() {
     let mut bytes = minimal_v17();
-    // overwrite the version field (bytes 4..8) with 13
-    bytes[4..8].copy_from_slice(&13u32.to_le_bytes());
+    // Version 16 is not in the oracle's matrix, so it must be rejected. Overwrite the version
+    // field (bytes 4..8) before parsing.
+    bytes[4..8].copy_from_slice(&16u32.to_le_bytes());
     match MapGeometry::from_bytes(&bytes) {
-        Err(Error::UnsupportedVersion(13)) => {}
-        other => panic!("expected UnsupportedVersion(13), got {other:?}"),
+        Err(Error::UnsupportedVersion(16)) => {}
+        other => panic!("expected UnsupportedVersion(16), got {other:?}"),
     }
 }
 

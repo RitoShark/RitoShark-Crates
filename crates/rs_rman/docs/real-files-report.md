@@ -134,21 +134,73 @@ No body-walk bug was found in the existing bundle/file/directory path; it agrees
 cdragon field-for-field. The one correctness fix this pass was the flag-entry layout
 (fixed-offset, not vtable), caught precisely because the new test runs against real files.
 
+## What I implemented (writer pass)
+
+`Serialize::to_writer` is now real; the `Unsupported` stub is gone.
+
+1. **FlatBuffer body builder** (`write.rs`, `BodyBuilder`). A two-pass emitter that mirrors
+   the reader exactly: an `i32` body-header length (`0`) plus four self-relative table offsets
+   (bundles / flags / files / directories), then each table as a `u32` count followed by
+   self-relative entry offsets. Every entry carries a self-relative vtable pointer ahead of an
+   indexed field-offset array, with forward references reserved as zeroed slots and patched once
+   their target is known. Field indices match the reader and cdragon-rman: bundle `{0 id, 1
+   chunks}`, chunk `{0 id, 1 compressed, 2 uncompressed}`, file `{0 id, 1 dir, 2 size, 3 name, 4
+   mask, 5/6/8/10/11 preserved, 7 chunk-ids, 9 link, 12 perms}`, directory `{0 id, 1 parent, 2
+   name}`. Flag entries use the fixed (non-indexed) layout — vtable ptr, three reserved bytes,
+   `id` at +7, self-relative name offset at +8.
+2. **Header + compression.** The body is zstd-compressed and prefixed with the 28-byte header
+   (magic, major, minor, flags, body offset `28`, compressed length, manifest id, uncompressed
+   length). `#![forbid(unsafe_code)]` is preserved.
+3. **Preserved uninterpreted fields.** File fields 5, 6, 8, 10, 11 — previously dropped — are
+   now read into `FileEntry::extra` (`FileExtra { field5, field6, field8, field10, field11 }`)
+   and re-emitted verbatim. On the real manifests only field 11 (a `u16`, the localized-WAD
+   marker) actually occurs (240 / 248 / 78 files); the other indices never appear but are
+   modelled the same way for safety.
+
+### Round-trip contract: semantic, not byte-exact
+
+RMAN is the one format crate whose contract is a **semantic** round-trip rather than a
+byte-identical one. `read → write → read` yields an identical logical `Rman`, which
+`tests/real_files.rs::real_manifests_semantic_round_trip` asserts on all three real manifests
+(equality of bundles, files incl. `extra`, directories, flags, and `file_paths()`), plus a
+synthetic unit round-trip and an extras-preservation test in `tests/read.rs`. Byte-exact
+reproduction is **intentionally not pursued** for two reasons:
+
+- **zstd.** The body is zstd-compressed; our encoder and Riot's emit different (both valid)
+  byte streams for identical input.
+- **FlatBuffer layout.** Field packing order, vtable sharing, and alignment padding are free
+  encoder choices; many distinct bodies decode to the same model.
+
+Chasing byte parity would require reverse-engineering and reproducing Riot's exact zstd
+parameters and FlatBuffer emitter, which buys nothing for tooling that only needs the model
+back.
+
 ## Remaining gaps
 
-1. **Writing support.** Emit a byte-faithful FlatBuffer body + header so manifests can
-   be round-tripped. The reader is eager and owned, so a writer would re-emit the vtable
-   tables (bundles / flags / files / directories) and re-zstd the body. Large; deferred.
-   Until then `to_writer` returns `Unsupported`. This is the headline missing piece versus
-   the workspace's lossless round-trip contract.
-2. **Actual extraction / download.** `file_chunks` gives the byte ranges, but fetching
+1. **Actual extraction / download.** `file_chunks` gives the byte ranges, but fetching
    bundle bytes from the CDN and zstd-decompressing each chunk into the target file is a
    separate concern (network + a per-chunk frame decode) that belongs above this crate.
-3. **Unmodelled file fields.** Fields 5, 6, 8, 10, 11 are still unread (cdragon documents
-   only 11 as "set to 1 for localized WADs"). None are needed for paths, flags, or chunk
-   ranges, but a future writer must preserve them for a lossless round-trip.
+2. **Width of unobserved file fields 5/6/8/10.** None occur in any shipped manifest seen, so
+   their true on-disk width is unconfirmed; they are modelled as `Option<u32>` (field 11, the
+   only one observed, is correctly a `u16`). If a future manifest carries them at a different
+   width, the model would need adjusting — but the semantic round-trip holds for every real
+   sample today.
 
-## What I changed (this pass)
+## What I changed (writer pass)
+
+- **write.rs:** real `Serialize` impl — `BodyBuilder` (two-pass FlatBuffer emitter) plus
+  header + zstd compression; removed the `Unsupported` stub.
+- **rman.rs:** added `FileExtra { field5, field6, field8, field10, field11 }` and
+  `FileEntry::extra` so the previously-dropped file fields survive a write.
+- **read.rs:** read the preserved fields (5/6/8/10 as `u32`, 11 as `u16`) into `extra`;
+  added a `get_u16` field accessor.
+- **lib.rs:** export `FileExtra`; updated the crate doc (writing now supported).
+- **tests/read.rs:** added `synthetic_semantic_round_trip` and
+  `preserves_uninterpreted_file_fields` (with a `Body::with_extras` builder).
+- **tests/real_files.rs:** added `real_manifests_semantic_round_trip` — `from_path → to_bytes
+  → from_bytes` model equality on all three real manifests (twice, for idempotence).
+
+## What I changed (flags / chunk-ranges pass)
 
 - **rman.rs:** added `FileFlag { id, name }`, `ChunkRange { … }`,
   `FileEntry::flags_mask`, `Rman::file_flags`, and methods `file_flag_names`,

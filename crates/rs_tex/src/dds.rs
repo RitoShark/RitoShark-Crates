@@ -15,6 +15,7 @@ enum DdsKind {
     Bc1,
     Bc2,
     Bc3,
+    Bc5,
     Bc7,
     Bgra8,
     Rgba8,
@@ -31,6 +32,9 @@ fn classify(dds: &Dds) -> Result<DdsKind> {
             }
             DxgiFormat::BC3_Typeless | DxgiFormat::BC3_UNorm | DxgiFormat::BC3_UNorm_sRGB => {
                 Ok(DdsKind::Bc3)
+            }
+            DxgiFormat::BC5_Typeless | DxgiFormat::BC5_UNorm | DxgiFormat::BC5_SNorm => {
+                Ok(DdsKind::Bc5)
             }
             DxgiFormat::BC7_Typeless | DxgiFormat::BC7_UNorm | DxgiFormat::BC7_UNorm_sRGB => {
                 Ok(DdsKind::Bc7)
@@ -71,6 +75,7 @@ fn decode_dds_surface(dds: &Dds, data: &[u8]) -> Result<RgbaImage> {
     match classify(dds)? {
         DdsKind::Bc1 => decode_block_format(TexFormat::Bc1, width, height, data),
         DdsKind::Bc3 => decode_block_format(TexFormat::Bc3, width, height, data),
+        DdsKind::Bc5 => decode_block_format(TexFormat::Bc5, width, height, data),
         DdsKind::Bgra8 => decode_block_format(TexFormat::Bgra8, width, height, data),
         DdsKind::Rgba8 => {
             let expected = w * h * 4;
@@ -143,6 +148,71 @@ impl Texture {
         std::fs::write(path, self.to_dds_bytes()?).map_err(rs_io::Error::from)?;
         Ok(())
     }
+
+    /// Serialize this texture's full-resolution mip into a block-compressed `.dds` byte buffer of
+    /// the given `format` (BC1/BC3/BC5/BC7). The payload is decoded to RGBA8 and re-compressed into
+    /// the requested format, producing a single-surface, single-mip compressed DDS that any DDS
+    /// reader accepts. For lossless re-export prefer matching the texture's own format.
+    pub fn to_dds_bytes_bc(&self, format: TexFormat) -> Result<Vec<u8>> {
+        let img = self.decode_rgba()?;
+        rgba_to_dds_bc(&img, format)?.to_bytes()
+    }
+
+    /// Write this texture as a block-compressed `.dds` file at `path` (see
+    /// [`Texture::to_dds_bytes_bc`]).
+    pub fn save_dds_bc(&self, path: impl AsRef<Path>, format: TexFormat) -> Result<()> {
+        std::fs::write(path, self.to_dds_bytes_bc(format)?).map_err(rs_io::Error::from)?;
+        Ok(())
+    }
+}
+
+/// Map a block-compressed [`TexFormat`] onto its DXGI equivalent for the DDS writer.
+fn bc_dxgi_format(format: TexFormat) -> Result<DxgiFormat> {
+    Ok(match format {
+        TexFormat::Bc1 | TexFormat::Bc1Alt => DxgiFormat::BC1_UNorm,
+        TexFormat::Bc3 => DxgiFormat::BC3_UNorm,
+        TexFormat::Bc5 => DxgiFormat::BC5_UNorm,
+        TexFormat::Bc7 => DxgiFormat::BC7_UNorm,
+        other => {
+            return Err(Error::UnsupportedFormat(format!(
+                "compressed dds is only supported for BC1/BC3/BC5/BC7, not {other:?}"
+            )));
+        }
+    })
+}
+
+/// Build a single-surface block-compressed DDS from an RGBA8 image and a BC [`TexFormat`].
+fn rgba_to_dds_bc(img: &RgbaImage, format: TexFormat) -> Result<Dds> {
+    let dxgi = bc_dxgi_format(format)?;
+    let blocks = crate::encode::compress_surface(format, img.as_raw(), img.width(), img.height())?;
+    let mut dds = Dds::new_dxgi(NewDxgiParams {
+        height: img.height(),
+        width: img.width(),
+        depth: None,
+        format: dxgi,
+        mipmap_levels: None,
+        array_layers: None,
+        caps2: None,
+        is_cubemap: false,
+        resource_dimension: D3D10ResourceDimension::Texture2D,
+        alpha_mode: AlphaMode::Straight,
+    })?;
+    if blocks.len() > dds.data.len() {
+        dds.data.resize(blocks.len(), 0);
+    }
+    dds.data[..blocks.len()].copy_from_slice(&blocks);
+    Ok(dds)
+}
+
+/// Serialize an [`RgbaImage`] to a block-compressed `.dds` byte buffer of the given BC `format`.
+pub fn write_dds_bytes_bc(img: &RgbaImage, format: TexFormat) -> Result<Vec<u8>> {
+    rgba_to_dds_bc(img, format)?.to_bytes()
+}
+
+/// Write an [`RgbaImage`] to a block-compressed `.dds` file at `path`.
+pub fn save_dds_bc(img: &RgbaImage, path: impl AsRef<Path>, format: TexFormat) -> Result<()> {
+    std::fs::write(path, write_dds_bytes_bc(img, format)?).map_err(rs_io::Error::from)?;
+    Ok(())
 }
 
 trait DdsBytes {

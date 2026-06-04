@@ -1,21 +1,11 @@
-use rs_math::Vec3;
-
-/** Captures the exact on-disk form of an uncompressed `r3d2anmd` v5 animation so the writer can
-reproduce the original bytes verbatim. The decoded [`crate::Animation`] keeps human-editable tracks,
-but the quaternion palette is normalized on read and the palette ordering is not recoverable from the
-decoded poses, so the raw sections are retained alongside to guarantee a byte-exact round-trip. */
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RawV5 {
-    pub format_token: u32,
-    pub flags1: u32,
-    pub flags2: u32,
-    pub track_count: u32,
-    pub frame_count: u32,
-    pub frame_duration: f32,
-    pub asset_name_offset: i32,
-    pub time_offset: i32,
-    pub vecs: Vec<Vec3>,
-    pub quats: Vec<[u8; 6]>,
-    pub joint_hashes: Vec<u32>,
-    pub frame_indices: Vec<[u16; 3]>,
+/** Captures the exact on-disk form of an animation so the writer can reproduce the original bytes
+verbatim, for every container the reader accepts (uncompressed `r3d2anmd` v3/v4/v5 and compressed
+`r3d2canm`). The decoded [`crate::Animation`] keeps human-editable tracks, but several lossy steps
+happen on read — the quaternion palette is normalized, the v5 palette ordering is not recoverable
+from decoded poses, and compressed keyframes are dequantized and resampled — so the source bytes are
+retained alongside to guarantee a byte-exact round-trip. Calling [`crate::Animation::make_editable`]
+drops this, after which the writer rebuilds the file from the decoded tracks (emitting v4). */
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RawAnim {
+    pub bytes: Vec<u8>,
 }

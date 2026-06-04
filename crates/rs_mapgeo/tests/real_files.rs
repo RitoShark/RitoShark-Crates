@@ -1,16 +1,18 @@
 //! Exercises the parser against real `.mapgeo` sample files. The files live outside the crate in
 //! a gitignored sample directory, so every test skips cleanly when they are absent. For each file
 //! we first read the `OEGM` magic and the on-disk version, then attempt a full parse. Supported
-//! versions (14, 17, 18) must parse with a non-empty model list and round-trip the *entire* file
-//! byte-for-byte; any other version must be reported as `Error::UnsupportedVersion` carrying that
-//! exact version (never a panic, never a different error).
+//! versions (5, 6, 7, 9, 11, 12, 13, 14, 15, 17, 18) must parse with a non-empty model list and
+//! round-trip the *entire* file byte-for-byte; any other version (8, 10, 16) must be reported as
+//! `Error::UnsupportedVersion` carrying that exact version (never a panic, never a different
+//! error). Only v14/v17/v18 appear among the real samples; the others are validated synthetically
+//! in `tests/synthetic_versions.rs`.
 
 use std::path::{Path, PathBuf};
 
 use rs_io::{Parse, Serialize};
 use rs_mapgeo::{Error, MapGeometry};
 
-const SUPPORTED: &[u32] = &[14, 17, 18];
+const SUPPORTED: &[u32] = &[5, 6, 7, 9, 11, 12, 13, 14, 15, 17, 18];
 
 fn sample_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Sample-Files")

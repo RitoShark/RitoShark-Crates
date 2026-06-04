@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use rs_io::Parse;
+use rs_io::{Parse, Serialize};
 use rs_rman::Rman;
 
 /// Locate a sample `.manifest` under the workspace's flat `sample-files` directory.
@@ -68,6 +68,74 @@ fn parses_real_manifests() {
 
     if tested == 0 {
         eprintln!("no sample manifests present; nothing to verify");
+    }
+}
+
+/// Semantic round-trip on every real manifest: `from_path → to_bytes → from_bytes` must yield a
+/// logically identical `Rman`. Byte-exact reproduction is intentionally NOT asserted — Riot's
+/// zstd settings and FlatBuffer field/vtable layout are encoder choices we do not reproduce, and
+/// several valid encodings decode to the same model. We assert structural equality of every
+/// load-bearing field (bundles, files including the preserved uninterpreted fields, directories,
+/// flags) and of `file_paths()`, then re-emit a third time and confirm it stays stable.
+#[test]
+fn real_manifests_semantic_round_trip() {
+    let mut tested = 0;
+    for name in MANIFESTS {
+        let Some(path) = sample(name) else {
+            eprintln!("skip {name}: not present");
+            continue;
+        };
+        tested += 1;
+
+        let original = Rman::from_path(&path).unwrap_or_else(|e| panic!("{name}: parse: {e}"));
+        let bytes = original
+            .to_bytes()
+            .unwrap_or_else(|e| panic!("{name}: write: {e}"));
+        let reparsed =
+            Rman::from_bytes(&bytes).unwrap_or_else(|e| panic!("{name}: re-parse: {e}"));
+
+        assert_eq!(original.version, reparsed.version, "{name}: version");
+        assert_eq!(original.flags, reparsed.flags, "{name}: flags");
+        assert_eq!(original.manifest_id, reparsed.manifest_id, "{name}: id");
+        assert_eq!(original.bundles, reparsed.bundles, "{name}: bundles");
+        assert_eq!(original.files, reparsed.files, "{name}: files");
+        assert_eq!(
+            original.directories, reparsed.directories,
+            "{name}: directories"
+        );
+        assert_eq!(original.file_flags, reparsed.file_flags, "{name}: file_flags");
+        assert_eq!(
+            original.file_paths(),
+            reparsed.file_paths(),
+            "{name}: file_paths"
+        );
+        // The whole model is `PartialEq`; this also covers anything added later.
+        assert_eq!(original, reparsed, "{name}: full model");
+
+        // Writing the re-parsed model again is itself stable (idempotent semantic output).
+        let bytes2 = reparsed.to_bytes().unwrap();
+        let reparsed2 = Rman::from_bytes(&bytes2).unwrap();
+        assert_eq!(reparsed, reparsed2, "{name}: second round-trip");
+
+        // How many files actually carried a preserved field-11 (localized-WAD marker).
+        let with_extra = original
+            .files
+            .iter()
+            .filter(|f| f.extra.field11.is_some())
+            .count();
+        eprintln!(
+            "{name}: semantic round-trip OK ({} bundles, {} files, {} dirs, {} flags; {} files carry field 11; compressed body {} bytes)",
+            original.bundles.len(),
+            original.files.len(),
+            original.directories.len(),
+            original.file_flags.len(),
+            with_extra,
+            bytes.len(),
+        );
+    }
+
+    if tested == 0 {
+        eprintln!("no sample manifests present; round-trip nothing to verify");
     }
 }
 

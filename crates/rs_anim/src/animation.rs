@@ -1,6 +1,6 @@
 use rs_math::{Quat, Vec3};
 
-use crate::raw::RawV5;
+use crate::raw::RawAnim;
 
 /// A single keyframe for one joint: a pose sampled at `time` seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -41,13 +41,15 @@ impl AnimTrack {
 /// A League animation (`.anm`).
 ///
 /// Holds one [`AnimTrack`] per animated joint. Reading supports the uncompressed `r3d2anmd`
-/// container (versions 3, 4, 5) and the compressed `r3d2canm` container (versions 1-3); writing
-/// emits uncompressed version 4 (full quaternions) so values round-trip without quantization loss.
+/// container (versions 3, 4, 5) and the compressed `r3d2canm` container (versions 1-3). Every
+/// accepted container preserves its source bytes so an unedited `read -> write` is byte-exact;
+/// after [`Animation::make_editable`] (or for in-memory animations) writing emits uncompressed
+/// version 4 (full quaternions) so values round-trip without quantization loss.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Animation {
     pub fps: f32,
     pub tracks: Vec<AnimTrack>,
-    pub(crate) raw: Option<RawV5>,
+    pub(crate) raw: Option<RawAnim>,
 }
 
 impl Animation {
@@ -63,15 +65,16 @@ impl Animation {
         &self.tracks
     }
 
-    /// True when this animation was read from an uncompressed v5 file and still carries the raw
-    /// sections that let the writer reproduce the original bytes exactly.
+    /// True when this animation was read from a file and still carries the preserved source bytes
+    /// that let the writer reproduce the original file exactly (any accepted container: uncompressed
+    /// v3/v4/v5 or compressed `r3d2canm`).
     pub fn is_byte_exact(&self) -> bool {
         self.raw.is_some()
     }
 
-    /// Drops the preserved raw v5 layout so the writer rebuilds the file from the decoded tracks
-    /// (emitting v4). Call this after mutating `tracks` if the source was a byte-exact v5 file,
-    /// otherwise the writer re-emits the original, unedited bytes.
+    /// Drops the preserved source bytes so the writer rebuilds the file from the decoded tracks
+    /// (emitting uncompressed v4). Call this after mutating `tracks` if the source was a byte-exact
+    /// file, otherwise the writer re-emits the original, unedited bytes.
     pub fn make_editable(&mut self) {
         self.raw = None;
     }

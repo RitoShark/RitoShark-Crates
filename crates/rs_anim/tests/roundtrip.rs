@@ -256,6 +256,155 @@ fn build_canm(
     header
 }
 
+/// Builds an uncompressed `r3d2anmd` version-4 buffer with one vector, one quaternion, and one
+/// track. Mirrors the C# `UncompressedAnimationAsset.ReadV4` layout: a 12-byte common header, the
+/// track/frame/duration triple, six byte offsets (relative to byte 12) plus a 12-byte pad, then the
+/// `vecs -> quats(f32x4) -> frames` sections. Frame rows embed the joint hash plus three u16 indices
+/// and a padding u16.
+fn build_anmd_v4(joint_hash: u32, frame_duration: f32) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(b"r3d2anmd");
+    buf.extend_from_slice(&4u32.to_le_bytes()); // version
+    buf.extend_from_slice(&0u32.to_le_bytes()); // resource size
+    buf.extend_from_slice(&0u32.to_le_bytes()); // format token
+    buf.extend_from_slice(&0u32.to_le_bytes()); // flags1
+    buf.extend_from_slice(&0u32.to_le_bytes()); // flags2
+    buf.extend_from_slice(&1u32.to_le_bytes()); // track count
+    buf.extend_from_slice(&1u32.to_le_bytes()); // frame count
+    buf.extend_from_slice(&frame_duration.to_le_bytes());
+
+    // Data begins at absolute byte 76 (12 common + 28 header + 24 offsets + 12 pad), i.e. rel 64.
+    // One vec3 (12 bytes) -> quats at rel 76; one quaternion (16 bytes) -> frames at rel 92.
+    let vecs_rel = 64i32;
+    let quats_rel = 76i32;
+    let frames_rel = 92i32;
+    buf.extend_from_slice(&0i32.to_le_bytes()); // joint hashes (embedded in frames for v4)
+    buf.extend_from_slice(&0i32.to_le_bytes()); // asset name
+    buf.extend_from_slice(&0i32.to_le_bytes()); // time
+    buf.extend_from_slice(&vecs_rel.to_le_bytes());
+    buf.extend_from_slice(&quats_rel.to_le_bytes());
+    buf.extend_from_slice(&frames_rel.to_le_bytes());
+    buf.extend_from_slice(&[0u8; 12]); // pad
+
+    // one vec3 (translation == scale, index 0)
+    for c in [1.0f32, 2.0, 3.0] {
+        buf.extend_from_slice(&c.to_le_bytes());
+    }
+    // one quaternion (identity), full f32x4
+    for c in [0.0f32, 0.0, 0.0, 1.0] {
+        buf.extend_from_slice(&c.to_le_bytes());
+    }
+    // one frame row: jointHash, translateId, scaleId, rotateId, pad
+    buf.extend_from_slice(&joint_hash.to_le_bytes());
+    buf.extend_from_slice(&0u16.to_le_bytes());
+    buf.extend_from_slice(&0u16.to_le_bytes());
+    buf.extend_from_slice(&0u16.to_le_bytes());
+    buf.extend_from_slice(&0u16.to_le_bytes());
+
+    let file_size = buf.len() as u32;
+    buf[12..16].copy_from_slice(&file_size.to_le_bytes());
+    buf
+}
+
+/// Builds a legacy `r3d2anmd` version-3 buffer: `skeletonId`, track/frame counts, integer fps, then
+/// per-track a fixed 32-byte name (ELF-lower hashed) + flags, and a full rotation+translation per
+/// frame. Scale is implicitly `(1,1,1)`.
+fn build_anmd_v3(track_name: &str, fps: u32, frames: &[(Quat, Vec3)]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(b"r3d2anmd");
+    buf.extend_from_slice(&3u32.to_le_bytes()); // version
+    buf.extend_from_slice(&0u32.to_le_bytes()); // skeleton id
+    buf.extend_from_slice(&1u32.to_le_bytes()); // track count
+    buf.extend_from_slice(&(frames.len() as u32).to_le_bytes()); // frame count
+    buf.extend_from_slice(&fps.to_le_bytes());
+
+    let mut name = [0u8; 32];
+    let bytes = track_name.as_bytes();
+    name[..bytes.len()].copy_from_slice(bytes);
+    buf.extend_from_slice(&name);
+    buf.extend_from_slice(&0u32.to_le_bytes()); // flags
+    for (rot, tr) in frames {
+        for c in [rot.x, rot.y, rot.z, rot.w] {
+            buf.extend_from_slice(&c.to_le_bytes());
+        }
+        for c in [tr.x, tr.y, tr.z] {
+            buf.extend_from_slice(&c.to_le_bytes());
+        }
+    }
+    buf
+}
+
+#[test]
+fn uncompressed_v4_round_trips_byte_exact() {
+    let buf = build_anmd_v4(0xDEAD_BEEF, 1.0 / 30.0);
+    let anim = Animation::from_bytes(&buf).expect("read synthetic v4 anm");
+    assert!(anim.is_byte_exact(), "v4 should preserve source bytes");
+    assert_eq!(anim.tracks().len(), 1);
+    assert_eq!(anim.tracks()[0].joint_hash, 0xDEAD_BEEF);
+    let written = anim.to_bytes().expect("write v4 anm");
+    assert_eq!(written, buf, "v4 read -> write must be byte-exact");
+}
+
+#[test]
+fn uncompressed_v3_round_trips_byte_exact() {
+    let frames = [
+        (Quat::from_xyzw(0.0, 0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 0.0)),
+        (Quat::from_xyzw(0.5, 0.5, 0.5, 0.5), Vec3::new(1.0, 2.0, 3.0)),
+    ];
+    let buf = build_anmd_v3("L_Hand", 30, &frames);
+    let anim = Animation::from_bytes(&buf).expect("read synthetic v3 anm");
+    assert!(anim.is_byte_exact(), "v3 should preserve source bytes");
+    assert_eq!(anim.tracks().len(), 1);
+    // v3 joint hash is the lowercased ELF hash of the track name.
+    assert_eq!(anim.tracks()[0].joint_hash, rs_hash::elf_lower("L_Hand"));
+    let written = anim.to_bytes().expect("write v3 anm");
+    assert_eq!(written, buf, "v3 read -> write must be byte-exact");
+}
+
+#[test]
+fn compressed_round_trips_byte_exact() {
+    use rs_anim::quantized::compress_quat;
+
+    let rotation = Quat::from_xyzw(0.5, 0.5, 0.5, 0.5);
+    let records = [(0u16, 0u16, compress_quat(rotation))];
+    let buf = build_canm(
+        0x1234_5678,
+        1.0,
+        1.0,
+        (Vec3::ZERO, Vec3::ONE),
+        (Vec3::ZERO, Vec3::ONE),
+        &records,
+    );
+    let anim = Animation::from_bytes(&buf).expect("read compressed anm");
+    assert!(anim.is_byte_exact(), "compressed should preserve source bytes");
+    let written = anim.to_bytes().expect("write compressed anm");
+    assert_eq!(written, buf, "compressed read -> write must be byte-exact");
+}
+
+#[test]
+fn make_editable_drops_byte_exact_layout() {
+    let buf = build_anmd_v4(0xDEAD_BEEF, 1.0 / 30.0);
+    let mut anim = Animation::from_bytes(&buf).expect("read synthetic v4 anm");
+    assert!(anim.is_byte_exact());
+    anim.make_editable();
+    assert!(!anim.is_byte_exact(), "make_editable drops preserved bytes");
+    // The re-emit is a valid uncompressed v4 file that re-reads to the same tracks.
+    let written = anim.to_bytes().expect("write edited anm");
+    assert_eq!(&written[..8], b"r3d2anmd");
+    assert_eq!(u32::from_le_bytes(written[8..12].try_into().unwrap()), 4);
+    let reparsed = Animation::from_bytes(&written).expect("re-read edited anm");
+    assert_eq!(anim.tracks()[0].joint_hash, reparsed.tracks()[0].joint_hash);
+}
+
+#[test]
+fn joint_hash_matches_oracle_hash_lower() {
+    // The C# RigResource / Joint and pyritofile both key joints on the lowercased ELF hash
+    // (Elf.HashLower). The v3 reader and the .skl joint ordering must use the same value.
+    assert_eq!(rs_hash::elf_lower("Root"), rs_hash::elf_lower("root"));
+    // Known vector: ELF-lower of "root" computed by the SystemV ELF algorithm over lowercased ASCII.
+    assert_eq!(rs_hash::elf_lower("root"), 0x0007_9664);
+}
+
 #[test]
 fn compressed_animation_recovers_known_rotation() {
     use rs_anim::quantized::compress_quat;

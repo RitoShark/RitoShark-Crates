@@ -1,11 +1,11 @@
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 
 use rs_io::{Parse, ReaderExt};
 use rs_math::{Quat, Vec3};
 
 use crate::animation::{AnimFrame, AnimTrack, Animation};
 use crate::quantized::{decompress_quat, decompress_vec3};
-use crate::raw::RawV5;
+use crate::raw::RawAnim;
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Default)]
@@ -13,19 +13,6 @@ struct SparsePose {
     rotation: Option<Quat>,
     translation: Option<Vec3>,
     scale: Option<Vec3>,
-}
-
-fn elf(name: &str) -> u32 {
-    let mut hash: u32 = 0;
-    for &b in name.as_bytes() {
-        hash = (hash << 4).wrapping_add(b as u32);
-        let high = hash & 0xF000_0000;
-        if high != 0 {
-            hash ^= high >> 24;
-        }
-        hash &= !high;
-    }
-    hash
 }
 
 fn section_count(size: i32, element: i32) -> usize {
@@ -48,11 +35,11 @@ impl Animation {
 
     fn read_v5<R: Read + Seek>(reader: &mut R) -> Result<Self> {
         let _resource_size = reader.read_u32()?;
-        let format_token = reader.read_u32()?;
-        let flags1 = reader.read_u32()?;
-        let flags2 = reader.read_u32()?;
+        let _format_token = reader.read_u32()?;
+        let _flags1 = reader.read_u32()?;
+        let _flags2 = reader.read_u32()?;
 
-        let track_count = reader.read_u32()?;
+        let _track_count = reader.read_u32()?;
         let frame_count = reader.read_u32()?;
         let frame_duration = reader.read_f32()?;
         let fps = if frame_duration != 0.0 {
@@ -62,8 +49,8 @@ impl Animation {
         };
 
         let joint_hashes_offset = reader.read_i32()?;
-        let asset_name_offset = reader.read_i32()?;
-        let time_offset = reader.read_i32()?;
+        let _asset_name_offset = reader.read_i32()?;
+        let _time_offset = reader.read_i32()?;
         let vecs_offset = reader.read_i32()?;
         let quats_offset = reader.read_i32()?;
         let frames_offset = reader.read_i32()?;
@@ -96,11 +83,9 @@ impl Animation {
         reader
             .seek(SeekFrom::Start(quats_offset as u64 + 12))
             .map_err(rs_io::Error::from)?;
-        let mut raw_quats = Vec::with_capacity(quat_count);
         let mut quats = Vec::with_capacity(quat_count);
         for _ in 0..quat_count {
             let bytes = reader.read_array::<6>()?;
-            raw_quats.push(bytes);
             quats.push(decompress_quat(&bytes).normalize());
         }
 
@@ -112,7 +97,6 @@ impl Animation {
             })
             .collect();
 
-        let mut frame_indices = Vec::with_capacity(frame_count * tracks.len());
         reader
             .seek(SeekFrom::Start(frames_offset as u64 + 12))
             .map_err(rs_io::Error::from)?;
@@ -122,7 +106,6 @@ impl Animation {
                 let translate_id = reader.read_u16()?;
                 let scale_id = reader.read_u16()?;
                 let rotate_id = reader.read_u16()?;
-                frame_indices.push([translate_id, scale_id, rotate_id]);
                 track.frames.push(AnimFrame {
                     time,
                     rotation: quats
@@ -138,25 +121,10 @@ impl Animation {
             }
         }
 
-        let raw = RawV5 {
-            format_token,
-            flags1,
-            flags2,
-            track_count,
-            frame_count: frame_count as u32,
-            frame_duration,
-            asset_name_offset,
-            time_offset,
-            vecs,
-            quats: raw_quats,
-            joint_hashes,
-            frame_indices,
-        };
-
         Ok(Self {
             fps,
             tracks,
-            raw: Some(raw),
+            raw: None,
         })
     }
 
@@ -255,7 +223,7 @@ impl Animation {
         let mut tracks = Vec::with_capacity(track_count);
         for _ in 0..track_count {
             let name = reader.read_fixed_string::<32>()?;
-            let joint_hash = elf(&name);
+            let joint_hash = rs_hash::elf_lower(&name);
             let _flags = reader.read_u32()?;
 
             let mut frames = Vec::with_capacity(frame_count);
@@ -448,13 +416,24 @@ impl Animation {
 impl Parse for Animation {
     type Error = Error;
 
+    /** Reads the whole stream into a buffer, decodes the tracks from it, and keeps the buffer so an
+    unedited `read -> write` reproduces the source bytes exactly for every accepted container
+    (uncompressed v3/v4/v5 and compressed `r3d2canm`). [`Animation::make_editable`] drops the buffer
+    to opt into a v4 re-emit. */
     fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self> {
-        let magic = reader.read_array::<8>()?;
-        let version = reader.read_u32()?;
-        match &magic {
-            b"r3d2anmd" => Self::read_uncompressed(reader, version),
-            b"r3d2canm" => Self::read_compressed(reader, version),
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).map_err(rs_io::Error::from)?;
+
+        let mut cursor = Cursor::new(&bytes);
+        let magic = cursor.read_array::<8>()?;
+        let version = cursor.read_u32()?;
+        let mut anim = match &magic {
+            b"r3d2anmd" => Self::read_uncompressed(&mut cursor, version),
+            b"r3d2canm" => Self::read_compressed(&mut cursor, version),
             _ => Err(Error::InvalidMagic(magic)),
-        }
+        }?;
+
+        anim.raw = Some(RawAnim { bytes });
+        Ok(anim)
     }
 }

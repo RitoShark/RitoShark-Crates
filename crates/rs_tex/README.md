@@ -2,8 +2,8 @@
 
 Reads, **writes, and encodes** the League of Legends extended `.tex` texture container, and
 reads and writes `.dds` containers, decoding either to an `image::RgbaImage`. It can compress an
-`image::RgbaImage` into a valid BC1/BC3 `.tex` (with a generated mip chain) and serialize any
-decoded image to an uncompressed `.dds`.
+`image::RgbaImage` into a valid BC1/BC3/BC5/BC7 `.tex` (with a generated mip chain) and serialize
+any decoded image to either an uncompressed or a block-compressed (BC1/BC3/BC5/BC7) `.dds`.
 
 ## Formats
 
@@ -36,7 +36,7 @@ Supported `.tex` format bytes:
 | 10   | `Bc1`         | DXT1 / BC1               | yes    | yes    |
 | 11   | `Bc1Alt`      | DXT1 / BC1 (alt code)    | yes    | yes    |
 | 12   | `Bc3`         | DXT5 / BC3               | yes    | yes    |
-| 13   | `Bc7`         | BC7                      | yes    | no     |
+| 13   | `Bc7`         | BC7                      | yes    | yes    |
 | 14   | `Bc5`         | BC5 (two-channel/normal) | yes    | yes    |
 | 20   | `Bgra8`       | uncompressed BGRA8       | yes    | yes    |
 | 21   | `Rgba16Snorm` | 16-bit signed RGBA       | yes    | no     |
@@ -68,6 +68,7 @@ let bytes = tex.to_bytes()?;                           // also to_path / to_writ
 // Encode an image into a brand-new .tex
 let tex = Texture::encode_bc1(&img, /*mipmaps=*/ true)?;  // BC1 (DXT1) + Lanczos-3 mip chain
 let tex = Texture::encode_bc3(&img, true)?;               // BC3 (DXT5)
+let tex = Texture::encode_bc7(&img, true)?;               // BC7 (high-quality RGBA)
 let tex = Texture::encode(&img, TexFormat::Bc5, false)?;  // BC5, no mips
 let tex = Texture::from_rgba_bgra8(&img);                 // uncompressed BGRA8
 tex.to_path("out.tex")?;
@@ -80,7 +81,9 @@ let tex = Texture::from_dds_bytes(&buf)?;              // DDS -> Texture (BC1/BC
 
 // DDS write
 let dds = write_dds_bytes(&img)?;                      // RgbaImage -> uncompressed RGBA8 .dds
-tex.save_dds("out.dds")?;                              // a Texture's decoded image -> .dds
+let dds = write_dds_bytes_bc(&img, TexFormat::Bc7)?;   // RgbaImage -> compressed BC7 .dds
+tex.save_dds("out.dds")?;                              // a Texture's decoded image -> .dds (RGBA8)
+tex.save_dds_bc("out.dds", TexFormat::Bc3)?;           // a Texture's decoded image -> BC3 .dds
 ```
 
 Key items:
@@ -89,15 +92,18 @@ Key items:
   (the mip chain kept exactly as on disk). `Texture::new(w, h, format, data)` builds a
   single-mip texture; `mip_count()`, `largest_mip()`, `decode_rgba()`.
 - **Encoding** — `Texture::encode(&RgbaImage, TexFormat, mipmaps)` and the `encode_bc1` /
-  `encode_bc3` shortcuts compress an image into a valid `.tex` (BC1/BC3/BC5), generating a
-  Lanczos-3 mip chain when `mipmaps` is set. `from_rgba_bgra8` builds an uncompressed texture.
+  `encode_bc3` / `encode_bc7` shortcuts compress an image into a valid `.tex`
+  (BC1/BC3/BC5/BC7), generating a Lanczos-3 mip chain when `mipmaps` is set. `from_rgba_bgra8`
+  builds an uncompressed texture.
 - `TexFormat` — the format byte enum with `from_u8` / `to_u8`, `block_size`,
   `bytes_per_block`, `mip_size`.
 - `read_dds` / `read_dds_bytes` — decode the first DDS surface to RGBA8, including formats with
   no `.tex` equivalent (BC2, BC7). `read_dds_faces` / `read_dds_faces_bytes` decode **all**
   surfaces (six cubemap faces or every array layer). `dds_is_cubemap` reports the surface kind.
 - `write_dds_bytes` / `save_dds` and `Texture::to_dds_bytes` / `Texture::save_dds` — write an
-  uncompressed RGBA8 `.dds`.
+  uncompressed RGBA8 `.dds`. `write_dds_bytes_bc` / `save_dds_bc` and
+  `Texture::to_dds_bytes_bc` / `Texture::save_dds_bc` — write a block-compressed
+  (BC1/BC3/BC5/BC7) `.dds`.
 - `Texture::from_dds_bytes` — adopt a DDS payload as a `Texture` when its format maps onto a
   `.tex` format.
 
@@ -105,8 +111,10 @@ Key items:
 
 BC compression is lossy, so encode→decode is *close*, not exact (the tests bound the mean
 absolute per-channel difference). BC1 carries no alpha; BC3 carries a full alpha channel; BC5 is
-two-channel (normal maps). BC7 and ETC **encoding** are not implemented — only decoding — so
-those formats are read-only for now. The `.tex` writer still reproduces any *parsed* texture
+two-channel (normal maps); BC7 keeps a high-quality RGBA payload. BC7 encoding runs on a
+prebuilt SIMD block kernel (no external toolchain needed) that operates on whole 4x4 tiles, so
+non-block-aligned mips are padded to the tile grid before encoding. **ETC encoding** is still not
+implemented — ETC formats remain decode-only. The `.tex` writer reproduces any *parsed* texture
 byte-for-byte via `to_writer`.
 
 ## Fixtures

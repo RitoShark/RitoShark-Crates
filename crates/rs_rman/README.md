@@ -101,15 +101,47 @@ for c in rman.file_chunks(&file) {
 
 Public fields expose the parsed structure directly: `version`, `flags`, `manifest_id`,
 `bundles` (each with `chunks`), `files` (`name`, `size`, `directory_id`, `chunk_ids`,
-`link`, `permissions`, `flags_mask`), `directories` (`id`, `parent_id`, `name`), and
-`file_flags`.
+`link`, `permissions`, `flags_mask`, `extra`), `directories` (`id`, `parent_id`, `name`),
+and `file_flags`.
 
 ## Writing
 
-**Not implemented.** RMAN is consumed read-only by our tooling, and the format is a
-download descriptor rather than an editable asset, so `Serialize::to_writer` returns
-`Error::Unsupported`. Rebuilding a manifest (FlatBuffer emission plus re-bundling)
-would be a large, separate effort; see `docs/real-files-report.md`.
+**Supported**, via the workspace `Serialize` trait (`to_writer` / `to_bytes` / `to_path`).
+The writer rebuilds the FlatBuffer body from the owned model — every table and field index
+the reader walks (bundles + chunks, the flags table, files, directories) — compresses it,
+and re-emits the 28-byte header.
+
+```rust
+use rs_io::{Parse, Serialize};
+use rs_rman::Rman;
+
+let rman = Rman::from_path("7D6C65378829C6AA.manifest")?;
+let bytes = rman.to_bytes()?;          // valid RMAN container
+let again = Rman::from_bytes(&bytes)?; // identical logical model
+assert_eq!(rman, again);
+```
+
+### Round-trip contract: semantic, not byte-exact
+
+Unlike the other format crates, RMAN's contract is a **semantic** round-trip, not a
+byte-identical one: `read → write → read` yields an identical logical `Rman` (bundles,
+files — including the preserved uninterpreted fields — directories, flags, and
+`file_paths()`). Byte-exact reproduction of Riot's own output is **intentionally not
+attempted** because two layers are non-deterministic encoder choices we do not mirror:
+
+1. **zstd compression.** The body is zstd-compressed; our compressor and Riot's produce
+   different (both valid) byte streams for the same input.
+2. **FlatBuffer layout.** Field packing order, vtable sharing, and alignment padding are
+   free choices in the FlatBuffer encoding; many distinct bodies decode to the same model.
+
+The tests therefore assert model equality on the three real manifests, not byte equality.
+
+### Preserved uninterpreted fields
+
+File entries carry FlatBuffer fields the reader does not interpret (indices 5, 6, 8, 10,
+11). On real manifests field 11 (a `u16`, the localized-WAD marker) is present on hundreds
+of files. These are read into `FileEntry::extra` (`FileExtra`) and re-emitted verbatim so a
+write loses nothing.
 
 ## Fixtures
 

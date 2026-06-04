@@ -1,9 +1,13 @@
 /*!
-The writer is the byte-exact inverse of the reader for every version it supports (14, 17, 18). It
-reproduces the same field order, padding and per-version layout: the implicit sampler strings, `u8`
-render-flag word and single baked-paint channel of version 14; the extra mesh `u32` of version 18;
-and the trailing bucketed scene graphs and planar reflectors of all three. A parsed file therefore
-re-serializes identically. Any unsupported version is rejected with `Error::UnsupportedVersion`.
+The writer is the byte-exact inverse of the reader for every version it supports (5, 6, 7, 9, 11,
+12, 13, 14, 15, 17, 18). It reproduces the same field order, padding and per-version layout: the
+leading `separate_point_lights` byte and per-mesh point light of versions < 7; the embedded per-mesh
+names of versions < 12; the nine spherical-harmonics coefficients of versions < 9; the implicit
+sampler strings, `u8` render-flag word and single baked-paint channel of versions before 17; the
+post-transform layer byte of versions 7..=12; the extra mesh `u32` of version 18; the v5 omission of
+the backface-culling byte; and the trailing bucketed scene graphs and planar reflectors. A parsed
+file therefore re-serializes identically. Any unsupported version is rejected with
+`Error::UnsupportedVersion`.
 */
 
 use std::io::Write;
@@ -20,7 +24,7 @@ use crate::mapgeo::{
 const MAX_VERTEX_ELEMENTS: usize = 15;
 
 fn is_supported(version: u32) -> bool {
-    matches!(version, 14 | 17 | 18)
+    matches!(version, 5 | 6 | 7 | 9 | 11 | 12 | 13 | 14 | 15 | 17 | 18)
 }
 
 impl MapGeometry {
@@ -33,6 +37,10 @@ impl MapGeometry {
         writer.write_bytes(MapGeometry::magic())?;
         writer.write_u32(version)?;
 
+        if version < 7 {
+            writer.write_bool(self.separate_point_lights)?;
+        }
+
         write_shader_overrides(writer, self, version)?;
 
         writer.write_u32(self.vertex_descriptions.len() as u32)?;
@@ -42,14 +50,18 @@ impl MapGeometry {
 
         writer.write_u32(self.vertex_buffers.len() as u32)?;
         for vb in &self.vertex_buffers {
-            writer.write_u8(vb.layer)?;
+            if version >= 13 {
+                writer.write_u8(vb.layer)?;
+            }
             writer.write_u32(vb.data.len() as u32)?;
             writer.write_bytes(&vb.data)?;
         }
 
         writer.write_u32(self.index_buffers.len() as u32)?;
         for ib in &self.index_buffers {
-            writer.write_u8(ib.layer)?;
+            if version >= 13 {
+                writer.write_u8(ib.layer)?;
+            }
             writer.write_u32((ib.indices.len() * 2) as u32)?;
             for &index in &ib.indices {
                 writer.write_u16(index)?;
@@ -58,7 +70,7 @@ impl MapGeometry {
 
         writer.write_u32(self.models.len() as u32)?;
         for model in &self.models {
-            write_model(writer, model, version)?;
+            write_model(writer, model, version, self.separate_point_lights)?;
         }
 
         write_scene_graphs(writer, &self.scene_graphs, version)?;
@@ -113,7 +125,16 @@ fn write_vertex_description<W: Write>(writer: &mut W, desc: &VertexDescription) 
     Ok(())
 }
 
-fn write_model<W: Write>(writer: &mut W, model: &MapModel, version: u32) -> Result<()> {
+fn write_model<W: Write>(
+    writer: &mut W,
+    model: &MapModel,
+    version: u32,
+    separate_point_lights: bool,
+) -> Result<()> {
+    if version < 12 {
+        writer.write_string_u32(&model.name)?;
+    }
+
     writer.write_u32(model.vertex_count)?;
     writer.write_u32(model.vertex_buffer_ids.len() as u32)?;
     writer.write_u32(model.vertex_description_id)?;
@@ -144,18 +165,42 @@ fn write_model<W: Write>(writer: &mut W, model: &MapModel, version: u32) -> Resu
         writer.write_u32(submesh.max_vertex)?;
     }
 
-    writer.write_bool(model.disable_backface_culling)?;
+    if version != 5 {
+        writer.write_bool(model.disable_backface_culling)?;
+    }
 
     write_vec3(writer, model.bounds.min)?;
     write_vec3(writer, model.bounds.max)?;
     writer.write_mtx44(&model.transform.to_cols_array())?;
 
     writer.write_u8(model.quality)?;
-    writer.write_u8(model.layer_transition)?;
-    if version >= 16 {
-        writer.write_u16(model.render_flags)?;
-    } else {
+
+    if (7..=12).contains(&version) {
+        writer.write_u8(model.layer)?;
+    }
+
+    if (11..14).contains(&version) {
         writer.write_u8(model.render_flags as u8)?;
+    } else if version >= 14 {
+        writer.write_u8(model.layer_transition)?;
+        if version >= 16 {
+            writer.write_u16(model.render_flags)?;
+        } else {
+            writer.write_u8(model.render_flags as u8)?;
+        }
+    }
+
+    if version < 7 && separate_point_lights {
+        write_vec3(writer, model.point_light.unwrap_or(Vec3::ZERO))?;
+    }
+
+    if version < 9 {
+        let harmonics = model.spherical_harmonics.unwrap_or([Vec3::ZERO; 9]);
+        for coefficient in harmonics {
+            write_vec3(writer, coefficient)?;
+        }
+        write_channel(writer, &model.baked_light)?;
+        return Ok(());
     }
 
     write_channel(writer, &model.baked_light)?;

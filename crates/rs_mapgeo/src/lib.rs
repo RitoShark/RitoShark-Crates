@@ -1,10 +1,11 @@
 /*!
 rs_mapgeo reads and writes League `.mapgeo` (OEGM) environment geometry. It supports on-disk
-versions 14, 17 and 18, parsing the full structure: shader/texture overrides, vertex declarations,
-the raw vertex and index buffers, the list of placed models (buffer references, submeshes,
-transform, bounding box, visibility layer, render flags and per-version lighting), and the trailing
-bucketed scene graphs and planar reflectors. The writer is the byte-exact inverse for every version
-it reads. Any other on-disk version is reported as `Error::UnsupportedVersion`.
+versions 5, 6, 7, 9, 11, 12, 13, 14, 15, 17 and 18, parsing the full structure: shader/texture
+overrides, vertex declarations, the raw vertex and index buffers, the list of placed models (buffer
+references, submeshes, transform, bounding box, visibility layer, render flags and per-version
+lighting), and the trailing bucketed scene graphs and planar reflectors. The writer is the
+byte-exact inverse for every version it reads. Versions 8, 10 and 16 are not defined by the
+reference oracle and are reported as `Error::UnsupportedVersion`.
 */
 
 #![forbid(unsafe_code)]

@@ -12,7 +12,7 @@ use rs_anim::{Animation, Skeleton, AnimTrack, AnimFrame, Joint};
 let skl  = Skeleton::from_path("aatrox.skl")?;
 let anim = Animation::from_path("aatrox_idle.anm")?;
 
-let bytes = anim.to_bytes()?;     // v5 in -> byte-exact v5 out; otherwise emits v4
+let bytes = anim.to_bytes()?;     // any file in -> byte-exact out; emits v4 after make_editable()
 skl.to_path("out.skl")?;
 ```
 
@@ -62,20 +62,20 @@ offsets (relative to byte 12) into shared data sections.
   (translation, scale, rotation) per track.
 - **v4** — sections `vecs -> quats -> frames`; quaternions are full `f32x4`. Frame rows embed the
   joint hash per track plus the three indices and a padding `u16`.
-- **v3 (legacy)** — per-track fixed 32-byte name (hashed with ELF), then a full
+- **v3 (legacy)** — per-track fixed 32-byte name (hashed with the **lowercased ELF** hash, shared
+  from `rs_hash::elf_lower` — the same `Elf.HashLower` the C# oracle keys joints on), then a full
   rotation+translation per frame; scale is implicitly `(1,1,1)`.
 
-**Writing is format-preserving for v5.** When a file is read from uncompressed v5, the reader keeps
-the raw sections (vector palette, the 48-bit quantized quaternion palette *as bytes*, joint hashes,
-and the per-frame palette-index triples) plus the header fields and the exact physical section
-order (`vecs -> quats -> jointHashes -> frames`, with the 12-byte post-header pad). The writer
-replays them, so `read -> write` is **byte-identical** for v5 (verified on the three real samples).
+**Writing is format-preserving for every container the reader accepts.** Reading decodes the tracks
+*and* retains the complete source byte buffer. An unedited `read -> write` replays that buffer
+verbatim, so the round-trip is **byte-identical** for uncompressed v3, v4, and v5 **and** for
+compressed `r3d2canm` — there is no lossy "normalize to v4" step on the write path for an unmodified
+file. The three real v5 samples and synthetic v3/v4/compressed fixtures are all verified byte-exact.
 
-If you mutate `tracks` on a v5-sourced animation, call `Animation::make_editable()` first to drop
-the preserved layout; the writer then rebuilds from the decoded tracks and emits **v4** (full
-quaternions, no quantization loss). Animations constructed in memory, or read from v3/v4/compressed,
-have no preserved layout and always write as v4. `Animation::is_byte_exact()` reports whether the
-preserved v5 layout is present.
+If you mutate `tracks`, call `Animation::make_editable()` first to drop the preserved buffer; the
+writer then rebuilds from the decoded tracks and emits uncompressed **v4** (full quaternions, no
+quantization loss). Animations constructed in memory have no preserved buffer and always write as
+v4. `Animation::is_byte_exact()` reports whether the preserved source bytes are present.
 
 ### Compressed — `r3d2canm` (versions 1, 2, 3)  ✅ supported
 
@@ -111,9 +111,8 @@ Two bits pick the dropped largest-magnitude component; three 15-bit fields hold 
 |---|---|---|---|
 | `.skl` modern `0x22FD4FC3` | 0 | yes (byte-exact) | yes (byte-exact) |
 | `.skl` legacy `r3d2sklt` | 1, 2 | `UnsupportedVersion` | no |
-| `.anm` `r3d2anmd` v5 | 5 | yes | **byte-exact** (v4 after `make_editable`) |
-| `.anm` `r3d2anmd` v3/v4 | 3, 4 | yes | as v4 |
-| `.anm` `r3d2canm` | 1, 2, 3 | yes (resampled) | no (re-emit as v4) |
+| `.anm` `r3d2anmd` v3/v4/v5 | 3, 4, 5 | yes | **byte-exact** (v4 after `make_editable`) |
+| `.anm` `r3d2canm` | 1, 2, 3 | yes (resampled) | **byte-exact** passthrough (v4 after `make_editable`) |
 | `.anm` `r3d2canm` | other | `UnsupportedVersion` | — |
 
 ## Tests & fixtures

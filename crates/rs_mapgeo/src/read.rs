@@ -1,12 +1,17 @@
 /*!
-The reader supports OEGM versions 14, 17 and 18. It parses the full file: shader/texture overrides,
-vertex declarations, vertex/index buffer descriptions, the model list (buffer references, submeshes,
-transform, bounding box, layer, flags and per-version lighting), and the trailing bucketed scene
-graphs and planar reflectors. Vertex buffers are kept as raw bytes plus their declaration so callers
-can decode them. The per-version layout deltas mirror the trusted C# oracle: version 18 adds one
-mesh `u32`; version 14 uses implicit sampler strings, a `u8` render-flag word, a single baked-paint
-channel, no visibility-controller hash, and a single (non-counted) scene graph. Any other version
-returns `Error::UnsupportedVersion`.
+The reader supports OEGM versions 5, 6, 7, 9, 11, 12, 13, 14, 15, 17 and 18. It parses the full
+file: shader/texture overrides, vertex declarations, vertex/index buffer descriptions, the model
+list (buffer references, submeshes, transform, bounding box, layer, flags and per-version lighting),
+and the trailing bucketed scene graphs and planar reflectors. Vertex buffers are kept as raw bytes
+plus their declaration so callers can decode them. Every per-version layout delta mirrors the
+trusted C# oracle: the leading `separate_point_lights` byte and per-mesh point light of versions
+< 7; the embedded per-mesh names of versions < 12; the nine spherical-harmonics coefficients of
+versions < 9 (which replace the stationary-light channel); implicit sampler strings before version
+17; the `u8`-vs-`u16` render flags (the `u16` form starts at version 16); the single baked-paint
+channel of versions 12..=16; the visibility-controller hash and counted scene-graph list of
+versions >= 15; the planar reflectors of versions >= 13; the extra mesh `u32` of version 18; and
+the v5 special case that omits the backface-culling byte. Versions 8, 10 and 16 are not defined by
+the oracle and return `Error::UnsupportedVersion`.
 */
 
 use std::io::{Read, Seek};
@@ -24,7 +29,7 @@ use crate::mapgeo::{
 const MAX_VERTEX_ELEMENTS: usize = 15;
 
 fn is_supported(version: u32) -> bool {
-    matches!(version, 14 | 17 | 18)
+    matches!(version, 5 | 6 | 7 | 9 | 11 | 12 | 13 | 14 | 15 | 17 | 18)
 }
 
 impl MapGeometry {
@@ -39,16 +44,19 @@ impl MapGeometry {
             return Err(Error::UnsupportedVersion(version));
         }
 
+        let separate_point_lights = version < 7 && reader.read_bool()?;
+
         let texture_overrides = read_shader_overrides(reader, version)?;
         let vertex_descriptions = read_vertex_descriptions(reader)?;
-        let vertex_buffers = read_vertex_buffers(reader)?;
-        let index_buffers = read_index_buffers(reader)?;
-        let models = read_models(reader, version)?;
+        let vertex_buffers = read_vertex_buffers(reader, version)?;
+        let index_buffers = read_index_buffers(reader, version)?;
+        let models = read_models(reader, version, separate_point_lights)?;
         let scene_graphs = read_scene_graphs(reader, version)?;
         let planar_reflectors = read_planar_reflectors(reader, version)?;
 
         Ok(MapGeometry {
             version,
+            separate_point_lights,
             texture_overrides,
             vertex_descriptions,
             vertex_buffers,
@@ -120,11 +128,13 @@ fn read_vertex_descriptions<R: Read>(reader: &mut R) -> Result<Vec<VertexDescrip
     Ok(descriptions)
 }
 
-fn read_vertex_buffers<R: Read>(reader: &mut R) -> Result<Vec<VertexBuffer>> {
+/* The per-buffer visibility-layer byte is present only from version 13 onward; earlier versions
+store no layer and default to all-layers (0). */
+fn read_vertex_buffers<R: Read>(reader: &mut R, version: u32) -> Result<Vec<VertexBuffer>> {
     let count = reader.read_u32()? as usize;
     let mut buffers = Vec::with_capacity(count);
     for _ in 0..count {
-        let layer = reader.read_u8()?;
+        let layer = if version >= 13 { reader.read_u8()? } else { 0 };
         let size = reader.read_u32()? as usize;
         let data = reader.read_bytes(size)?;
         buffers.push(VertexBuffer { layer, data });
@@ -132,11 +142,11 @@ fn read_vertex_buffers<R: Read>(reader: &mut R) -> Result<Vec<VertexBuffer>> {
     Ok(buffers)
 }
 
-fn read_index_buffers<R: Read>(reader: &mut R) -> Result<Vec<IndexBuffer>> {
+fn read_index_buffers<R: Read>(reader: &mut R, version: u32) -> Result<Vec<IndexBuffer>> {
     let count = reader.read_u32()? as usize;
     let mut buffers = Vec::with_capacity(count);
     for _ in 0..count {
-        let layer = reader.read_u8()?;
+        let layer = if version >= 13 { reader.read_u8()? } else { 0 };
         let size = reader.read_u32()? as usize;
         let mut indices = Vec::with_capacity(size / 2);
         for _ in 0..size / 2 {
@@ -147,17 +157,32 @@ fn read_index_buffers<R: Read>(reader: &mut R) -> Result<Vec<IndexBuffer>> {
     Ok(buffers)
 }
 
-fn read_models<R: Read>(reader: &mut R, version: u32) -> Result<Vec<MapModel>> {
+fn read_models<R: Read>(
+    reader: &mut R,
+    version: u32,
+    separate_point_lights: bool,
+) -> Result<Vec<MapModel>> {
     let count = reader.read_u32()? as usize;
     let mut models = Vec::with_capacity(count);
     for id in 0..count {
-        models.push(read_model(reader, id, version)?);
+        models.push(read_model(reader, id, version, separate_point_lights)?);
     }
     Ok(models)
 }
 
-fn read_model<R: Read>(reader: &mut R, id: usize, version: u32) -> Result<MapModel> {
-    let name = format!("MapGeo_Instance_{id}");
+fn read_model<R: Read>(
+    reader: &mut R,
+    id: usize,
+    version: u32,
+    separate_point_lights: bool,
+) -> Result<MapModel> {
+    /* Versions < 12 embed the mesh name as a sized string; later versions derive it from the
+    instance index and store nothing. */
+    let name = if version < 12 {
+        reader.read_string_u32()?
+    } else {
+        format!("MapGeo_Instance_{id}")
+    };
 
     let vertex_count = reader.read_u32()?;
     let vertex_buffer_count = reader.read_u32()? as usize;
@@ -171,7 +196,9 @@ fn read_model<R: Read>(reader: &mut R, id: usize, version: u32) -> Result<MapMod
     let index_count = reader.read_u32()?;
     let index_buffer_id = reader.read_i32()?;
 
-    let layer = if version >= 13 { reader.read_u8()? } else { 0 };
+    /* The visibility layer sits here from version 13 onward; versions 7..=12 instead store it
+    after the transform (read below), and versions < 7 have no layer byte at all. */
+    let mut layer = if version >= 13 { reader.read_u8()? } else { 0 };
 
     let unknown_v18 = if version >= 18 { reader.read_u32()? } else { 0 };
     let bucket_grid_hash = if version >= 15 { reader.read_u32()? } else { 0 };
@@ -195,21 +222,78 @@ fn read_model<R: Read>(reader: &mut R, id: usize, version: u32) -> Result<MapMod
         });
     }
 
-    let disable_backface_culling = reader.read_bool()?;
+    /* Version 5 is the lone exception that omits the backface-culling byte entirely. */
+    let disable_backface_culling = if version != 5 {
+        reader.read_bool()?
+    } else {
+        false
+    };
 
     let bounds = Aabb::new(read_vec3(reader)?, read_vec3(reader)?);
     let transform = read_mat4(reader)?;
 
     let quality = reader.read_u8()?;
 
-    /* Version >= 14 stores the layer-transition behavior byte followed by the render-flag word,
-    which widened from a `u8` to a `u16` at version 16. */
-    let layer_transition = reader.read_u8()?;
-    let render_flags = if version >= 16 {
-        reader.read_u16()?
+    if (7..=12).contains(&version) {
+        layer = reader.read_u8()?;
+    }
+
+    /* Render-flag layout by version: versions 11..=13 store a bare `u8` with no transition byte;
+    versions >= 14 store the layer-transition behavior byte followed by the render-flag word, which
+    widened from a `u8` to a `u16` at version 16; versions < 11 store neither. */
+    let mut layer_transition = 0u8;
+    let mut render_flags = 0u16;
+    if (11..14).contains(&version) {
+        render_flags = reader.read_u8()? as u16;
+    } else if version >= 14 {
+        layer_transition = reader.read_u8()?;
+        render_flags = if version >= 16 {
+            reader.read_u16()?
+        } else {
+            reader.read_u8()? as u16
+        };
+    }
+
+    let point_light = if version < 7 && separate_point_lights {
+        Some(read_vec3(reader)?)
     } else {
-        reader.read_u8()? as u16
+        None
     };
+
+    /* Versions < 9 carry nine spherical-harmonics light-probe coefficients and only the baked-light
+    channel; the stationary-light channel and any paint data are absent. */
+    if version < 9 {
+        let mut harmonics = [Vec3::ZERO; 9];
+        for slot in &mut harmonics {
+            *slot = read_vec3(reader)?;
+        }
+        let baked_light = read_channel(reader)?;
+        return Ok(MapModel {
+            name,
+            vertex_count,
+            vertex_description_id,
+            vertex_buffer_ids,
+            index_count,
+            index_buffer_id,
+            layer,
+            unknown_v18,
+            bucket_grid_hash,
+            submeshes,
+            disable_backface_culling,
+            bounds,
+            transform,
+            quality,
+            layer_transition,
+            render_flags,
+            point_light,
+            spherical_harmonics: Some(harmonics),
+            baked_light,
+            stationary_light: AssetChannel::empty(),
+            texture_overrides: Vec::new(),
+            baked_paint_scale_offset: [0.0; 4],
+            baked_paint: None,
+        });
+    }
 
     let baked_light = read_channel(reader)?;
     let stationary_light = read_channel(reader)?;
@@ -256,6 +340,8 @@ fn read_model<R: Read>(reader: &mut R, id: usize, version: u32) -> Result<MapMod
         quality,
         layer_transition,
         render_flags,
+        point_light,
+        spherical_harmonics: None,
         baked_light,
         stationary_light,
         texture_overrides,

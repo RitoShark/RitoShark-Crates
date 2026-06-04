@@ -31,5 +31,5 @@ CLAUDE.md
 *.log
 
 # Local sample game files (copyrighted; never committed) and reference clones
-/sample-files/
-/texture-reference/
+/Sample-Files/
+/Texture-Reference/

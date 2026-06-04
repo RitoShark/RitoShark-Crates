@@ -14,3 +14,4 @@ image = { workspace = true }
 ddsfile = "0.5"
 texture2ddecoder = "0.1"
 texpresso = "2.0.2"
+intel_tex_2 = "=0.4.0"

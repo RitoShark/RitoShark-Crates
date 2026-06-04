@@ -128,15 +128,25 @@ TexThumbnailProvider) surfaced these gaps:
 ## What I implemented
 
 - **Encoder (`encode.rs`).** `Texture::encode(&RgbaImage, TexFormat, mipmaps)` plus `encode_bc1`
-  / `encode_bc3` shortcuts compress an image into a valid `.tex` using a pure-Rust BC compressor
-  (`texpresso`, pinned `2.0.2` — builds clean on Windows/MSVC), supporting **BC1, BC3, and BC5**.
-  When `mipmaps` is set it generates the full chain down to 1×1 with a separable **Lanczos-3**
-  resample (matching Paint.NET's `DownsampleRgba`) and stores it smallest-first exactly as the
-  reader/`TexFile.Read` expect. `from_rgba_bgra8` builds an uncompressed texture. BC7/ETC encode
-  are intentionally skipped (`texpresso` has no encoder for them).
+  / `encode_bc3` / `encode_bc7` shortcuts compress an image into a valid `.tex`, supporting
+  **BC1, BC3, BC5, and BC7**. BC1/BC3/BC5 use the pure-Rust `texpresso` compressor (pinned
+  `2.0.2`). When `mipmaps` is set it generates the full chain down to 1×1 with a separable
+  **Lanczos-3** resample (matching Paint.NET's `DownsampleRgba`) and stores it smallest-first
+  exactly as the reader/`TexFile.Read` expect. `from_rgba_bgra8` builds an uncompressed texture.
+- **BC7 encoder.** Added `intel_tex_2` (pinned `=0.4.0`) — Intel's ISPC block compressor. It
+  **builds clean on Windows/MSVC**: the crate ships prebuilt ISPC kernels via `ispc_rt`, so no
+  ISPC/clang/`cl` toolchain is required (verified: compiles in ~8 s, links and runs). The kernel
+  operates on whole 4×4 tiles, so non-aligned mips (3×3, 2×2, 1×1…) are padded up to the block
+  grid by edge replication before encoding; the partial edge blocks the decoder discards are
+  unaffected. `intel_tex_2` uses `unsafe` internally, but it is an external dependency —
+  `rs_tex` itself keeps `#![forbid(unsafe_code)]`. BC7 encode uses the balanced
+  `alpha_basic_settings` preset.
 - **DDS writer (`dds.rs`).** `write_dds_bytes` / `save_dds` and `Texture::to_dds_bytes` /
-  `save_dds` emit an uncompressed `R8G8B8A8_UNorm` `.dds` via `ddsfile`, a lossless container for
-  the decoded image.
+  `save_dds` emit an uncompressed `R8G8B8A8_UNorm` `.dds` via `ddsfile`. **Compressed DDS:**
+  `write_dds_bytes_bc` / `save_dds_bc` and `Texture::to_dds_bytes_bc` / `save_dds_bc` emit a
+  block-compressed **BC1/BC3/BC5/BC7** `.dds` (mapped onto `BC{1,3,5,7}_UNorm` DXGI formats),
+  re-compressing the decoded RGBA8 surface. The DDS reader gained BC5 decode so written BC5 DDS
+  reads back.
 - **Multi-surface DDS decode.** `read_dds_faces` / `read_dds_faces_bytes` walk every array layer
   (`get_num_array_layers`, which returns 6 for cubemaps) and decode each layer's full-resolution
   mip; `dds_is_cubemap` reports the surface kind. `read_dds_bytes` still returns the first
@@ -153,8 +163,15 @@ TexThumbnailProvider) surfaced these gaps:
   the mean absolute per-channel diff is asserted `< 12` (BC is lossy). The re-encoded `.tex` is
   also re-parsed and its header/mip-count checked, proving the encoder emits a structurally valid
   file our own reader accepts.
+- Each real BC1/BC3 `.tex` is decoded → **encoded to BC7** (with the same mip flag) → re-parsed →
+  decoded; header/mip-count checked and mean-abs-diff asserted `< 8`. Measured drift on the real
+  samples is well under 8 (BC7 is high quality). A synthetic 64×64 BC7 gradient round-trips at
+  drift `< 6` with a 7-level mip chain.
 - A synthetic 64×64 gradient encodes to BC1 (opaque) and BC3 (alpha) with mip chains (7 levels),
   round-trips under threshold, and re-parses.
+- **Compressed DDS:** a synthetic 32×32 image is written to BC1/BC3/BC5/BC7 `.dds` via
+  `write_dds_bytes_bc`, read back through `read_dds_bytes`, and compared; dimensions match and
+  drift is under threshold (BC5 compared on its R/G channels only).
 - `aatrox_cubemap.dds` is detected as a cubemap and decodes to **six faces**.
 - The DDS writer round-trips an uncompressed RGBA8 image byte-exactly.
 
@@ -162,12 +179,14 @@ All `rs_tex` tests pass and `cargo clippy -p rs_tex --all-targets -- -D warnings
 
 ## Remaining gaps / TODO
 
-1. **BC7 and ETC encoding.** Only decode exists for these. `texpresso` cannot encode them; BC7
-   would need `intel_tex_2` (C/ISPC build) and ETC a dedicated encoder.
+1. **ETC encoding.** ETC1/ETC2/ETC2-EAC remain decode-only — no buildable pure-Rust ETC encoder
+   is wired in. (`intel_tex_2` exposes an ETC1 path but not the ETC2 variants League uses.) This
+   is the main remaining encode gap.
 2. **`RGBA16_SNORM` encode.** Decode added; no encoder path yet.
-3. **DDS writer is uncompressed only.** It re-encodes to RGBA8 rather than preserving an original
-   BC payload or writing compressed DDS; a block-preserving DDS export would be lossless for
-   already-compressed sources.
+3. **Compressed DDS re-compresses rather than preserves.** `write_dds_bytes_bc` re-encodes the
+   decoded RGBA8 surface into BC, so exporting an already-BC source is a lossy re-compress. A
+   block-preserving path (copy the original mip bytes straight into the DDS) would be lossless for
+   already-compressed sources and is still TODO.
 4. **Confirm the ETC2/EAC mapping against a real mobile `.tex`.** It now matches the two C++
    codecs, but no ETC sample exercises the decode path end to end.
 5. **`.tex` has no multi-surface header**, so cubemap/array support is DDS-only; if a `.tex`

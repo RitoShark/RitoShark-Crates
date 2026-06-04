@@ -1,8 +1,10 @@
 # rs_mapgeo — real-file report
 
 Results of running `rs_mapgeo` against the real `.mapgeo` samples in the workspace `Sample-Files/`
-directory. The crate now supports **OEGM versions 14, 17 and 18**; everything else is reported as
-`Error::UnsupportedVersion`.
+directory. The crate now supports the **full oracle matrix — OEGM versions 5, 6, 7, 9, 11, 12, 13,
+14, 15, 17 and 18**. Versions 8, 10 and 16 are not defined by the oracle and are reported as
+`Error::UnsupportedVersion`. Only v14/v17/v18 have real samples; the remaining versions are covered
+by synthetic byte-exact round-trip tests (`tests/synthetic_versions.rs`).
 
 ## Per-file results
 
@@ -47,6 +49,28 @@ discards and re-emits it version-correctly:
    vertex/index arrays, per-bucket records, optional per-face visibility flags) and the planar
    reflectors (`transform, plane, normal`) are now fully parsed and round-tripped, so `bloom.mapgeo`
    round-trips in full rather than just up to the model list.
+4. **OEGM v5, v6, v7, v9, v11, v12, v13, v15 reader + writer.** Added the remaining oracle versions
+   by filling the existing version-gated branches (no parallel reader). Per-version notes:
+   - **v5 / v6.** Leading file-level `separate_point_lights` `bool` (`MapGeometry::separate_point_lights`);
+     embedded per-mesh names; no per-buffer layer byte; no mesh layer byte; no render flags
+     (< 11); a per-mesh point light `Vec3` when the flag is set (`MapModel::point_light`); nine
+     spherical-harmonics coefficients (`MapModel::spherical_harmonics`) followed by only the
+     baked-light channel. **v5 additionally omits the backface-culling byte** (`version != 5` gate).
+   - **v7.** Same as v6 minus the `separate_point_lights` byte and point light (gate is `< 7`); the
+     mesh layer byte moves to the post-transform slot (`7..=12`); still spherical-harmonics lit
+     (< 9) with no stationary light or paint.
+   - **v9.** Gains the first implicit sampler string (`BAKED_DIFFUSE_TEXTURE`), the stationary-light
+     channel, and drops the spherical-harmonics block (>= 9). No render flags yet (< 11). Layer
+     still post-transform (7..=12).
+   - **v11.** Adds the second implicit sampler string (`..._ALPHA`) and the bare `u8` render-flag
+     word (`11..=13`, no transition byte). Still embeds per-mesh names (< 12) and post-transform
+     layer (7..=12).
+   - **v12.** Drops embedded names (>= 12) and adds the single baked-paint channel
+     (`MapModel::baked_paint`, `12..=16`). Layer still post-transform.
+   - **v13.** Per-buffer + per-mesh layer bytes move to the >= 13 positions; adds the planar
+     reflectors section. Render flags still bare `u8` (`11..=13`).
+   - **v15.** Adds the mesh visibility-controller hash (`bucket_grid_hash`, >= 15), the counted
+     scene-graph list with per-graph hashes, and the transition byte + `u8` render flags (`14..15`).
 
 ## Field-by-field version matrix (mirrors the C# oracle)
 
@@ -64,13 +88,16 @@ discards and re-emits it version-correctly:
 
 ## Remaining gaps
 
-- **Versions 5, 6, 7, 9, 11, 12, 13, 15** are still `UnsupportedVersion` — no real samples to
-  validate against, and several carry features this crate does not yet model (separate point
-  lights `< 7`, spherical-harmonics light probes `< 9`, embedded mesh names `<= 11`, the
-  `version == 5` special-case that omits `DisableBackfaceCulling`). The reader/writer are already
-  structured by version gates, so adding them is mostly filling these branches once a fixture
-  exists.
-- **Light grid** (older embedded per-mesh grid) is not modeled; none of the three samples use it.
+- **Versions 8, 10 and 16 are undocumented / skipped.** They are absent from the C# oracle's
+  version gate (`5,6,7,9,11,12,13,14,15,17,18`), absent from pyritofile's matrix, and have no known
+  real files, so there is no authoritative layout to mirror. They report `UnsupportedVersion` rather
+  than being guessed at. (pyritofile additionally omits v18 from *its* reader, but the C# oracle and
+  our existing real sample cover it, so we keep it.)
+- **No real fixtures for 5/6/7/9/11/12/13/15.** These versions are implemented straight from the two
+  oracles and validated by synthetic byte-exact round-trips. They should be re-checked against a
+  real file if one ever surfaces, but the layout is a faithful mirror of the oracle gates.
+- **Light grid** (older embedded per-mesh grid) is not modeled; none of the three real samples use
+  it, and the oracle does not read it for any supported version.
 
 ## Foundation needs
 

@@ -186,6 +186,8 @@ pub struct TextureOverride {
 /// One placed environment model: its buffer references, transform, bounds, and lighting data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapModel {
+    /// Mesh name. Embedded in the file as a sized string for versions < 12; for later versions it
+    /// is the generated `MapGeo_Instance_{id}` and is not stored on disk.
     pub name: String,
     pub vertex_count: u32,
     pub vertex_description_id: u32,
@@ -204,7 +206,15 @@ pub struct MapModel {
     pub quality: u8,
     pub layer_transition: u8,
     pub render_flags: u16,
+    /// Separate per-mesh point light, present only on versions 5/6 when the file-level
+    /// `separate_point_lights` flag is set. `None` otherwise.
+    pub point_light: Option<Vec3>,
+    /// The nine spherical-harmonics light-probe coefficients carried by versions < 9 in place of
+    /// the stationary-light channel and baked-paint data. `None` for versions >= 9.
+    pub spherical_harmonics: Option<[Vec3; 9]>,
     pub baked_light: AssetChannel,
+    /// Stationary-light channel; present only on versions >= 9 (versions < 9 use
+    /// [`Self::spherical_harmonics`] instead and carry only the baked-light channel).
     pub stationary_light: AssetChannel,
     pub texture_overrides: Vec<TextureOverride>,
     pub baked_paint_scale_offset: [f32; 4],
@@ -259,6 +269,9 @@ pub struct PlanarReflector {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapGeometry {
     pub version: u32,
+    /// File-level flag read only on versions < 7 (a leading `bool`). When set, versions 5/6 store
+    /// a separate per-mesh point light. Always `false` for versions >= 7, where the byte is absent.
+    pub separate_point_lights: bool,
     pub texture_overrides: Vec<TextureOverride>,
     pub vertex_descriptions: Vec<VertexDescription>,
     pub vertex_buffers: Vec<VertexBuffer>,

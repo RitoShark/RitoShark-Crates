@@ -2,11 +2,13 @@
 
 Reads and writes League of Legends `.mapgeo` (**OEGM**) environment geometry.
 
-This crate supports **OEGM versions 14, 17 and 18**. Any other on-disk version is reported as
-`Error::UnsupportedVersion(version)` rather than mis-parsed. The reader covers the **entire** file —
-including the trailing bucketed scene graphs and planar reflectors — and the writer is its
-byte-exact inverse, so a read → write round-trip of a supported file is byte-identical over the
-whole file (all three real samples round-trip in full).
+This crate supports **OEGM versions 5, 6, 7, 9, 11, 12, 13, 14, 15, 17 and 18** — the full version
+matrix of the C# `LeagueToolkit` oracle. Versions 8, 10 and 16 are not defined by the oracle and are
+reported as `Error::UnsupportedVersion(version)` rather than mis-parsed. The reader covers the
+**entire** file — including the trailing bucketed scene graphs and planar reflectors — and the
+writer is its byte-exact inverse, so a read → write round-trip of a supported file is byte-identical
+over the whole file (all three real samples round-trip in full; the remaining versions are validated
+synthetically).
 
 ## Format overview (OEGM)
 
@@ -15,7 +17,8 @@ bytes (no NUL terminator).
 
 ```
 magic            : "OEGM" (4 bytes)
-version          : u32                       // this crate accepts 14, 17, 18
+version          : u32                       // accepts 5,6,7,9,11,12,13,14,15,17,18
+separate_lights  : u8 bool                   // present only if version < 7
 
 shader texture overrides
   count          : u32
@@ -81,20 +84,42 @@ equals the **entire** source file byte-for-byte.
 
 ### Per-version layout deltas
 
-| Field | v14 | v17 | v18 |
-|---|---|---|---|
-| shader overrides | implicit bare strings (v9/v11 samplers) | counted `[index, name]` | counted `[index, name]` |
-| mesh extra `u32` after layer | — | — | `unknown_v18` |
-| mesh visibility-controller hash | — | `u32` | `u32` |
-| mesh render flags | `u8` | `u16` | `u16` |
-| mesh paint data | single baked-paint channel | counted overrides + scale/bias | counted overrides + scale/bias |
-| scene graph list | single implicit graph | counted | counted, each with leading `f32` |
+Every gate below mirrors the C# oracle (`EnvironmentAsset` / `EnvironmentAssetMesh` /
+`BucketedGeometry`). All deltas are version-gated inside the single reader/writer pair — there is no
+parallel reader per version.
+
+| Field | applies when |
+|---|---|
+| leading `separate_point_lights` byte | version < 7 |
+| shader overrides: implicit bare strings (v9 sampler, v11 second) | 9 ≤ version < 17 |
+| shader overrides: counted `[index, name]` list | version ≥ 17 |
+| per-buffer visibility layer byte (vertex + index buffers) | version ≥ 13 |
+| embedded per-mesh name (sized string) | version < 12 |
+| mesh layer byte (before submeshes) | version ≥ 13 |
+| mesh layer byte (after transform) | 7 ≤ version ≤ 12 |
+| mesh `unknown_v18` `u32` | version ≥ 18 |
+| mesh visibility-controller hash `u32` | version ≥ 15 |
+| backface-culling byte | version ≠ 5 |
+| mesh render flags: bare `u8`, no transition byte | 11 ≤ version ≤ 13 |
+| mesh render flags: transition byte + `u8` | 14 ≤ version ≤ 15 |
+| mesh render flags: transition byte + `u16` | version ≥ 16 |
+| per-mesh point light (`Vec3`) | version < 7 and `separate_point_lights` |
+| nine spherical-harmonics coefficients (then baked-light only) | version < 9 |
+| stationary-light channel | version ≥ 9 |
+| single baked-paint channel | 12 ≤ version < 17 |
+| counted texture overrides + scale/offset | version ≥ 17 |
+| scene graphs: single implicit graph | version < 15 |
+| scene graphs: counted list, each with visibility hash | version ≥ 15 |
+| scene graph leading `f32` | version ≥ 18 |
+| planar reflectors (counted list) | version ≥ 13 |
 
 ## Versioning
 
-Versions `14`, `17` and `18` are accepted; all three appear in the wild (see
-`docs/real-files-report.md`). The C# oracle additionally lists `5, 6, 7, 9, 11, 12, 13, 15`, which
-this crate does not yet exercise against real samples and reports as `UnsupportedVersion`.
+Versions `5, 6, 7, 9, 11, 12, 13, 14, 15, 17, 18` are accepted — the complete matrix listed by the
+C# `LeagueToolkit` oracle. Only `14`, `17` and `18` appear among the real samples (see
+`docs/real-files-report.md`); the rest are validated synthetically in `tests/synthetic_versions.rs`
+by building a minimal file per version straight from the oracle's layout and asserting a byte-exact
+round-trip. Versions `8`, `10` and `16` are absent from the oracle and report `UnsupportedVersion`.
 
 ## API
 
@@ -129,10 +154,13 @@ suite is green on a fresh checkout.
 ## Testing
 
 - `tests/smoke.rs` — a hand-built minimal v17 file: parse, reject bad magic / unsupported
-  version, byte-exact round-trip, and a truncation test (must `Err`, never panic).
+  version (16), byte-exact round-trip, and a truncation test (must `Err`, never panic).
+- `tests/synthetic_versions.rs` — a minimal file built per version (5/6/7/9/11/12/13/15) from the
+  oracle's layout, each asserting a byte-exact `read → to_bytes → ==`, plus a check that the
+  undocumented versions 8/10/16 report `UnsupportedVersion`.
 - `tests/real_files.rs` — for each sample: print magic + version, then parse; supported versions
-  (14/17/18) must yield a non-empty model list and round-trip the **whole** file byte-for-byte,
-  other versions must report `UnsupportedVersion` carrying the exact on-disk version.
+  must yield a non-empty model list and round-trip the **whole** file byte-for-byte, other
+  versions must report `UnsupportedVersion` carrying the exact on-disk version.
 
 ```bash
 cargo test -p rs_mapgeo

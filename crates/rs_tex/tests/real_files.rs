@@ -3,17 +3,14 @@ use std::path::{Path, PathBuf};
 use rs_io::{Parse, Serialize};
 use rs_tex::{
     TexFormat, Texture, dds_is_cubemap, read_dds_bytes, read_dds_faces_bytes, write_dds_bytes,
+    write_dds_bytes_bc,
 };
 
 /// Mean absolute per-channel difference between two equally sized RGBA images.
 fn mean_abs_diff(a: &image::RgbaImage, b: &image::RgbaImage) -> f64 {
     assert_eq!(a.dimensions(), b.dimensions());
     let (ar, br) = (a.as_raw(), b.as_raw());
-    let total: u64 = ar
-        .iter()
-        .zip(br)
-        .map(|(x, y)| x.abs_diff(*y) as u64)
-        .sum();
+    let total: u64 = ar.iter().zip(br).map(|(x, y)| x.abs_diff(*y) as u64).sum();
     total as f64 / ar.len() as f64
 }
 
@@ -177,6 +174,102 @@ fn encode_synthetic_gradient_roundtrips_close() {
         let decoded = parsed.decode_rgba().expect("decode");
         let diff = mean_abs_diff(img, &decoded);
         assert!(diff < thresh, "{fmt:?}: gradient drift {diff:.3}");
+    }
+}
+
+#[test]
+fn real_tex_encodes_to_bc7_and_roundtrips_close() {
+    for name in TEX_SAMPLES {
+        let Some(bytes) = read_sample(name) else {
+            continue;
+        };
+        let tex = Texture::from_bytes(&bytes).unwrap_or_else(|e| panic!("{name}: parse: {e}"));
+        let original = tex
+            .decode_rgba()
+            .unwrap_or_else(|e| panic!("{name}: decode: {e}"));
+
+        let encoded = Texture::encode_bc7(&original, tex.has_mipmaps)
+            .unwrap_or_else(|e| panic!("{name}: bc7 encode: {e}"));
+        assert_eq!(encoded.format, TexFormat::Bc7, "{name}: bc7 format byte");
+
+        let tex_bytes = encoded
+            .to_bytes()
+            .unwrap_or_else(|e| panic!("{name}: bc7 to_bytes: {e}"));
+        let parsed =
+            Texture::from_bytes(&tex_bytes).unwrap_or_else(|e| panic!("{name}: bc7 reparse: {e}"));
+        assert_eq!(parsed.width, tex.width, "{name}: bc7 width");
+        assert_eq!(parsed.height, tex.height, "{name}: bc7 height");
+        assert_eq!(parsed.format, TexFormat::Bc7, "{name}: bc7 reparse format");
+        if tex.has_mipmaps {
+            assert_eq!(parsed.mips.len(), tex.mips.len(), "{name}: bc7 mip count");
+        }
+
+        let roundtripped = parsed
+            .decode_rgba()
+            .unwrap_or_else(|e| panic!("{name}: bc7 redecode: {e}"));
+        let diff = mean_abs_diff(&original, &roundtripped);
+        assert!(
+            diff < 8.0,
+            "{name}: bc7 re-encode drift too high (mean abs diff {diff:.3})"
+        );
+        eprintln!("{name}: BC7 encode mean-abs-diff={diff:.3} OK");
+    }
+}
+
+#[test]
+fn encode_synthetic_gradient_bc7_roundtrips_close() {
+    let mut img = image::RgbaImage::new(64, 64);
+    for (x, y, px) in img.enumerate_pixels_mut() {
+        *px = image::Rgba([(x * 4) as u8, (y * 4) as u8, 128, (x * 4) as u8]);
+    }
+    let tex = Texture::encode_bc7(&img, true).expect("bc7 encode");
+    let bytes = tex.to_bytes().expect("to_bytes");
+    let parsed = Texture::from_bytes(&bytes).expect("reparse");
+    assert_eq!(parsed.format, TexFormat::Bc7);
+    assert!(parsed.has_mipmaps);
+    assert_eq!(parsed.mips.len(), 7, "64px -> 7 mip levels");
+    let decoded = parsed.decode_rgba().expect("decode");
+    let diff = mean_abs_diff(&img, &decoded);
+    assert!(diff < 6.0, "bc7 gradient drift {diff:.3}");
+}
+
+#[test]
+fn compressed_dds_writes_and_reads_back() {
+    let mut img = image::RgbaImage::new(32, 32);
+    for (x, y, px) in img.enumerate_pixels_mut() {
+        *px = image::Rgba([(x * 8) as u8, (y * 8) as u8, 96, 255]);
+    }
+    // Each BC format must write a compressed DDS our own reader can decode back to dimensions,
+    // with the decoded result close to the source (BC is lossy). BC5 is two-channel, so only its
+    // R/G survive; compare just those for it.
+    for (fmt, thresh, rg_only) in [
+        (TexFormat::Bc1, 12.0, false),
+        (TexFormat::Bc3, 12.0, false),
+        (TexFormat::Bc7, 8.0, false),
+        (TexFormat::Bc5, 12.0, true),
+    ] {
+        let dds_bytes = write_dds_bytes_bc(&img, fmt)
+            .unwrap_or_else(|e| panic!("{fmt:?}: compressed dds write: {e}"));
+        let back = read_dds_bytes(&dds_bytes)
+            .unwrap_or_else(|e| panic!("{fmt:?}: compressed dds read: {e}"));
+        assert_eq!(back.dimensions(), img.dimensions(), "{fmt:?}: dims");
+
+        let diff = if rg_only {
+            let (ar, br) = (img.as_raw(), back.as_raw());
+            let mut total = 0u64;
+            let mut count = 0u64;
+            for (i, (a, b)) in ar.iter().zip(br).enumerate() {
+                if i % 4 < 2 {
+                    total += a.abs_diff(*b) as u64;
+                    count += 1;
+                }
+            }
+            total as f64 / count as f64
+        } else {
+            mean_abs_diff(&img, &back)
+        };
+        assert!(diff < thresh, "{fmt:?}: compressed dds drift {diff:.3}");
+        eprintln!("{fmt:?}: compressed DDS round-trip mean-abs-diff={diff:.3} OK");
     }
 }
 

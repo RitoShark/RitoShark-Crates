@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use rs_io::Parse;
+use rs_io::{Parse, Serialize};
 use rs_rman::{Error, Rman};
 
 const HEADER_LEN: u32 = 28;
@@ -105,6 +105,28 @@ fn parses_synthetic_body() {
     assert_eq!(ranges[0].offset_in_bundle, 0);
     assert_eq!(ranges[0].compressed_size, 100);
     assert_eq!(ranges[0].uncompressed_size, 250);
+}
+
+/// Semantic round-trip on a synthetic manifest: parse the hand-built body, re-serialize it
+/// with the real writer, parse that, and assert the two logical models are identical. Byte-exact
+/// reproduction is deliberately not asserted (zstd + FlatBuffer layout are not unique).
+#[test]
+fn synthetic_semantic_round_trip() {
+    let original = Rman::from_bytes(&wrap(&Body::full())).unwrap();
+    let bytes = original.to_bytes().unwrap();
+    let reparsed = Rman::from_bytes(&bytes).unwrap();
+    assert_eq!(original, reparsed);
+}
+
+/// The writer preserves file fields the reader does not interpret (FlatBuffer indices 5/6/8/10/11)
+/// so nothing is lost across a write. Build a file carrying those extras, round-trip, and compare.
+#[test]
+fn preserves_uninterpreted_file_fields() {
+    let original = Rman::from_bytes(&wrap(&Body::with_extras())).unwrap();
+    assert_eq!(original.files[0].extra.field11, Some(2));
+    assert_eq!(original.files[0].extra.field5, Some(0xABCD));
+    let reparsed = Rman::from_bytes(&original.to_bytes().unwrap()).unwrap();
+    assert_eq!(original, reparsed);
 }
 
 #[test]
@@ -319,6 +341,50 @@ impl Body {
         b.patch(file_chunks_slot, b.pos());
         b.u32(1); // chunk id count
         b.u64(0xC001);
+
+        b.finish()
+    }
+
+    /// A minimal body whose single file carries the normally-uninterpreted fields 5 (`u32`) and
+    /// 11 (`u16`), used to prove the writer preserves them across a round-trip.
+    fn with_extras() -> Vec<u8> {
+        let mut b = Self::new();
+        b.i32(0);
+        let bundles_slot = b.reserve();
+        let flags_slot = b.reserve();
+        let files_slot = b.reserve();
+        let dirs_slot = b.reserve();
+
+        // Empty bundles / flags / directories tables.
+        b.patch(bundles_slot, b.pos());
+        b.u32(0);
+        b.patch(flags_slot, b.pos());
+        b.u32(0);
+
+        // Files table: one file with field 5 (u32) and field 11 (u16) present.
+        b.patch(files_slot, b.pos());
+        b.u32(1);
+        let file_ptr = b.reserve();
+        let file_entry = b.pos();
+        b.patch(file_ptr, file_entry);
+        let file_vtable_slot = b.reserve();
+        b.u64(0xF002); // +4  field 0 id
+        b.u32(64); // +12 field 2 size
+        b.u32(0xABCD); // +16 field 5 (u32)
+        let file_name_slot = b.reserve(); // +20 field 3 name
+        let file_chunks_slot = b.reserve(); // +24 field 7 chunks
+        b.u16(2); // +28 field 11 (u16)
+        b.u32(1); // +30 field 12 permissions
+        let file_field_array =
+            b.vtable(&[4, 0, 12, 20, 0, 16, 0, 24, 0, 0, 0, 28, 30]);
+        b.patch_vtable(file_vtable_slot, file_field_array);
+        b.patch(file_name_slot, b.pos());
+        b.string("loose.txt");
+        b.patch(file_chunks_slot, b.pos());
+        b.u32(0); // no chunk ids
+
+        b.patch(dirs_slot, b.pos());
+        b.u32(0);
 
         b.finish()
     }
