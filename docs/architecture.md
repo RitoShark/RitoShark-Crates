@@ -1,7 +1,27 @@
 # Architecture
 
-RitoShark is a Cargo workspace of small, single-purpose crates. This document describes how the
-pieces fit together and the conventions every crate follows.
+RitoShark is a Cargo workspace of small, single-purpose crates. This document describes how the pieces fit together and the conventions every crate follows.
+
+## Workspace layout
+
+```
+ritoshark/        umbrella crate — re-exports every format module behind a feature
+crates/
+  rs_io/          byte/stream I/O, the Parse/Serialize traits, mmap-backed reads
+  rs_hash/        FNV-1a, XXH64/XXH3, SystemV ELF, and hash-name dictionaries
+  rs_math/        vector / matrix / colour / bounds primitives (over glam)
+  rs_file/        format detection by magic bytes
+  rs_bin/         .bin (PROP/PTCH) + #PROP_text
+  rs_wad/         .wad archives
+  rs_tex/         .tex + .dds textures
+  rs_mesh/        .skn skinned + .scb static meshes
+  rs_anim/        .skl skeletons + .anm animations
+  rs_mapgeo/      .mapgeo environment geometry
+  rs_rst/         .stringtable string tables
+  rs_rman/        .manifest release manifests (read-only)
+  rs_audio/       .wpk / .bnk audio containers
+  rs_cli/         the `ritoshark` command-line tool
+```
 
 ## Crate graph
 
@@ -12,18 +32,14 @@ rs_io  ──┘        ▲
 rs_file ──────────┘
 ```
 
-- **Foundation** — `rs_io`, `rs_hash`, `rs_math`, `rs_file`. These depend only on third-party
-  crates (and, where useful, each other). They define the shared vocabulary every format speaks.
-- **Format crates** — `rs_bin`, `rs_wad`, `rs_tex`, `rs_mesh`, `rs_anim`, `rs_mapgeo`, `rs_rst`,
-  `rs_rman`, `rs_audio`. Each handles one family of formats and depends only on the foundation.
-- **Umbrella** — `ritoshark` re-exports every format module behind a feature flag of the same
-  name, plus a `prelude`. Nothing depends on the umbrella except the CLI.
+- **Foundation** — `rs_io`, `rs_hash`, `rs_math`, `rs_file`. They depend only on third-party crates (and, where useful, each other) and define the shared vocabulary every format speaks.
+- **Format crates** — `rs_bin`, `rs_wad`, `rs_tex`, `rs_mesh`, `rs_anim`, `rs_mapgeo`, `rs_rst`, `rs_rman`, `rs_audio`. Each handles one family of formats and depends only on the foundation.
+- **Umbrella** — `ritoshark` re-exports every format module behind a feature flag of the same name, plus a `prelude`. Nothing depends on the umbrella except the CLI.
 - **CLI** — `rs_cli` builds the `ritoshark` binary.
 
 ## The universal interface
 
-Two traits in `rs_io`, implemented by every top-level format type, make the whole workspace
-behave identically:
+Two traits in `rs_io`, implemented by every top-level format type, make the whole workspace behave identically:
 
 ```rust
 pub trait Parse: Sized {
@@ -48,8 +64,7 @@ The verb vocabulary is fixed and never varies between crates:
 | construct in memory | `new` / `Foo::builder()…build()` |
 | field accessor | `field_name()` (no `get_` prefix) |
 
-`ReaderExt` and `WriterExt` (also in `rs_io`) add little-endian typed reads/writes
-(`read_u32`, `read_string_u16`, `read_vec3`, …) on top of any `std::io::Read`/`Write`.
+`ReaderExt` and `WriterExt` (also in `rs_io`) add little-endian typed reads/writes (`read_u32`, `read_string_u16`, `read_vec3`, …) on top of any `std::io::Read`/`Write`.
 
 ## Per-crate layout
 
@@ -71,33 +86,24 @@ crates/rs_<fmt>/
 
 ## Errors
 
-Each crate defines exactly one `Error` enum via `thiserror` and one `Result<T>` alias. Errors
-carry enough context to debug (offsets, expected-vs-got, path hashes) without embedding large
-payloads. Library code never prints and never panics on input — malformed data is always an
-`Err`. The CLI is the only place errors are rendered for humans.
+Each crate defines exactly one `Error` enum via `thiserror` and one `Result<T>` alias. Errors carry enough context to debug (offsets, expected-vs-got, path hashes) without embedding large payloads. Library code never prints and never panics on input — malformed data is always an `Err`. The CLI is the only place errors are rendered for humans.
 
 ## Performance
 
 Speed comes from data layout and algorithm, not micro-optimization:
 
-- **Memory-mapped reads.** `from_path` maps the file and parses from the borrowed slice; only leaf
-  values (strings, buffers) allocate.
-- **Single pass.** Readers consume the stream once and use on-disk size fields as inline bounds
-  checks, which also catches corruption early.
+- **Memory-mapped reads.** `from_path` maps the file and parses from the borrowed slice; only leaf values (strings, buffers) allocate.
+- **Single pass.** Readers consume the stream once and use on-disk size fields as inline bounds checks, which also catches corruption early.
 - **Pre-sized collections.** Counts from the file drive `Vec::with_capacity` / `IndexMap::with_capacity`.
 - **Parallel extraction.** `rs_wad` can extract chunks across threads behind its `parallel` feature.
 
 ## Safety
 
-`#![forbid(unsafe_code)]` is set in every crate **except** `rs_io`, whose only `unsafe` is the
-`memmap2` call inside `Parse::from_path`, isolated in one function with a written safety note.
-There is no other `unsafe`, no `transmute`, and no SIMD anywhere in the workspace.
+`#![forbid(unsafe_code)]` is set in every crate **except** `rs_io`, whose only `unsafe` is the `memmap2` call inside `Parse::from_path`, isolated in one function with a written safety note. There is no other `unsafe`, no `transmute`, and no SIMD anywhere in the workspace.
 
 ## Correctness and the round-trip contract
 
-For every writeable format, the primary guarantee is a **byte-exact round-trip**: reading a real
-file and writing it back reproduces the original bytes exactly. This is the headline test in each
-crate's `tests/`, run against real game files. Additional coverage includes:
+For every writeable format, the primary guarantee is a **byte-exact round-trip**: reading a real file and writing it back reproduces the original bytes exactly. This is the headline test in each crate's `tests/`, run against real game files. Additional coverage includes:
 
 - `#PROP_text` round-trips for `rs_bin` (`bin → text → bin` is byte-identical).
 - Per-version synthetic round-trips where real samples for a version aren't available.
@@ -105,19 +111,12 @@ crate's `tests/`, run against real game files. Additional coverage includes:
 
 Two formats are intentionally not byte-exact:
 
-- **`rs_rman`** is read-only — release manifests are produced by Riot's servers and never authored
-  on the client side, so there is no writer.
-- Authoring a brand-new texture re-compresses pixel data (block compression is lossy), so a
-  freshly *encoded* texture is compared approximately; a decoded-then-re-written `.tex` of an
-  already-compressed source is byte-exact.
+- **`rs_rman`** is read-only — release manifests are produced by Riot's servers and never authored on the client side, so there is no writer.
+- Authoring a brand-new texture re-compresses pixel data (block compression is lossy), so a freshly *encoded* texture is compared approximately; a decoded-then-re-written `.tex` of an already-compressed source is byte-exact.
 
 ## No placeholder code
 
-The workspace contains no stub functions — nothing that exists only to return "not implemented".
-When a capability genuinely does not apply to a format, the corresponding method is simply absent
-(for example, `rs_rman` implements `Parse` but not `Serialize`). Genuinely unknown inputs — an
-unsupported file version, an unmapped enum value — return a precise error, which is honest
-handling rather than a placeholder.
+The workspace contains no stub functions — nothing that exists only to return "not implemented". When a capability genuinely does not apply to a format, the corresponding method is simply absent (for example, `rs_rman` implements `Parse` but not `Serialize`). Genuinely unknown inputs — an unsupported file version, an unmapped enum value — return a precise error, which is honest handling rather than a placeholder.
 
 ## Hashing reference
 
@@ -130,5 +129,4 @@ handling rather than a placeholder.
 | xxh3-64 | string-table (RST) keys |
 | SystemV ELF (`elf` / `elf_lower`) | skeleton & animation joint names |
 
-`HashMapper` loads `<hex> <name>` dictionaries so raw integer hashes can be resolved back to
-readable names for display.
+`HashMapper` loads `<hex> <name>` dictionaries so raw integer hashes can be resolved back to readable names for display.
