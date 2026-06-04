@@ -156,6 +156,24 @@ fn skn_bad_version_errs() {
     assert!(SkinnedMesh::from_bytes(&bytes).is_err());
 }
 
+#[test]
+fn skn_v3_basic_roundtrip() {
+    // Major 3 shares the major-1/2 layout. Older exporters emit it and Jade
+    // accepts it; the crate must too.
+    roundtrip_skn(3, 0);
+}
+
+#[test]
+fn skn_nonstandard_minor_ok() {
+    // `minor` is not load-bearing — a v2 file tagged with an unusual minor must
+    // still parse and round-trip, preserving the value verbatim.
+    let mut bytes = build_skn(2, 0);
+    bytes[6] = 7; // minor low byte = 7
+    let mesh = SkinnedMesh::from_bytes(&bytes).expect("parse v2 with minor 7");
+    assert_eq!(mesh.minor, 7);
+    assert_eq!(mesh.to_bytes().unwrap(), bytes, "byte-exact round-trip preserves minor");
+}
+
 fn build_scb(vertex_type: Option<u32>) -> Vec<u8> {
     let (major, minor) = if vertex_type.is_some() {
         (3u16, 2u16)
@@ -240,6 +258,21 @@ fn scb_v32_color_byte_exact_roundtrip() {
     let mesh = StaticMesh::from_bytes(&bytes).expect("parse scb color");
     let out = mesh.to_bytes().expect("write scb color");
     assert_eq!(out, bytes, "byte-exact .scb round-trip (3.2 color)");
+}
+
+#[test]
+fn scb_v22_parses() {
+    // 2.2 occurs in the wild (per Jade's own note) and uses the no-vertex_type
+    // layout, same as 2.1. Patch a 3.1 buffer's version to 2.2 and confirm it
+    // parses and round-trips byte-exactly.
+    let mut bytes = build_scb(None);
+    bytes[8] = 2; // major low byte
+    bytes[10] = 2; // minor low byte
+    let mesh = StaticMesh::from_bytes(&bytes).expect("parse scb 2.2");
+    assert_eq!(mesh.version, (2, 2));
+    assert!(mesh.colors().is_none());
+    assert_eq!(mesh.faces().len(), 1);
+    assert_eq!(mesh.to_bytes().unwrap(), bytes, "byte-exact .scb round-trip (2.2)");
 }
 
 #[test]

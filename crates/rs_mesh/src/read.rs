@@ -19,7 +19,12 @@ impl Parse for SkinnedMesh {
 
         let major = reader.read_u16()?;
         let minor = reader.read_u16()?;
-        if !matches!(major, 0 | 1 | 2 | 4) || minor != 1 {
+        // Accept any major 0..=4 regardless of minor, matching Jade and the ltk
+        // reference. Majors 1/2/3 share one layout (submesh table, no flags or
+        // AABB); some exporters tag 1 or 3 on byte-identical v2 files. `minor`
+        // has only ever been 1 in practice but is not load-bearing, so it is
+        // preserved rather than gated. Only major > 4 is genuinely unknown.
+        if major > 4 {
             return Err(Error::UnsupportedVersion(
                 (u32::from(major) << 16) | u32::from(minor),
             ));

@@ -162,9 +162,10 @@ impl WadBuilder {
         out.write_u8(self.version.0)?;
         out.write_u8(self.version.1)?;
         out.write_bytes(&[0u8; V3_TRAILER_LEN])?;
+        let v3_4_plus = self.version.0 == 3 && self.version.1 >= 4;
         out.write_u32(chunks.len() as u32)?;
         for chunk in &chunks {
-            write_chunk(out, chunk)?;
+            write_chunk(out, chunk, v3_4_plus)?;
         }
 
         // Pass 2: re-pull each unique blob in offset order and write its compressed bytes.

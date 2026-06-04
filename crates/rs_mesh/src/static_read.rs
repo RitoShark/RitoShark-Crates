@@ -36,7 +36,11 @@ impl StaticMesh {
 
         let major = reader.read_u16()?;
         let minor = reader.read_u16()?;
-        if !matches!((major, minor), (2, 1) | (3, 1) | (3, 2)) {
+        // Accept major 2 or 3 regardless of minor, matching Jade and the ltk
+        // reference. 2.1, 2.2, and 3.2 all occur in the wild; the only layout
+        // branch that depends on the exact version is the 3.2 `vertex_type`
+        // field read below. Anything outside major {2,3} is unknown — reject.
+        if !matches!(major, 2 | 3) {
             return Err(Error::UnsupportedVersion(
                 (u32::from(major) << 16) | u32::from(minor),
             ));
