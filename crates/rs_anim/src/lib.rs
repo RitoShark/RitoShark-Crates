@@ -17,6 +17,7 @@ without quantization loss. Legacy skeletons are reported as errors.
 mod animation;
 mod animation_read;
 mod animation_write;
+mod compressed;
 mod error;
 pub mod quantized;
 mod raw;
