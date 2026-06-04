@@ -20,9 +20,11 @@ rs_mapgeo = { workspace = true, optional = true }
 rs_rst = { workspace = true, optional = true }
 rs_rman = { workspace = true, optional = true }
 rs_audio = { workspace = true, optional = true }
+rs_troybin = { workspace = true, optional = true }
+rs_luabin = { workspace = true, optional = true }
 
 [features]
-default = ["bin", "wad", "tex", "mesh", "anim", "mapgeo", "rst", "rman", "audio"]
+default = ["bin", "wad", "tex", "mesh", "anim", "mapgeo", "rst", "rman", "audio", "troybin", "luabin"]
 full = ["default"]
 bin = ["dep:rs_bin"]
 wad = ["dep:rs_wad"]
@@ -33,3 +35,5 @@ mapgeo = ["dep:rs_mapgeo"]
 rst = ["dep:rs_rst"]
 rman = ["dep:rs_rman"]
 audio = ["dep:rs_audio"]
+troybin = ["dep:rs_troybin"]
+luabin = ["dep:rs_luabin"]

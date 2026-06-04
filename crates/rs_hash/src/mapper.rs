@@ -3,8 +3,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::error::Result;
 use crate::Error;
+use crate::error::Result;
 
 /// Resolves raw integer hashes back to their original names, loaded from CDTB-style dictionaries.
 ///
@@ -56,8 +56,8 @@ impl HashMapper {
             let (hex, name) = trimmed
                 .split_once(' ')
                 .ok_or_else(|| Error::InvalidLine(trimmed.to_string()))?;
-            let hash = u64::from_str_radix(hex, 16)
-                .map_err(|_| Error::InvalidHash(hex.to_string()))?;
+            let hash =
+                u64::from_str_radix(hex, 16).map_err(|_| Error::InvalidHash(hex.to_string()))?;
             self.map.insert(hash, name.to_string());
             count += 1;
         }

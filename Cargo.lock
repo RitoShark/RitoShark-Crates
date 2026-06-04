@@ -493,12 +493,14 @@ dependencies = [
  "rs_file",
  "rs_hash",
  "rs_io",
+ "rs_luabin",
  "rs_mapgeo",
  "rs_math",
  "rs_mesh",
  "rs_rman",
  "rs_rst",
  "rs_tex",
+ "rs_troybin",
  "rs_wad",
 ]
 
@@ -562,6 +564,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rs_luabin"
+version = "0.1.0"
+dependencies = [
+ "rs_io",
+ "thiserror",
+]
+
+[[package]]
 name = "rs_mapgeo"
 version = "0.1.0"
 dependencies = [
@@ -616,6 +626,15 @@ dependencies = [
  "rs_math",
  "texpresso",
  "texture2ddecoder",
+ "thiserror",
+]
+
+[[package]]
+name = "rs_troybin"
+version = "0.1.0"
+dependencies = [
+ "rs_hash",
+ "rs_io",
  "thiserror",
 ]
 

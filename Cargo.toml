@@ -24,6 +24,8 @@ rs_mapgeo = { path = "crates/rs_mapgeo" }
 rs_rst = { path = "crates/rs_rst" }
 rs_rman = { path = "crates/rs_rman" }
 rs_audio = { path = "crates/rs_audio" }
+rs_troybin = { path = "crates/rs_troybin" }
+rs_luabin = { path = "crates/rs_luabin" }
 rs_legacy = { path = "crates/rs_legacy" }
 ritoshark = { path = "crates/ritoshark" }
 
