@@ -71,7 +71,7 @@ fn push_fields(
 ) {
     for (name, value) in fields {
         indent(out, depth);
-        push_hash32(out, *name, mapper);
+        push_name(out, *name, mapper);
         out.push_str(": ");
         push_type(out, value);
         out.push_str(" = ");
@@ -261,13 +261,28 @@ fn push_string(out: &mut String, s: &str) {
     out.push('"');
 }
 
+/** Renders a resolved field or class name. Canonical ritobin writes these as barewords (e.g.
+`rate:`, `TestClass {`), unlike entry keys and hash/link values which are always quoted. A resolved
+name that is not a valid identifier is quoted so the output stays parseable; an unresolved hash
+falls back to `0x%08x`. */
 fn push_name(out: &mut String, hash: u32, mapper: Option<&HashMapper>) {
     match mapper.and_then(|m| m.get(hash as u64)) {
-        Some(name) => out.push_str(name),
+        Some(name) if is_bareword(name) => out.push_str(name),
+        Some(name) => push_string(out, name),
         None => {
             let _ = write!(out, "0x{hash:08x}");
         }
     }
+}
+
+/// Whether `s` is a valid ritobin identifier: `^[A-Za-z_][A-Za-z0-9_]*$`, so it can be written bare.
+fn is_bareword(s: &str) -> bool {
+    let mut chars = s.bytes();
+    match chars.next() {
+        Some(b) if b == b'_' || b.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|b| b == b'_' || b.is_ascii_alphanumeric())
 }
 
 fn push_hash32(out: &mut String, hash: u32, mapper: Option<&HashMapper>) {

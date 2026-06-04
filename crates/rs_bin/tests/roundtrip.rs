@@ -183,6 +183,70 @@ fn text_round_trip_reconstructs_bin() {
 }
 
 #[test]
+fn text_printer_barewords_names_but_quotes_keys_and_hash_values() {
+    // Canonical ritobin (and ltk_ritobin) render resolved *field* and *class* names as barewords,
+    // but resolved *entry keys* and *hash/link values* as quoted strings. Pin all four so the
+    // printer matches the canonical format, not just its own self-consistency.
+    use rs_hash::fnv1a;
+
+    let entry_key = fnv1a("Characters/Test/Root"); // a path: not a bareword
+    let class = fnv1a("TestClass");
+    let f_rate = fnv1a("rate");
+    let f_link = fnv1a("mLink");
+    let hash_value = fnv1a("SomeIdentifier"); // identifier-shaped, but a *value*: must stay quoted
+
+    let mut mapper = rs_hash::HashMapper::new();
+    for (h, name) in [
+        (entry_key, "Characters/Test/Root"),
+        (class, "TestClass"),
+        (f_rate, "rate"),
+        (f_link, "mLink"),
+        (hash_value, "SomeIdentifier"),
+    ] {
+        mapper.insert(h as u64, name);
+    }
+
+    let mut fields = IndexMap::new();
+    fields.insert(f_rate, BinValue::F32(1.5));
+    fields.insert(f_link, BinValue::Hash(hash_value));
+    let bin = Bin {
+        is_patch: false,
+        patch_header: [0; 8],
+        version: 3,
+        linked: Vec::new(),
+        entries: vec![BinEntry {
+            path_hash: entry_key,
+            class_hash: class,
+            fields,
+        }],
+        patches: Vec::new(),
+    };
+
+    let text = rs_bin::to_text(&bin, Some(&mapper));
+
+    // Field names: bareword.
+    assert!(text.contains("rate: f32 = 1.5"), "field name must be bareword:\n{text}");
+    assert!(text.contains("mLink: hash ="), "field name must be bareword:\n{text}");
+    assert!(!text.contains("\"rate\""), "field name must not be quoted:\n{text}");
+    // Class name: bareword.
+    assert!(text.contains("TestClass {"), "class name must be bareword:\n{text}");
+    // Entry key: quoted (it is a path, not an identifier).
+    assert!(
+        text.contains("\"Characters/Test/Root\" = TestClass"),
+        "entry key must be quoted:\n{text}"
+    );
+    // Hash value: quoted even though its name is identifier-shaped.
+    assert!(
+        text.contains("mLink: hash = \"SomeIdentifier\""),
+        "hash value must be quoted:\n{text}"
+    );
+
+    // And it still round-trips back to the same bin (parser hashes the barewords).
+    let reparsed = rs_bin::from_text(&text, None).expect("parse text");
+    assert_eq!(reparsed, bin, "bin -> text(mapped) -> bin must reconstruct");
+}
+
+#[test]
 fn text_round_trip_is_idempotent() {
     let bin = Bin::from_bytes(&sample_prop()).expect("parse");
     let text1 = rs_bin::to_text(&bin, None);

@@ -629,7 +629,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Reads a class/field name: `0xHEX`, a bareword, or a quoted string, hashed with FNV1a-32. The
-    /// printer renders resolved field and entry keys as quoted strings and class names as barewords,
+    /// printer renders resolved field and class names as barewords and entry keys as quoted strings,
     /// so all three spellings must round-trip to the same integer.
     fn read_name_hash(&mut self) -> Result<u32> {
         let backup = self.pos;
