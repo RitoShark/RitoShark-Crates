@@ -30,7 +30,15 @@ fn write_v1<W: Write>(w: &mut W, body: &TroybinV1) -> Result<()> {
 }
 
 fn write_v2<W: Write>(w: &mut W, body: &TroybinV2) -> Result<()> {
-    w.write_u16(body.strings_length)?;
+    let strings_length = body
+        .buckets
+        .iter()
+        .find_map(|b| match &b.values {
+            BucketValues::Strings { blob, .. } => Some(blob.len() as u16),
+            _ => None,
+        })
+        .unwrap_or(body.strings_length);
+    w.write_u16(strings_length)?;
 
     let mut flags = 0u16;
     for bucket in &body.buckets {
