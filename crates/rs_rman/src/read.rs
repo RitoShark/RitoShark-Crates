@@ -84,11 +84,7 @@ fn parse_body(body: &[u8]) -> Result<Body> {
     })
 }
 
-fn parse_table<T>(
-    body: &[u8],
-    offset: i32,
-    parse: fn(Cursor<'_>) -> Result<T>,
-) -> Result<Vec<T>> {
+fn parse_table<T>(body: &[u8], offset: i32, parse: fn(Cursor<'_>) -> Result<T>) -> Result<Vec<T>> {
     let mut cursor = Cursor::new(body, offset);
     let count = cursor.read_u32()? as usize;
     let mut out = Vec::with_capacity(count.min(1 << 20));
@@ -194,7 +190,9 @@ fn parse_directory(cursor: Cursor<'_>) -> Result<Directory> {
     let fields = cursor.fields()?;
     let id = fields.get_u64(0)?.unwrap_or(0);
     let parent_id = fields.get_u64(1)?;
-    let name = fields.get_str(2)?.ok_or(Error::Malformed("directory name"))?;
+    let name = fields
+        .get_str(2)?
+        .ok_or(Error::Malformed("directory name"))?;
     Ok(Directory {
         id,
         parent_id,
@@ -273,7 +271,8 @@ impl<'a> Cursor<'a> {
     fn read_offset(&mut self) -> Result<i32> {
         let base = self.offset;
         let rel = self.read_i32()?;
-        base.checked_add(rel).ok_or(Error::Malformed("offset overflow"))
+        base.checked_add(rel)
+            .ok_or(Error::Malformed("offset overflow"))
     }
 
     /// Follow a self-relative offset into a fresh cursor.

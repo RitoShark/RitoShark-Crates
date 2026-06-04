@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use rs_io::{Parse, Serialize};
+use rs_io::Parse;
 use rs_rman::{Error, Rman};
 
 const HEADER_LEN: u32 = 28;
@@ -89,7 +89,10 @@ fn parses_synthetic_body() {
     assert_eq!(file.flags_mask, Some(0b1000));
 
     let paths = rman.file_paths();
-    assert_eq!(paths, vec![("data/champions/champion.bin".to_string(), 250u64)]);
+    assert_eq!(
+        paths,
+        vec![("data/champions/champion.bin".to_string(), 250u64)]
+    );
 
     assert_eq!(rman.file_flags.len(), 1);
     assert_eq!(rman.file_flags[0].id, 3);
@@ -107,26 +110,13 @@ fn parses_synthetic_body() {
     assert_eq!(ranges[0].uncompressed_size, 250);
 }
 
-/// Semantic round-trip on a synthetic manifest: parse the hand-built body, re-serialize it
-/// with the real writer, parse that, and assert the two logical models are identical. Byte-exact
-/// reproduction is deliberately not asserted (zstd + FlatBuffer layout are not unique).
-#[test]
-fn synthetic_semantic_round_trip() {
-    let original = Rman::from_bytes(&wrap(&Body::full())).unwrap();
-    let bytes = original.to_bytes().unwrap();
-    let reparsed = Rman::from_bytes(&bytes).unwrap();
-    assert_eq!(original, reparsed);
-}
-
-/// The writer preserves file fields the reader does not interpret (FlatBuffer indices 5/6/8/10/11)
-/// so nothing is lost across a write. Build a file carrying those extras, round-trip, and compare.
+/// The reader captures file fields it does not interpret (FlatBuffer indices 5/6/8/10/11) so the
+/// full manifest model is available even though the format is never written back.
 #[test]
 fn preserves_uninterpreted_file_fields() {
     let original = Rman::from_bytes(&wrap(&Body::with_extras())).unwrap();
     assert_eq!(original.files[0].extra.field11, Some(2));
     assert_eq!(original.files[0].extra.field5, Some(0xABCD));
-    let reparsed = Rman::from_bytes(&original.to_bytes().unwrap()).unwrap();
-    assert_eq!(original, reparsed);
 }
 
 #[test]
@@ -375,8 +365,7 @@ impl Body {
         let file_chunks_slot = b.reserve(); // +24 field 7 chunks
         b.u16(2); // +28 field 11 (u16)
         b.u32(1); // +30 field 12 permissions
-        let file_field_array =
-            b.vtable(&[4, 0, 12, 20, 0, 16, 0, 24, 0, 0, 0, 28, 30]);
+        let file_field_array = b.vtable(&[4, 0, 12, 20, 0, 16, 0, 24, 0, 0, 0, 28, 30]);
         b.patch_vtable(file_vtable_slot, file_field_array);
         b.patch(file_name_slot, b.pos());
         b.string("loose.txt");

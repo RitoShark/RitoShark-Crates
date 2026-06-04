@@ -114,8 +114,7 @@ impl Rman {
     /// Paths join each file's directory chain with `/`; files without a directory use the
     /// bare name. Cycles in the directory chain are broken so this never loops.
     pub fn file_paths(&self) -> Vec<(String, u64)> {
-        let by_id: HashMap<u64, &Directory> =
-            self.directories.iter().map(|d| (d.id, d)).collect();
+        let by_id: HashMap<u64, &Directory> = self.directories.iter().map(|d| (d.id, d)).collect();
 
         self.files
             .iter()

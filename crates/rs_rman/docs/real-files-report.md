@@ -1,5 +1,10 @@
 # rs_rman — real-files report
 
+> **Update:** the writer described in the lower "What I implemented" sections was subsequently
+> **removed**. RMAN is read-only by design — release manifests are produced by Riot's servers and
+> never authored on the client/modding side, so the crate provides no `Serialize` impl. The
+> reader (including the preserved uninterpreted file fields) is unchanged.
+
 Results of running `Rman::from_path` over the real `.manifest` samples in
 `sample-files/`, plus a cross-check of our body walk against the cdragon-rman
 reference (Rust). Run with:
