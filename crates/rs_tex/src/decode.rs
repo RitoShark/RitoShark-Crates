@@ -83,7 +83,12 @@ pub(crate) fn decode_block_format(
     let (w, h) = (width as usize, height as usize);
     let mut out = vec![0u32; w.max(1) * h.max(1)];
     let res: core::result::Result<(), &'static str> = match format {
-        TexFormat::Bc1 | TexFormat::Bc1Alt => texture2ddecoder::decode_bc1(data, w, h, &mut out),
+        // BC1 can encode 1-bit punch-through alpha (when a block's color0 <=
+        // color1, the 4th palette entry is TRANSPARENT, not opaque black).
+        // `decode_bc1` forces those texels opaque; `decode_bc1a` honours the
+        // transparency. League's *_1bitalpha textures (foliage/decals) rely on
+        // this — without it, cutouts render as solid black.
+        TexFormat::Bc1 | TexFormat::Bc1Alt => texture2ddecoder::decode_bc1a(data, w, h, &mut out),
         TexFormat::Bc3 => texture2ddecoder::decode_bc3(data, w, h, &mut out),
         TexFormat::Bc7 => texture2ddecoder::decode_bc7(data, w, h, &mut out),
         TexFormat::Bc5 => {
