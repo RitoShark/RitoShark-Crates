@@ -521,7 +521,7 @@ impl<'a> Parser<'a> {
             BinType::Vec2 => BinValue::Vec2(self.read_float_array::<2>()?),
             BinType::Vec3 => BinValue::Vec3(self.read_float_array::<3>()?),
             BinType::Vec4 => BinValue::Vec4(self.read_float_array::<4>()?),
-            BinType::Mtx44 => BinValue::Mtx44(self.read_float_array::<16>()?),
+            BinType::Mtx44 => BinValue::Mtx44(self.read_mtx44()?),
             BinType::Rgba => {
                 let a = self.read_u8_array::<4>()?;
                 BinValue::Rgba(a)
@@ -587,6 +587,61 @@ impl<'a> Parser<'a> {
         }
         if i != N {
             return self.err("too few array elements");
+        }
+        Ok(out)
+    }
+
+    /// Reads a 4x4 matrix as 16 floats. The printer emits an `mtx44` as four
+    /// nested brace rows:
+    ///
+    /// ```text
+    /// {
+    ///     { m00, m01, m02, m03 }
+    ///     { m10, m11, m12, m13 }
+    ///     { m20, m21, m22, m23 }
+    ///     { m30, m31, m32, m33 }
+    /// }
+    /// ```
+    ///
+    /// so the generic flat `read_float_array::<16>` (which hits the first inner
+    /// `{` where it expects a number) can't parse our own output. This reader is
+    /// brace-tolerant: it tracks brace depth, reading 16 floats and treating any
+    /// `{`/`}`/`,`/newlines as structure to skip until the outer brace closes.
+    /// A flat `{ f, f, ... }` matrix parses too.
+    fn read_mtx44(&mut self) -> Result<[f32; 16]> {
+        let mut out = [0.0f32; 16];
+        if !self.read_symbol(b'{') {
+            return self.err("expected '{'");
+        }
+        // Outer brace consumed → depth 1. Read until it closes (depth 0).
+        let mut depth = 1usize;
+        let mut i = 0usize;
+        while depth > 0 {
+            self.skip_newlines();
+            match self.peek() {
+                Some(b'{') => {
+                    self.pos += 1;
+                    depth += 1;
+                }
+                Some(b'}') => {
+                    self.pos += 1;
+                    depth -= 1;
+                }
+                Some(b',') => {
+                    self.pos += 1;
+                }
+                Some(_) => {
+                    if i >= 16 {
+                        return self.err("too many matrix elements");
+                    }
+                    out[i] = self.read_number::<f32>()?;
+                    i += 1;
+                }
+                None => return self.err("unterminated mtx44"),
+            }
+        }
+        if i != 16 {
+            return self.err("mtx44 needs 16 elements");
         }
         Ok(out)
     }

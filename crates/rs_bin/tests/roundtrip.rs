@@ -293,6 +293,65 @@ entries: map[hash,embed] = {
 }
 
 #[test]
+fn mtx44_text_round_trips() {
+    // The printer emits an mtx44 as four nested `{ .. }` rows; the parser must
+    // read that back (regression: it used to expect a flat 16-float array and
+    // failed with "invalid number ''" on the first inner brace).
+    let m: [f32; 16] = [
+        -0.9999999, -0.00000008742277, 0.0, 0.0,
+        0.00000008742277, -0.9999999, 0.0, 0.0,
+        0.0, 0.0, 0.9999999, 0.0,
+        0.0, -100.0, 0.0, 1.0,
+    ];
+    let mut fields = IndexMap::new();
+    fields.insert(rs_hash::fnv1a("Transform"), BinValue::Mtx44(m));
+    let bin = Bin {
+        is_patch: false,
+        patch_header: [0; 8],
+        version: 3,
+        linked: Vec::new(),
+        entries: vec![BinEntry {
+            path_hash: 0x0a0a_0a0a,
+            class_hash: rs_hash::fnv1a("SomeClass"),
+            fields,
+        }],
+        patches: Vec::new(),
+    };
+
+    let text = rs_bin::to_text(&bin, None);
+    // Sanity: the printer really does emit nested rows (field name is a hash
+    // without a mapper, so match on the type + nested braces, not the name).
+    assert!(text.contains("mtx44 = {"), "printer should emit mtx44:\n{text}");
+    assert!(text.contains("{ -0.9999999,"), "printer should emit nested rows:\n{text}");
+
+    let reparsed = rs_bin::from_text(&text, None).expect("mtx44 text must re-parse");
+    match reparsed.entries[0].fields.get(&rs_hash::fnv1a("Transform")) {
+        Some(BinValue::Mtx44(got)) => assert_eq!(*got, m, "mtx44 values must survive round-trip"),
+        other => panic!("expected mtx44, got {other:?}"),
+    }
+    assert_eq!(reparsed, bin, "bin -> text -> bin must reconstruct the matrix");
+
+    // Also accept a FLAT 16-float matrix (backward/forward compatible input).
+    let flat = "\
+#PROP_text
+version: u32 = 3
+entries: map[hash,embed] = {
+    0x0a0a0a0a = SomeClass {
+        Transform: mtx44 = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }
+    }
+}
+";
+    let flat_bin = rs_bin::from_text(flat, None).expect("flat mtx44 must parse");
+    let identity: [f32; 16] = [
+        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    ];
+    match flat_bin.entries[0].fields.get(&rs_hash::fnv1a("Transform")) {
+        Some(BinValue::Mtx44(got)) => assert_eq!(*got, identity),
+        other => panic!("expected mtx44, got {other:?}"),
+    }
+}
+
+#[test]
 fn ptch_patches_round_trip_binary_and_text() {
     // PTCH with one trailing patch record exercising the override section + its text form.
     let mut bytes = Vec::new();
