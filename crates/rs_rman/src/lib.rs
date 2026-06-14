@@ -14,9 +14,13 @@ the crate parses them but deliberately provides no writer.
 mod error;
 mod read;
 mod rman;
+#[cfg(feature = "verify")]
+mod validate;
 
 pub use error::{Error, Result};
 pub use rman::{
     Bundle, Chunk, ChunkHashType, ChunkRange, Directory, FileEntry, FileExtra, FileFlag,
     Parameter, Rman,
 };
+#[cfg(feature = "verify")]
+pub use validate::validate_chunk;
