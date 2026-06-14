@@ -1,11 +1,19 @@
 //! Network-gated: fetches one real chunk by range from Riot's CDN and validates it.
 //! Skips when sample manifests are absent or when HEXTECH_NET_TESTS is unset.
+//! Requires the `verify` feature.
 
+#[cfg(not(feature = "verify"))]
+fn main() {}
+
+#[cfg(feature = "verify")]
 use std::path::PathBuf;
 
+#[cfg(feature = "verify")]
 use rs_io::Parse;
+#[cfg(feature = "verify")]
 use rs_rman::{validate_chunk, Rman};
 
+#[cfg(feature = "verify")]
 fn sample(name: &str) -> Option<PathBuf> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../sample-files")
@@ -13,6 +21,7 @@ fn sample(name: &str) -> Option<PathBuf> {
     if path.is_file() { Some(path) } else { None }
 }
 
+#[cfg(feature = "verify")]
 #[test]
 fn validates_one_real_chunk() {
     if std::env::var("HEXTECH_NET_TESTS").is_err() {
