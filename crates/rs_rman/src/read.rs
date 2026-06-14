@@ -3,7 +3,9 @@ use std::io::{Read, Seek};
 use rs_io::{Parse, ReaderExt};
 
 use crate::error::{Error, Result};
-use crate::rman::{Bundle, Chunk, Directory, FileEntry, FileExtra, FileFlag, Rman};
+use crate::rman::{
+    Bundle, Chunk, ChunkHashType, Directory, FileEntry, FileExtra, FileFlag, Parameter, Rman,
+};
 
 const MAGIC: [u8; 4] = *b"RMAN";
 const HEADER_LEN: u32 = 4 + 1 + 1 + 2 + 4 + 4 + 8 + 4;
@@ -50,6 +52,7 @@ impl Parse for Rman {
             files: parsed.files,
             directories: parsed.directories,
             file_flags: parsed.file_flags,
+            parameters: parsed.parameters,
         })
     }
 }
@@ -59,6 +62,7 @@ struct Body {
     files: Vec<FileEntry>,
     directories: Vec<Directory>,
     file_flags: Vec<FileFlag>,
+    parameters: Vec<Parameter>,
 }
 
 fn parse_body(body: &[u8]) -> Result<Body> {
@@ -70,17 +74,21 @@ fn parse_body(body: &[u8]) -> Result<Body> {
     let flags_off = root.read_offset()?;
     let files_off = root.read_offset()?;
     let dirs_off = root.read_offset()?;
+    let _slot4_off = root.read_offset()?;
+    let params_off = root.read_offset()?;
 
     let bundles = parse_table(body, bundles_off, parse_bundle)?;
     let file_flags = parse_table(body, flags_off, parse_flag)?;
     let files = parse_table(body, files_off, parse_file)?;
     let directories = parse_table(body, dirs_off, parse_directory)?;
+    let parameters = parse_table(body, params_off, parse_parameter)?;
 
     Ok(Body {
         bundles,
         files,
         directories,
         file_flags,
+        parameters,
     })
 }
 
@@ -103,6 +111,18 @@ fn parse_bundle(cursor: Cursor<'_>) -> Result<Bundle> {
         None => Vec::new(),
     };
     Ok(Bundle { id, chunks })
+}
+
+fn parse_parameter(cursor: Cursor<'_>) -> Result<Parameter> {
+    let fields = cursor.fields()?;
+    let raw_hash_type = fields.get_u8(1)?.unwrap_or(0);
+    Ok(Parameter {
+        raw_hash_type,
+        hash_type: ChunkHashType::from_u8(raw_hash_type),
+        min_chunk_size: fields.get_u32(2)?.unwrap_or(0),
+        max_chunk_size: fields.get_u32(3)?.unwrap_or(0),
+        max_uncompressed_size: fields.get_u32(4)?.unwrap_or(0),
+    })
 }
 
 fn parse_chunks(mut cursor: Cursor<'_>) -> Result<Vec<Chunk>> {
