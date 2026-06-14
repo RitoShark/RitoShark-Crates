@@ -16,3 +16,6 @@ blake3 = { version = "1", optional = true }
 [features]
 default = []
 verify = ["dep:sha2", "dep:blake3"]
+
+[dev-dependencies]
+ureq = "2"
