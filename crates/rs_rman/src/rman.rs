@@ -176,6 +176,14 @@ impl Rman {
             .collect()
     }
 
+    /// The chunk hash algorithm governing `file`, resolved through its `param_index`
+    /// into [`Rman::parameters`]. `None` when the file carries no `param_index`, the
+    /// index is out of range, or the parameter's hash tag is unknown.
+    pub fn file_hash_type(&self, file: &FileEntry) -> Option<ChunkHashType> {
+        let idx = file.param_index? as usize;
+        self.parameters.get(idx).and_then(|p| p.hash_type)
+    }
+
     /// Names of the flags (locale/platform tags) active for `file`, in flag-table order.
     /// Empty when the file carries no mask or references no known flag.
     pub fn file_flag_names(&self, file: &FileEntry) -> Vec<&str> {
