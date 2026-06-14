@@ -16,4 +16,7 @@ mod read;
 mod rman;
 
 pub use error::{Error, Result};
-pub use rman::{Bundle, Chunk, ChunkRange, Directory, FileEntry, FileExtra, FileFlag, Rman};
+pub use rman::{
+    Bundle, Chunk, ChunkHashType, ChunkRange, Directory, FileEntry, FileExtra, FileFlag,
+    Parameter, Rman,
+};

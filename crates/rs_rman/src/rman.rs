@@ -8,6 +8,41 @@ pub struct Chunk {
     pub uncompressed_size: u32,
 }
 
+/// Per-file chunk hash algorithm, selected by a file's `param_index` into the
+/// manifest parameters table. Numeric values match Riot's RMAN encoding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChunkHashType {
+    Sha512,
+    Sha256,
+    Hkdf,
+    Blake3,
+}
+
+impl ChunkHashType {
+    /// Map the on-disk `u8` tag (`1..=4`) to a variant; `None` for unknown tags.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            1 => Some(Self::Sha512),
+            2 => Some(Self::Sha256),
+            3 => Some(Self::Hkdf),
+            4 => Some(Self::Blake3),
+            _ => None,
+        }
+    }
+}
+
+/// One entry of the manifest parameters table. A file's `param_index` selects the entry
+/// whose `hash_type` governs that file's chunk validation. `raw_hash_type` preserves the
+/// on-disk tag even when it maps to no known [`ChunkHashType`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Parameter {
+    pub raw_hash_type: u8,
+    pub hash_type: Option<ChunkHashType>,
+    pub min_chunk_size: u32,
+    pub max_chunk_size: u32,
+    pub max_uncompressed_size: u32,
+}
+
 /// A bundle groups chunks that are downloaded together.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bundle {
@@ -29,6 +64,9 @@ pub struct FileEntry {
     /// Bitmask selecting which entries of the manifest flags table apply to this file.
     /// Bit `n` set means the flag whose `id` is `n` (a locale or platform tag) is active.
     pub flags_mask: Option<u64>,
+    /// Index into [`Rman::parameters`] selecting this file's chunk hash parameters.
+    /// `None` for files Riot emits without parameters (most non-WAD entries).
+    pub param_index: Option<u8>,
     /** Verbatim copies of the file-entry fields the reader does not interpret (FlatBuffer
     field indices 5, 6, 8, 10, 11). Riot's encoder emits some of these on real manifests —
     field 11 (a `u16`, observed as `1`/`2`) marks localized WADs — so they are captured and
@@ -89,6 +127,9 @@ pub struct Rman {
     pub directories: Vec<Directory>,
     /// Locale/platform flag table; each file's `flags_mask` selects entries from it.
     pub file_flags: Vec<FileFlag>,
+    /// Chunk parameters table; each file's `param_index` selects the entry governing
+    /// that file's chunk hash algorithm and chunk-size bounds.
+    pub parameters: Vec<Parameter>,
 }
 
 impl Rman {
