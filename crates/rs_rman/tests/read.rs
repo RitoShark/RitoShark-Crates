@@ -216,7 +216,7 @@ impl Body {
     fn empty_tables() -> Vec<u8> {
         let mut b = Self::new();
         b.i32(0); // body header length
-        let slots = [b.reserve(), b.reserve(), b.reserve(), b.reserve()];
+        let slots = [b.reserve(), b.reserve(), b.reserve(), b.reserve(), b.reserve(), b.reserve()];
         for slot in slots {
             let target = b.pos();
             b.patch(slot, target);
@@ -232,6 +232,14 @@ impl Body {
         let flags_slot = b.reserve();
         let files_slot = b.reserve();
         let dirs_slot = b.reserve();
+        let _slot4 = b.reserve();
+        let params_slot = b.reserve();
+
+        // Slot 4 (unused) and slot 5 (parameters) — both empty tables.
+        b.patch(_slot4, b.pos());
+        b.u32(0);
+        b.patch(params_slot, b.pos());
+        b.u32(0);
 
         // ---- Bundles table: one bundle with one chunk ----
         b.patch(bundles_slot, b.pos());
@@ -344,6 +352,8 @@ impl Body {
         let flags_slot = b.reserve();
         let files_slot = b.reserve();
         let dirs_slot = b.reserve();
+        let _slot4 = b.reserve();
+        let params_slot = b.reserve();
 
         // Empty bundles / flags / directories tables.
         b.patch(bundles_slot, b.pos());
@@ -373,6 +383,10 @@ impl Body {
         b.u32(0); // no chunk ids
 
         b.patch(dirs_slot, b.pos());
+        b.u32(0);
+        b.patch(_slot4, b.pos());
+        b.u32(0);
+        b.patch(params_slot, b.pos());
         b.u32(0);
 
         b.finish()

@@ -176,6 +176,7 @@ fn parse_file(cursor: Cursor<'_>) -> Result<FileEntry> {
     };
     let link = fields.get_str(9)?.filter(|s| !s.is_empty());
     let permissions = fields.get_u8(12)?.unwrap_or(0);
+    let param_index = fields.get_u8(11)?;
     let extra = FileExtra {
         field5: fields.get_u32(5)?,
         field6: fields.get_u32(6)?,
@@ -193,6 +194,7 @@ fn parse_file(cursor: Cursor<'_>) -> Result<FileEntry> {
         link,
         permissions,
         flags_mask,
+        param_index,
         extra,
     })
 }
