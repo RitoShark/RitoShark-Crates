@@ -10,3 +10,9 @@ repository.workspace = true
 thiserror = { workspace = true }
 rs_io = { workspace = true }
 zstd = { workspace = true }
+sha2 = { version = "0.10", optional = true }
+blake3 = { version = "1", optional = true }
+
+[features]
+default = []
+verify = ["dep:sha2", "dep:blake3"]
