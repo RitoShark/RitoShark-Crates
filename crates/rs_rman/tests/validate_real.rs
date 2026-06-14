@@ -61,8 +61,9 @@ fn validates_one_real_chunk() {
     std::io::Read::read_to_end(&mut resp.into_reader(), &mut compressed).expect("read body");
 
     assert_eq!(compressed.len(), range.compressed_size as usize, "short read");
+    let decompressed = zstd::stream::decode_all(&compressed[..]).expect("zstd decode");
     assert!(
-        validate_chunk(&compressed, range.chunk_id, ht).expect("supported hash type"),
+        validate_chunk(&decompressed, range.chunk_id, ht).expect("supported hash type"),
         "chunk {:#x} failed {ht:?} validation",
         range.chunk_id
     );

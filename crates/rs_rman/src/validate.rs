@@ -1,5 +1,6 @@
 //! Chunk hash validation. A chunk's manifest `id` is the truncated hash of its
-//! decompressed bytes; these functions decompress the chunk then recompute the hash for comparison.
+//! decompressed bytes. `validate_chunk` takes already-decompressed bytes and recomputes
+//! the hash for comparison — callers are expected to decompress before calling.
 
 use crate::error::{Error, Result};
 use crate::ChunkHashType;
@@ -61,22 +62,18 @@ fn hash_hkdf(data: &[u8]) -> u64 {
 
 /*
  * Chunk ids are hashes of decompressed chunk bytes (Morilli/ManifestDownloader rman.c).
- * The CDN bundle stores chunks zstd-compressed; validate_chunk decompresses before hashing.
+ * Callers decompress each chunk for writing to disk anyway; passing decompressed bytes
+ * here avoids a second zstd pass per chunk.
  */
-/// Decompress `compressed` (a zstd-encoded chunk from the CDN bundle), then recompute its
-/// hash under `hash_type` and compare to `expected_id` (the chunk's manifest id).
-/// Returns `Err` only for unsupported algorithms (e.g. SHA512) or decompression failure.
-pub fn validate_chunk(compressed: &[u8], expected_id: u64, hash_type: ChunkHashType) -> Result<bool> {
-    if matches!(hash_type, ChunkHashType::Sha512) {
-        return Err(Error::Unsupported("SHA512 chunk hash"));
-    }
-    let decompressed = zstd::stream::decode_all(compressed)
-        .map_err(|e| Error::Decompress(e.to_string()))?;
+/// Recompute the chunk hash of `decompressed` (a chunk's already-inflated bytes) under
+/// `hash_type` and compare to `expected_id` (the chunk's manifest id). Chunk ids are
+/// hashes of the DECOMPRESSED chunk bytes. `Err` only for unsupported algorithms (SHA512).
+pub fn validate_chunk(decompressed: &[u8], expected_id: u64, hash_type: ChunkHashType) -> Result<bool> {
     let got = match hash_type {
-        ChunkHashType::Sha256 => hash_sha256(&decompressed),
-        ChunkHashType::Blake3 => hash_blake3(&decompressed),
-        ChunkHashType::Hkdf => hash_hkdf(&decompressed),
-        ChunkHashType::Sha512 => unreachable!(),
+        ChunkHashType::Sha256 => hash_sha256(decompressed),
+        ChunkHashType::Blake3 => hash_blake3(decompressed),
+        ChunkHashType::Hkdf => hash_hkdf(decompressed),
+        ChunkHashType::Sha512 => return Err(Error::Unsupported("SHA512 chunk hash")),
     };
     Ok(got == expected_id)
 }
@@ -92,10 +89,8 @@ mod tests {
     fn sha256_empty_input_matches_known_u64() {
         let expected = u64::from_le_bytes([0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14]);
         assert_eq!(hash_sha256(b""), expected);
-        // validate_chunk decompresses before hashing; use zstd-compressed empty bytes.
-        let compressed_empty = zstd::stream::encode_all(&b""[..], 3).unwrap();
-        assert!(validate_chunk(&compressed_empty, expected, ChunkHashType::Sha256).unwrap());
-        assert!(!validate_chunk(&compressed_empty, expected ^ 1, ChunkHashType::Sha256).unwrap());
+        assert!(validate_chunk(b"", expected, ChunkHashType::Sha256).unwrap());
+        assert!(!validate_chunk(b"", expected ^ 1, ChunkHashType::Sha256).unwrap());
     }
 
     #[test]
@@ -103,8 +98,7 @@ mod tests {
         // blake3("") = af1349b9... first 8 bytes af 13 49 b9 f5 f9 a1 a6 -> LE u64.
         let expected = u64::from_le_bytes([0xaf, 0x13, 0x49, 0xb9, 0xf5, 0xf9, 0xa1, 0xa6]);
         assert_eq!(hash_blake3(b""), expected);
-        let compressed_empty = zstd::stream::encode_all(&b""[..], 3).unwrap();
-        assert!(validate_chunk(&compressed_empty, expected, ChunkHashType::Blake3).unwrap());
+        assert!(validate_chunk(b"", expected, ChunkHashType::Blake3).unwrap());
     }
 
     #[test]
