@@ -78,5 +78,21 @@ fn tex_info_when_sample_present() {
         eprintln!("skipping: no sample.tex fixture");
         return;
     }
-    rs_cli().args(["tex", "info", sample.to_str().unwrap()]).assert().success();
+    rs_cli()
+        .args(["tex", "info", sample.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn rst_list_when_sample_present() {
+    let sample = std::path::Path::new("tests/fixtures/sample.stringtable");
+    if !sample.exists() {
+        eprintln!("skipping: no sample.stringtable fixture");
+        return;
+    }
+    rs_cli()
+        .args(["rst", "list", sample.to_str().unwrap()])
+        .assert()
+        .success();
 }

@@ -57,3 +57,9 @@ impl From<ritoshark::rst::Error> for CliError {
         CliError::Format(Box::new(e))
     }
 }
+
+impl From<ritoshark::audio::Error> for CliError {
+    fn from(e: ritoshark::audio::Error) -> Self {
+        CliError::Format(Box::new(e))
+    }
+}

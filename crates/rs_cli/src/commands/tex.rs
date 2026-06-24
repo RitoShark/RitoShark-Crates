@@ -35,10 +35,13 @@ pub fn info(input: &Path, json: bool) -> Result<()> {
     use ritoshark::prelude::*;
     let tex = ritoshark::tex::Texture::from_path(input)?;
     if json {
-        println!("{}", serde_json::json!({
-            "width": tex.width, "height": tex.height,
-            "format": format!("{:?}", tex.format), "mips": tex.mips.len(),
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "width": tex.width, "height": tex.height,
+                "format": format!("{:?}", tex.format), "mips": tex.mips.len(),
+            })
+        );
     } else {
         println!("width: {}", tex.width);
         println!("height: {}", tex.height);
@@ -51,13 +54,23 @@ pub fn info(input: &Path, json: bool) -> Result<()> {
 pub fn decode(input: &Path, output: Option<&Path>, _mip: u32) -> Result<()> {
     use ritoshark::prelude::*;
     let tex = ritoshark::tex::Texture::from_path(input)?;
-    let out = output.map(|p| p.to_path_buf()).unwrap_or_else(|| input.with_extension("png"));
-    let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("png").to_ascii_lowercase();
+    let out = output
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| input.with_extension("png"));
+    let ext = out
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_ascii_lowercase();
     if ext == "dds" {
-        tex.save_dds(&out).map_err(|e| CliError::msg(format!("write dds: {e}")))?;
+        tex.save_dds(&out)
+            .map_err(|e| CliError::msg(format!("write dds: {e}")))?;
     } else {
-        let img = tex.decode_rgba().map_err(|e| CliError::msg(format!("decode: {e}")))?;
-        img.save(&out).map_err(|e| CliError::msg(format!("write image: {e}")))?;
+        let img = tex
+            .decode_rgba()
+            .map_err(|e| CliError::msg(format!("decode: {e}")))?;
+        img.save(&out)
+            .map_err(|e| CliError::msg(format!("write image: {e}")))?;
     }
     Ok(())
 }
@@ -75,7 +88,9 @@ pub fn encode(input: &Path, format: &str, mipmaps: bool, output: Option<&Path>) 
         // uncompressed BGRA8 is always a single full-resolution surface.
         EncodeFormat::Bgra8 => ritoshark::tex::Texture::from_rgba_bgra8(&img),
     };
-    let out = output.map(|p| p.to_path_buf()).unwrap_or_else(|| input.with_extension("tex"));
+    let out = output
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| input.with_extension("tex"));
     tex.to_path(&out)?;
     Ok(())
 }

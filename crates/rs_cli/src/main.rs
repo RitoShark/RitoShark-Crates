@@ -61,6 +61,12 @@ enum Command {
     /// Operate on `.tex` textures.
     #[command(subcommand)]
     Tex(TexCmd),
+    /// Operate on `.stringtable` (RST) files.
+    #[command(subcommand)]
+    Rst(RstCmd),
+    /// Operate on `.wpk`/`.bnk` audio containers.
+    #[command(subcommand)]
+    Audio(AudioCmd),
 }
 
 #[derive(Subcommand)]
@@ -143,6 +149,26 @@ enum TexCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum RstCmd {
+    /// List entries.
+    List {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AudioCmd {
+    /// Extract .wem files.
+    Extract {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+}
+
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Detect { file, json } => commands::read::detect(&file, json),
@@ -206,8 +232,15 @@ fn run(cli: Cli) -> Result<()> {
         Command::Tex(TexCmd::Decode { input, output, mip }) => {
             commands::tex::decode(&input, output.as_deref(), mip)
         }
-        Command::Tex(TexCmd::Encode { input, format, mipmaps, output }) => {
-            commands::tex::encode(&input, &format, mipmaps, output.as_deref())
+        Command::Tex(TexCmd::Encode {
+            input,
+            format,
+            mipmaps,
+            output,
+        }) => commands::tex::encode(&input, &format, mipmaps, output.as_deref()),
+        Command::Rst(RstCmd::List { input, json }) => commands::rst::list(&input, json),
+        Command::Audio(AudioCmd::Extract { input, output }) => {
+            commands::audio::extract(&input, &output)
         }
     }
 }
