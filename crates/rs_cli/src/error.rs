@@ -16,8 +16,8 @@ pub enum CliError {
     #[error("unknown or undetectable format: {0}")]
     UnknownFormat(String),
 
-    #[error("format error: {0}")]
-    Format(String),
+    #[error("format error")]
+    Format(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     #[allow(dead_code)]
     #[error("unsupported conversion from .{from} to .{to}")]
@@ -39,24 +39,24 @@ impl CliError {
 
 impl From<ritoshark::bin::Error> for CliError {
     fn from(e: ritoshark::bin::Error) -> Self {
-        CliError::Format(e.to_string())
+        CliError::Format(Box::new(e))
     }
 }
 
 impl From<ritoshark::wad::Error> for CliError {
     fn from(e: ritoshark::wad::Error) -> Self {
-        CliError::Format(e.to_string())
+        CliError::Format(Box::new(e))
     }
 }
 
 impl From<ritoshark::tex::Error> for CliError {
     fn from(e: ritoshark::tex::Error) -> Self {
-        CliError::Format(e.to_string())
+        CliError::Format(Box::new(e))
     }
 }
 
 impl From<ritoshark::rst::Error> for CliError {
     fn from(e: ritoshark::rst::Error) -> Self {
-        CliError::Format(e.to_string())
+        CliError::Format(Box::new(e))
     }
 }
