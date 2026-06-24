@@ -41,14 +41,37 @@ Versions, capabilities, and known limits per format are in [docs/formats.md](doc
 ritoshark = "0.1"   # or: default-features = false, features = ["bin", "wad", "tex"]
 ```
 
-## Command-line tool
+## Command-line tool (`rs_cli`)
+
+Prebuilt binaries are published on the [GitHub Releases] page — download `rs_cli` for your OS
+and (optionally) drop a `hashes/` folder of CDTB dictionaries next to it for name resolution.
 
 ```
-cargo run -p rs_cli -- detect <file>
-cargo run -p rs_cli -- bin to-text <in> [--hashes <dict>] [--output <out>]
-cargo run -p rs_cli -- wad list <archive>
-cargo run -p rs_cli -- tex to-png <in> <out>
+rs_cli read <file> [--json] [--hashes <dir>]          # auto-detect, print info
+rs_cli detect <file> [--json]                          # just the format
+rs_cli transform <in> [out] [-r] [--keep-hashed]       # convert between formats
+
+rs_cli bin convert <in> [out] [-r] [--keep-hashed]
+rs_cli bin diff <a> <b> [-C <n>] [--no-color]
+rs_cli wad list <archive>... [-F table|json|csv|flat] [--stats]
+rs_cli wad extract <archive>... -o <dir> [-f <type>...] [-x <regex>] [--overwrite]
+rs_cli tex info <in> [--json]
+rs_cli tex decode <in> [-o <out>] [--mip <n>]
+rs_cli tex encode <in> -f <bc1|bc3|bc5|bc7|bgra8> [-m] [-o <out>]
+rs_cli rst list <in> [--json]
+rs_cli audio extract <wpk|bnk> -o <dir>
 ```
+
+The tool runs entirely in-process through the RitoShark crates; it calls no external program.
+Full reference in [docs/cli.md](docs/cli.md).
+
+### Install (prebuilt binary)
+
+Download `rs_cli` for your OS from the [GitHub Releases] page. No runtime dependencies are
+required. To enable hash resolution, place a `hashes/` directory containing CDTB dictionary files
+beside the binary.
+
+[GitHub Releases]: https://github.com/RitoShark/RitoShark-Crates/releases
 
 ## Build & test
 
