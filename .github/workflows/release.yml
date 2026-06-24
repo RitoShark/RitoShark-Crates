@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            label: x86_64-windows
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            label: x86_64-linux
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            label: x86_64-macos
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            label: aarch64-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          rustup show
+          rustup target add ${{ matrix.target }}
+      - name: Build
+        run: cargo build -p rs_cli --release --target ${{ matrix.target }}
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $name = "rs_cli-${{ github.ref_name }}-${{ matrix.label }}"
+          New-Item -ItemType Directory $name | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/rs_cli.exe" $name/
+          Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE $name/
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          name="rs_cli-${{ github.ref_name }}-${{ matrix.label }}"
+          mkdir "$name"
+          cp "target/${{ matrix.target }}/release/rs_cli" "$name/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$name/"
+          tar czf "$name.tar.gz" "$name"
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            rs_cli-${{ github.ref_name }}-${{ matrix.label }}.zip
+            rs_cli-${{ github.ref_name }}-${{ matrix.label }}.tar.gz
+          generate_release_notes: true
