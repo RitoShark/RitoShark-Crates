@@ -21,7 +21,6 @@ const CDTB_FILES: &[&str] = &[
 
 /// Resolve the hash source from the flag, the `RITOSHARK_HASHES` env var, or a `hashes`
 /// directory next to the running executable, in that order.
-#[allow(dead_code)]
 pub fn resolve(flag: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = flag {
         return Some(p.to_path_buf());
@@ -44,7 +43,6 @@ pub fn resolve(flag: Option<&Path>) -> Option<PathBuf> {
 
 /// Load a mapper from a resolved path. A directory merges the conventional CDTB files that
 /// exist; a file loads that single dictionary. Returns an empty mapper if nothing is found.
-#[allow(dead_code)]
 pub fn load(flag: Option<&Path>) -> HashMapper {
     let mut mapper = HashMapper::new();
     let Some(path) = resolve(flag) else {

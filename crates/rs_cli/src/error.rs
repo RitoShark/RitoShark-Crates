@@ -13,9 +13,11 @@ pub enum CliError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
-    #[allow(dead_code)]
     #[error("unknown or undetectable format: {0}")]
     UnknownFormat(String),
+
+    #[error("format error: {0}")]
+    Format(String),
 
     #[allow(dead_code)]
     #[error("unsupported conversion from .{from} to .{to}")]
@@ -32,5 +34,29 @@ impl CliError {
     #[allow(dead_code)]
     pub fn msg(text: impl Into<String>) -> Self {
         CliError::Message(text.into())
+    }
+}
+
+impl From<ritoshark::bin::Error> for CliError {
+    fn from(e: ritoshark::bin::Error) -> Self {
+        CliError::Format(e.to_string())
+    }
+}
+
+impl From<ritoshark::wad::Error> for CliError {
+    fn from(e: ritoshark::wad::Error) -> Self {
+        CliError::Format(e.to_string())
+    }
+}
+
+impl From<ritoshark::tex::Error> for CliError {
+    fn from(e: ritoshark::tex::Error) -> Self {
+        CliError::Format(e.to_string())
+    }
+}
+
+impl From<ritoshark::rst::Error> for CliError {
+    fn from(e: ritoshark::rst::Error) -> Self {
+        CliError::Format(e.to_string())
     }
 }

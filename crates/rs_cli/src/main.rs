@@ -32,15 +32,37 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Detect a file and print a per-format summary.
+    Read {
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+        /// Hash dictionary directory or file for name resolution.
+        #[arg(long)]
+        hashes: Option<PathBuf>,
+    },
 }
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Detect { file, json } => commands::read::detect(&file, json),
+        Command::Read { file, json, hashes } => {
+            commands::read::read(&file, json, hashes.as_deref())
+        }
     }
 }
 
-fn main() -> miette::Result<()> {
+fn main() {
     let cli = Cli::parse();
-    run(cli).map_err(Into::into)
+    match run(cli) {
+        Ok(()) => {}
+        Err(error::CliError::UnknownFormat(_)) => {
+            eprintln!("error: unknown or undetectable format");
+            std::process::exit(2);
+        }
+        Err(e) => {
+            eprintln!("{:?}", miette::Report::new(e));
+            std::process::exit(1);
+        }
+    }
 }
