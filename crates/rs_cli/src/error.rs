@@ -19,11 +19,9 @@ pub enum CliError {
     #[error("format error")]
     Format(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    #[allow(dead_code)]
     #[error("unsupported conversion from .{from} to .{to}")]
     UnsupportedConversion { from: String, to: String },
 
-    #[allow(dead_code)]
     #[error("{0}")]
     Message(String),
 }
@@ -31,7 +29,6 @@ pub enum CliError {
 pub type Result<T> = core::result::Result<T, CliError>;
 
 impl CliError {
-    #[allow(dead_code)]
     pub fn msg(text: impl Into<String>) -> Self {
         CliError::Message(text.into())
     }

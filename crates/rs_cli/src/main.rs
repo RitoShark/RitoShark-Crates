@@ -41,6 +41,17 @@ enum Command {
         #[arg(long)]
         hashes: Option<PathBuf>,
     },
+    /// Convert a file (or directory with -r) between formats.
+    Transform {
+        input: PathBuf,
+        output: Option<PathBuf>,
+        #[arg(short, long)]
+        recursive: bool,
+        #[arg(short = 'k', long)]
+        keep_hashed: bool,
+        #[arg(long)]
+        hashes: Option<PathBuf>,
+    },
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -49,6 +60,19 @@ fn run(cli: Cli) -> Result<()> {
         Command::Read { file, json, hashes } => {
             commands::read::read(&file, json, hashes.as_deref())
         }
+        Command::Transform {
+            input,
+            output,
+            recursive,
+            keep_hashed,
+            hashes,
+        } => commands::transform::run(
+            &input,
+            output.as_deref(),
+            recursive,
+            keep_hashed,
+            hashes.as_deref(),
+        ),
     }
 }
 
