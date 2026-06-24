@@ -160,9 +160,9 @@ rs_cli transform [-r] [-k] [--hashes <DIR>] <INPUT> [OUTPUT]
 |----------------|-----------------|------------|
 | `.bin` | `.ritobin` / `.txt` / `.py` | Binary PROP → `#PROP_text`; hashes resolved unless `--keep-hashed` |
 | `.ritobin` / `.txt` / `.py` | `.bin` | `#PROP_text` → binary PROP |
-| `.tex` | `.png` / `.jpg` / `.tga` / `.bmp` / `.webp` | Decode texture → image |
+| `.tex` | `.png` / `.jpg` / `.jpeg` / `.tga` / `.bmp` / `.webp` | Decode texture → image |
 | `.tex` | `.dds` | Decode texture → uncompressed BGRA8 DDS |
-| `.png` / `.jpg` / `.tga` / `.bmp` / `.webp` | `.tex` | Encode image → BC3 texture with mipmaps |
+| `.png` / `.jpg` / `.jpeg` / `.tga` / `.bmp` / `.webp` | `.tex` | Encode image → BC3 texture with mipmaps |
 | `.dds` | `.tex` | Decode DDS → encode as BC3 texture with mipmaps |
 
 When output is omitted, the default mapping is `.bin` → `.ritobin`, text → `.bin`, `.tex` → `.png`,
@@ -221,7 +221,7 @@ rs_cli bin diff [-C <N>] [--no-color] <A> <B>
 | `<A>` | First file (`.bin` or text) |
 | `<B>` | Second file (`.bin` or text) |
 | `-C, --context <N>` | Lines of context (default: `3`) |
-| `--no-color` | Suppress ANSI color in output |
+| `--no-color` | Accepted for compatibility; currently has no effect (diff output contains no ANSI color) |
 
 Both inputs are converted to `#PROP_text` before diffing, so a binary `.bin` and its text
 equivalent will produce an empty diff.
@@ -344,13 +344,13 @@ rs_cli tex decode [-o <OUT>] [--mip <N>] <INPUT>
 |----------------|-------------|
 | `<INPUT>` | `.tex` file to decode |
 | `-o, --output <OUT>` | Output path (default: input with `.png` extension) |
-| `--mip <N>` | Mip level to decode (default: `0`, the full-resolution surface) |
+| `--mip <N>` | Accepted for compatibility; mip selection is not yet implemented (always decodes the full-resolution surface) |
 
 The output format is chosen by the output file extension:
 
 | Extension | Output |
 |-----------|--------|
-| `.png`, `.jpg`, `.tga`, `.bmp`, `.webp` | Decoded RGBA image |
+| `.png`, `.jpg`, `.jpeg`, `.tga`, `.bmp`, `.webp` | Decoded RGBA image |
 | `.dds` | Uncompressed BGRA8 DDS |
 
 When writing `.dds`, the original block-compressed data is decoded to BGRA8 first; no
@@ -376,7 +376,7 @@ rs_cli tex encode -f <FORMAT> [-m] [-o <OUT>] <INPUT>
 
 | Argument / flag | Description |
 |----------------|-------------|
-| `<INPUT>` | Image file to encode (`.png`, `.jpg`, `.tga`, `.bmp`, `.webp`) |
+| `<INPUT>` | Image file to encode (`.png`, `.jpg`, `.jpeg`, `.tga`, `.bmp`, `.webp`) |
 | `-f, --format <FORMAT>` | Block format: `bc1`, `bc3`, `bc5`, `bc7`, or `bgra8` |
 | `-m, --mipmaps` | Generate a full mip chain (default: `true`; ignored for `bgra8`) |
 | `-o, --output <OUT>` | Output `.tex` path (default: input with `.tex` extension) |
