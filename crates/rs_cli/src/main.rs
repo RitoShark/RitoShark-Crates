@@ -10,6 +10,7 @@ mod commands;
 mod error;
 mod hashes;
 mod output;
+mod pathsafe;
 
 use std::path::PathBuf;
 
