@@ -61,4 +61,5 @@ jobs:
           files: |
             rs_cli-${{ github.ref_name }}-${{ matrix.label }}.zip
             rs_cli-${{ github.ref_name }}-${{ matrix.label }}.tar.gz
+          fail_on_unmatched_files: false
           generate_release_notes: true
