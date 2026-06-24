@@ -9,13 +9,24 @@ use std::path::Path;
 
 use crate::error::{CliError, Result};
 
-fn parse_format(name: &str) -> Result<ritoshark::tex::TexFormat> {
+/// Parsed encode-format choice: either a block-compressed format (routed to
+/// [`ritoshark::tex::Texture::encode`]) or uncompressed BGRA8 (routed to
+/// [`ritoshark::tex::Texture::from_rgba_bgra8`]).
+enum EncodeFormat {
+    Bc(ritoshark::tex::TexFormat),
+    Bgra8,
+}
+
+/// Parse a user-supplied format string (case-insensitive) into an [`EncodeFormat`].
+/// Accepted values: `bc1`, `bc3`, `bc5`, `bc7`, `bgra8`.
+fn parse_format(name: &str) -> Result<EncodeFormat> {
     use ritoshark::tex::TexFormat;
     Ok(match name.to_ascii_lowercase().as_str() {
-        "bc1" => TexFormat::Bc1,
-        "bc3" => TexFormat::Bc3,
-        "bc7" => TexFormat::Bc7,
-        "bgra8" => TexFormat::Bgra8,
+        "bc1" => EncodeFormat::Bc(TexFormat::Bc1),
+        "bc3" => EncodeFormat::Bc(TexFormat::Bc3),
+        "bc5" => EncodeFormat::Bc(TexFormat::Bc5),
+        "bc7" => EncodeFormat::Bc(TexFormat::Bc7),
+        "bgra8" => EncodeFormat::Bgra8,
         other => return Err(CliError::msg(format!("unknown tex format: {other}"))),
     })
 }
@@ -57,9 +68,41 @@ pub fn encode(input: &Path, format: &str, mipmaps: bool, output: Option<&Path>) 
     let img = image::open(input)
         .map_err(|e| CliError::msg(format!("open image: {e}")))?
         .to_rgba8();
-    let tex = ritoshark::tex::Texture::encode(&img, fmt, mipmaps)
-        .map_err(|e| CliError::msg(format!("encode: {e}")))?;
+    let tex = match fmt {
+        EncodeFormat::Bc(tex_fmt) => ritoshark::tex::Texture::encode(&img, tex_fmt, mipmaps)
+            .map_err(|e| CliError::msg(format!("encode: {e}")))?,
+        // `from_rgba_bgra8` is infallible; mipmaps flag is intentionally ignored —
+        // uncompressed BGRA8 is always a single full-resolution surface.
+        EncodeFormat::Bgra8 => ritoshark::tex::Texture::from_rgba_bgra8(&img),
+    };
     let out = output.map(|p| p.to_path_buf()).unwrap_or_else(|| input.with_extension("tex"));
     tex.to_path(&out)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_format_accepts_known_formats() {
+        // BC formats — exact case and upper-case variants must both succeed.
+        assert!(matches!(parse_format("bc1"), Ok(EncodeFormat::Bc(_))));
+        assert!(matches!(parse_format("BC1"), Ok(EncodeFormat::Bc(_))));
+        assert!(matches!(parse_format("bc3"), Ok(EncodeFormat::Bc(_))));
+        assert!(matches!(parse_format("BC3"), Ok(EncodeFormat::Bc(_))));
+        assert!(matches!(parse_format("bc5"), Ok(EncodeFormat::Bc(_))));
+        assert!(matches!(parse_format("bc7"), Ok(EncodeFormat::Bc(_))));
+        // Uncompressed BGRA8 must succeed and route to the Bgra8 variant.
+        assert!(matches!(parse_format("bgra8"), Ok(EncodeFormat::Bgra8)));
+        assert!(matches!(parse_format("BGRA8"), Ok(EncodeFormat::Bgra8)));
+    }
+
+    #[test]
+    fn parse_format_rejects_unknown_strings() {
+        assert!(parse_format("garbage").is_err());
+        assert!(parse_format("dxt5").is_err());
+        assert!(parse_format("").is_err());
+        assert!(parse_format("bc2").is_err());
+    }
 }
