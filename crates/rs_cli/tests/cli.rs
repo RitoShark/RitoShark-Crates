@@ -57,3 +57,16 @@ fn bin_diff_identical_is_empty() {
         .assert()
         .success();
 }
+
+#[test]
+fn wad_list_when_sample_present() {
+    let sample = std::path::Path::new("tests/fixtures/sample.wad.client");
+    if !sample.exists() {
+        eprintln!("skipping: no sample wad fixture");
+        return;
+    }
+    rs_cli()
+        .args(["wad", "list", sample.to_str().unwrap()])
+        .assert()
+        .success();
+}

@@ -55,6 +55,9 @@ enum Command {
     /// Operate on `.bin`/PROP documents.
     #[command(subcommand)]
     Bin(BinCmd),
+    /// Operate on `.wad` archives.
+    #[command(subcommand)]
+    Wad(WadCmd),
 }
 
 #[derive(Subcommand)]
@@ -78,6 +81,34 @@ enum BinCmd {
         context: usize,
         #[arg(long)]
         no_color: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WadCmd {
+    /// List chunks in one or more archives.
+    List {
+        archives: Vec<PathBuf>,
+        #[arg(short = 'F', long, default_value = "table")]
+        format: String,
+        #[arg(long, default_value_t = true)]
+        stats: bool,
+        #[arg(long)]
+        hashes: Option<PathBuf>,
+    },
+    /// Extract chunks to a directory.
+    Extract {
+        archives: Vec<PathBuf>,
+        #[arg(short, long)]
+        output: PathBuf,
+        #[arg(short = 'f', long = "filter-type", num_args = 0..)]
+        filter_type: Vec<String>,
+        #[arg(short = 'x', long)]
+        pattern: Option<String>,
+        #[arg(long)]
+        overwrite: bool,
+        #[arg(long)]
+        hashes: Option<PathBuf>,
     },
 }
 
@@ -119,6 +150,27 @@ fn run(cli: Cli) -> Result<()> {
             context,
             no_color,
         }) => commands::bin::diff(&a, &b, context, no_color),
+        Command::Wad(WadCmd::List {
+            archives,
+            format,
+            stats,
+            hashes,
+        }) => commands::wad::list(&archives, &format, stats, hashes.as_deref()),
+        Command::Wad(WadCmd::Extract {
+            archives,
+            output,
+            filter_type,
+            pattern,
+            overwrite,
+            hashes,
+        }) => commands::wad::extract(
+            &archives,
+            &output,
+            &filter_type,
+            pattern.as_deref(),
+            overwrite,
+            hashes.as_deref(),
+        ),
     }
 }
 
