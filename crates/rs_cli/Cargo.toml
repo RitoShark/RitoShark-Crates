@@ -7,10 +7,20 @@ rust-version.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "ritoshark"
+name = "rs_cli"
 path = "src/main.rs"
 
 [dependencies]
 ritoshark = { workspace = true }
 rs_hash = { workspace = true }
 clap = { workspace = true }
+miette = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+walkdir = { workspace = true }
+image = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
