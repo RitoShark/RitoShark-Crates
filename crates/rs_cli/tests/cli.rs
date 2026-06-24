@@ -38,3 +38,22 @@ fn transform_bin_roundtrip_when_sample_present() {
     let b = std::fs::read(&back).unwrap();
     assert_eq!(a, b, "bin -> text -> bin must be byte-identical");
 }
+
+#[test]
+fn bin_diff_identical_is_empty() {
+    let sample = std::path::Path::new("tests/fixtures/sample.bin");
+    if !sample.exists() {
+        eprintln!("skipping: no sample.bin fixture");
+        return;
+    }
+    rs_cli()
+        .args([
+            "bin",
+            "diff",
+            sample.to_str().unwrap(),
+            sample.to_str().unwrap(),
+            "--no-color",
+        ])
+        .assert()
+        .success();
+}

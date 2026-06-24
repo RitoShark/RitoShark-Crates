@@ -52,6 +52,33 @@ enum Command {
         #[arg(long)]
         hashes: Option<PathBuf>,
     },
+    /// Operate on `.bin`/PROP documents.
+    #[command(subcommand)]
+    Bin(BinCmd),
+}
+
+#[derive(Subcommand)]
+enum BinCmd {
+    /// Convert .bin <-> text.
+    Convert {
+        input: PathBuf,
+        output: Option<PathBuf>,
+        #[arg(short, long)]
+        recursive: bool,
+        #[arg(short = 'k', long)]
+        keep_hashed: bool,
+        #[arg(long)]
+        hashes: Option<PathBuf>,
+    },
+    /// Unified diff of two bins/texts.
+    Diff {
+        a: PathBuf,
+        b: PathBuf,
+        #[arg(short = 'C', long, default_value_t = 3)]
+        context: usize,
+        #[arg(long)]
+        no_color: bool,
+    },
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -73,6 +100,25 @@ fn run(cli: Cli) -> Result<()> {
             keep_hashed,
             hashes.as_deref(),
         ),
+        Command::Bin(BinCmd::Convert {
+            input,
+            output,
+            recursive,
+            keep_hashed,
+            hashes,
+        }) => commands::bin::convert(
+            &input,
+            output.as_deref(),
+            recursive,
+            keep_hashed,
+            hashes.as_deref(),
+        ),
+        Command::Bin(BinCmd::Diff {
+            a,
+            b,
+            context,
+            no_color,
+        }) => commands::bin::diff(&a, &b, context, no_color),
     }
 }
 
