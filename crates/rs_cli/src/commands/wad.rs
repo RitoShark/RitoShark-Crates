@@ -19,6 +19,27 @@ fn name_for(hash: u64, mapper: &HashMapper) -> Option<String> {
     mapper.get(hash).map(|s| s.to_string())
 }
 
+/// Reject path components that would escape the output directory: returns a
+/// relative, normalized path containing only normal components, or `None` if
+/// the candidate is unsafe (absolute, or contains `..`/root/prefix components).
+fn safe_relative(rel: &str) -> Option<PathBuf> {
+    use std::path::{Component, PathBuf};
+    let mut out = PathBuf::new();
+    for comp in std::path::Path::new(rel).components() {
+        match comp {
+            Component::Normal(c) => out.push(c),
+            Component::CurDir => {}
+            // Reject ParentDir, RootDir, Prefix outright.
+            _ => return None,
+        }
+    }
+    if out.as_os_str().is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 /// List chunks across one or more archives.
 pub fn list(
     archives: &[PathBuf],
@@ -96,15 +117,6 @@ pub fn list(
     Ok(())
 }
 
-fn ext_guess(name: Option<&str>) -> &'static str {
-    match name.and_then(|n| n.rsplit('.').next()) {
-        Some("bin") => "bin",
-        Some("dds") => "dds",
-        Some("tex") => "tex",
-        _ => "bin",
-    }
-}
-
 /// Extract chunks to a directory.
 pub fn extract(
     archives: &[PathBuf],
@@ -132,14 +144,27 @@ pub fn extract(
                     continue;
                 }
             }
-            let ext = ext_guess(name.as_deref());
-            if !filter_types.is_empty() && !filter_types.iter().any(|t| t == ext) {
+            let ext = name
+                .as_deref()
+                .and_then(|n| n.rsplit('.').next())
+                .map(|e| e.to_ascii_lowercase())
+                .unwrap_or_else(|| "bin".to_string());
+            if !filter_types.is_empty()
+                && !filter_types.iter().any(|t| t.eq_ignore_ascii_case(&ext))
+            {
                 continue;
             }
             let rel = name
                 .clone()
                 .unwrap_or_else(|| format!("{:016x}.{ext}", chunk.path_hash));
-            let dest = out.join(&rel);
+            let safe = match safe_relative(&rel) {
+                Some(p) => p,
+                None => {
+                    eprintln!("skipping unsafe path: {rel}");
+                    continue;
+                }
+            };
+            let dest = out.join(&safe);
             if dest.exists() && !overwrite {
                 continue;
             }
@@ -151,4 +176,31 @@ pub fn extract(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_relative;
+    use std::path::PathBuf;
+
+    #[test]
+    fn safe_relative_normal_path() {
+        let result = safe_relative("a/b.bin");
+        assert_eq!(result, Some(PathBuf::from("a/b.bin")));
+    }
+
+    #[test]
+    fn safe_relative_parent_dir_is_rejected() {
+        assert_eq!(safe_relative("../escape"), None);
+    }
+
+    #[test]
+    fn safe_relative_absolute_path_is_rejected() {
+        assert_eq!(safe_relative("/abs/path"), None);
+    }
+
+    #[test]
+    fn safe_relative_traversal_through_normal_is_rejected() {
+        assert_eq!(safe_relative("a/../../b"), None);
+    }
 }
