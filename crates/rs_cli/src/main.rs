@@ -58,6 +58,9 @@ enum Command {
     /// Operate on `.wad` archives.
     #[command(subcommand)]
     Wad(WadCmd),
+    /// Operate on `.tex` textures.
+    #[command(subcommand)]
+    Tex(TexCmd),
 }
 
 #[derive(Subcommand)]
@@ -109,6 +112,34 @@ enum WadCmd {
         overwrite: bool,
         #[arg(long)]
         hashes: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TexCmd {
+    /// Print texture metadata.
+    Info {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Decode a texture to an image or DDS.
+    Decode {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        #[arg(long, default_value_t = 0)]
+        mip: u32,
+    },
+    /// Encode an image into a texture.
+    Encode {
+        input: PathBuf,
+        #[arg(short = 'f', long)]
+        format: String,
+        #[arg(short = 'm', long, default_value_t = true)]
+        mipmaps: bool,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -171,6 +202,13 @@ fn run(cli: Cli) -> Result<()> {
             overwrite,
             hashes.as_deref(),
         ),
+        Command::Tex(TexCmd::Info { input, json }) => commands::tex::info(&input, json),
+        Command::Tex(TexCmd::Decode { input, output, mip }) => {
+            commands::tex::decode(&input, output.as_deref(), mip)
+        }
+        Command::Tex(TexCmd::Encode { input, format, mipmaps, output }) => {
+            commands::tex::encode(&input, &format, mipmaps, output.as_deref())
+        }
     }
 }
 
