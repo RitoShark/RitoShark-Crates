@@ -42,7 +42,7 @@ thiserror = "2"
 miette = { version = "7", features = ["fancy"] }
 num_enum = "0.7"
 rayon = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "webp"] }
 clap = { version = "4", features = ["derive"] }
 insta = "1"
 criterion = "0.5"
