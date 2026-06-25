@@ -14,7 +14,7 @@ impl Parse for Rman {
     type Error = Error;
 
     fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self> {
-        let magic = reader.read_array::<4>()?;
+        let magic = reader.read_byte_array::<4>()?;
         if magic != MAGIC {
             return Err(Error::InvalidMagic(magic));
         }

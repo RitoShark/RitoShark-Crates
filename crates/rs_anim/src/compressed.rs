@@ -108,7 +108,7 @@ impl Compressed {
         for _ in 0..frame_count {
             let time = reader.read_u16()?;
             let joint_id_raw = reader.read_u16()?;
-            let value = reader.read_array::<6>()?;
+            let value = reader.read_byte_array::<6>()?;
             frames.push(Frame {
                 time,
                 joint_id_raw,

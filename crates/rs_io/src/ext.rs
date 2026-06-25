@@ -7,50 +7,50 @@ use crate::Result;
 /// Reading helpers layered over any [`std::io::Read`]; every integer is little-endian.
 pub trait ReaderExt: Read {
     fn read_u8(&mut self) -> Result<u8> {
-        Ok(self.read_array::<1>()?[0])
+        Ok(self.read_byte_array::<1>()?[0])
     }
 
     fn read_i8(&mut self) -> Result<i8> {
-        Ok(self.read_array::<1>()?[0] as i8)
+        Ok(self.read_byte_array::<1>()?[0] as i8)
     }
 
     fn read_u16(&mut self) -> Result<u16> {
-        Ok(u16::from_le_bytes(self.read_array()?))
+        Ok(u16::from_le_bytes(self.read_byte_array()?))
     }
 
     fn read_i16(&mut self) -> Result<i16> {
-        Ok(i16::from_le_bytes(self.read_array()?))
+        Ok(i16::from_le_bytes(self.read_byte_array()?))
     }
 
     fn read_u32(&mut self) -> Result<u32> {
-        Ok(u32::from_le_bytes(self.read_array()?))
+        Ok(u32::from_le_bytes(self.read_byte_array()?))
     }
 
     fn read_i32(&mut self) -> Result<i32> {
-        Ok(i32::from_le_bytes(self.read_array()?))
+        Ok(i32::from_le_bytes(self.read_byte_array()?))
     }
 
     fn read_u64(&mut self) -> Result<u64> {
-        Ok(u64::from_le_bytes(self.read_array()?))
+        Ok(u64::from_le_bytes(self.read_byte_array()?))
     }
 
     fn read_i64(&mut self) -> Result<i64> {
-        Ok(i64::from_le_bytes(self.read_array()?))
+        Ok(i64::from_le_bytes(self.read_byte_array()?))
     }
 
     fn read_f32(&mut self) -> Result<f32> {
-        Ok(f32::from_le_bytes(self.read_array()?))
+        Ok(f32::from_le_bytes(self.read_byte_array()?))
     }
 
     fn read_f64(&mut self) -> Result<f64> {
-        Ok(f64::from_le_bytes(self.read_array()?))
+        Ok(f64::from_le_bytes(self.read_byte_array()?))
     }
 
     fn read_bool(&mut self) -> Result<bool> {
         Ok(self.read_u8()? != 0)
     }
 
-    fn read_array<const N: usize>(&mut self) -> Result<[u8; N]> {
+    fn read_byte_array<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut buf = [0u8; N];
         self.read_exact(&mut buf)?;
         Ok(buf)
@@ -87,7 +87,7 @@ pub trait ReaderExt: Read {
     }
 
     fn read_fixed_string<const N: usize>(&mut self) -> Result<String> {
-        let buf = self.read_array::<N>()?;
+        let buf = self.read_byte_array::<N>()?;
         let end = buf.iter().position(|&b| b == 0).unwrap_or(N);
         Ok(String::from_utf8(buf[..end].to_vec())?)
     }

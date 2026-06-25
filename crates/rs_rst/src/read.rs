@@ -11,7 +11,7 @@ impl Parse for Rst {
     type Error = Error;
 
     fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self> {
-        let magic = reader.read_array::<3>()?;
+        let magic = reader.read_byte_array::<3>()?;
         if magic != MAGIC {
             return Err(Error::InvalidMagic);
         }

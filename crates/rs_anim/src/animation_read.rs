@@ -79,7 +79,7 @@ impl Animation {
             .map_err(rs_io::Error::from)?;
         let mut quats = Vec::with_capacity(quat_count);
         for _ in 0..quat_count {
-            let bytes = reader.read_array::<6>()?;
+            let bytes = reader.read_byte_array::<6>()?;
             quats.push(decompress_quat(&bytes).normalize());
         }
 
@@ -272,7 +272,7 @@ impl Parse for Animation {
         reader.read_to_end(&mut bytes).map_err(rs_io::Error::from)?;
 
         let mut cursor = Cursor::new(&bytes);
-        let magic = cursor.read_array::<8>()?;
+        let magic = cursor.read_byte_array::<8>()?;
         let version = cursor.read_u32()?;
         let mut anim = match &magic {
             b"r3d2anmd" => Self::read_uncompressed(&mut cursor, version),

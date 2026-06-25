@@ -127,7 +127,7 @@ fn read_vertex<R: Read>(
     vertex_type: SkinnedMeshVertexType,
 ) -> Result<SkinnedMeshVertex> {
     let position = reader.read_vec3()?;
-    let blend_indices = reader.read_array::<4>()?;
+    let blend_indices = reader.read_byte_array::<4>()?;
     let blend_weights = [
         reader.read_f32()?,
         reader.read_f32()?,
@@ -143,7 +143,7 @@ fn read_vertex<R: Read>(
         vertex_type,
         SkinnedMeshVertexType::Color | SkinnedMeshVertexType::Tangent
     ) {
-        color = Some(reader.read_array::<4>()?);
+        color = Some(reader.read_byte_array::<4>()?);
         if vertex_type == SkinnedMeshVertexType::Tangent {
             tangent = Some(reader.read_vec4()?);
         }

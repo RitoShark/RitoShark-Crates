@@ -19,7 +19,7 @@ impl Parse for LuaBin {
     type Error = Error;
 
     fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self> {
-        if reader.read_array::<4>()? != SIGNATURE {
+        if reader.read_byte_array::<4>()? != SIGNATURE {
             return Err(Error::InvalidSignature);
         }
         let version = reader.read_u8()?;

@@ -13,13 +13,13 @@ impl Parse for Bin {
     type Error = Error;
 
     fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self> {
-        let mut magic = reader.read_array::<4>()?;
+        let mut magic = reader.read_byte_array::<4>()?;
         let mut is_patch = false;
         let mut patch_header = [0u8; 8];
         if magic == PTCH {
             is_patch = true;
-            patch_header = reader.read_array::<8>()?;
-            magic = reader.read_array::<4>()?;
+            patch_header = reader.read_byte_array::<8>()?;
+            magic = reader.read_byte_array::<4>()?;
         }
         if magic != PROP {
             return Err(Error::InvalidMagic(magic));
@@ -127,7 +127,7 @@ fn read_value<R: Read + Seek>(reader: &mut R, ty: BinType) -> Result<BinValue> {
             reader.read_f32()?,
         ]),
         BinType::Mtx44 => BinValue::Mtx44(reader.read_mtx44()?),
-        BinType::Rgba => BinValue::Rgba(reader.read_array::<4>()?),
+        BinType::Rgba => BinValue::Rgba(reader.read_byte_array::<4>()?),
         BinType::String => BinValue::String(reader.read_string_u16()?),
         BinType::Hash => BinValue::Hash(reader.read_u32()?),
         BinType::File => BinValue::File(reader.read_u64()?),

@@ -141,7 +141,7 @@ impl Parse for Skeleton {
         if magic == Self::MAGIC {
             Self::read(reader)
         } else {
-            let signature = reader.read_array::<8>()?;
+            let signature = reader.read_byte_array::<8>()?;
             if &signature == b"r3d2sklt" {
                 let version = reader.read_u32()?;
                 Err(Error::UnsupportedVersion(version))

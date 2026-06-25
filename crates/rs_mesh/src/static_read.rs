@@ -29,7 +29,7 @@ impl Parse for StaticMesh {
 impl StaticMesh {
     /// Reads the binary `.scb` (`"r3d2Mesh"`) static mesh format.
     pub fn from_scb_reader<R: Read>(reader: &mut R) -> Result<Self> {
-        let magic = reader.read_array::<8>()?;
+        let magic = reader.read_byte_array::<8>()?;
         if &magic != SCB_MAGIC {
             return Err(Error::InvalidMagic);
         }
@@ -68,7 +68,7 @@ impl StaticMesh {
             Some(t) if t >= 1 => {
                 let mut c = Vec::with_capacity(vertex_count);
                 for _ in 0..vertex_count {
-                    c.push(reader.read_array::<4>()?);
+                    c.push(reader.read_byte_array::<4>()?);
                 }
                 Some(c)
             }

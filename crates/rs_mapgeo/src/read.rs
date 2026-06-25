@@ -34,7 +34,7 @@ fn is_supported(version: u32) -> bool {
 
 impl MapGeometry {
     pub fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self> {
-        let magic = reader.read_array::<4>()?;
+        let magic = reader.read_byte_array::<4>()?;
         if &magic != MapGeometry::magic() {
             return Err(Error::InvalidMagic);
         }

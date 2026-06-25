@@ -72,7 +72,7 @@ impl Parse for Bnk {
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(Error::Io(e.into())),
             }
-            let rest = reader.read_array::<3>()?;
+            let rest = reader.read_byte_array::<3>()?;
             let tag = [first[0], rest[0], rest[1], rest[2]];
             let size = reader.read_u32()? as u64;
             let here = reader.stream_position()?;

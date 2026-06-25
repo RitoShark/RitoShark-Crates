@@ -21,7 +21,7 @@ impl Parse for Troybin {
 }
 
 fn read_v1<R: Read>(r: &mut R) -> Result<TroybinV1> {
-    let header = r.read_array::<3>()?;
+    let header = r.read_byte_array::<3>()?;
     let entry_count = r.read_u32()? as usize;
     let data_count = r.read_u32()? as usize;
 
@@ -111,7 +111,7 @@ fn read_scalars<R: Read, T>(
 fn read_u8_arrays<const N: usize, R: Read>(r: &mut R, count: usize) -> Result<Vec<[u8; N]>> {
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {
-        out.push(r.read_array::<N>()?);
+        out.push(r.read_byte_array::<N>()?);
     }
     Ok(out)
 }
