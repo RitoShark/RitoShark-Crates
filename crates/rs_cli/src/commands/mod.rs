@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub mod audio;
 pub mod bin;
 pub mod read;
