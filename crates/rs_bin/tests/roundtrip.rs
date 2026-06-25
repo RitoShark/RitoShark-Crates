@@ -225,11 +225,23 @@ fn text_printer_barewords_names_but_quotes_keys_and_hash_values() {
     let text = rs_bin::to_text(&bin, Some(&mapper));
 
     // Field names: bareword.
-    assert!(text.contains("rate: f32 = 1.5"), "field name must be bareword:\n{text}");
-    assert!(text.contains("mLink: hash ="), "field name must be bareword:\n{text}");
-    assert!(!text.contains("\"rate\""), "field name must not be quoted:\n{text}");
+    assert!(
+        text.contains("rate: f32 = 1.5"),
+        "field name must be bareword:\n{text}"
+    );
+    assert!(
+        text.contains("mLink: hash ="),
+        "field name must be bareword:\n{text}"
+    );
+    assert!(
+        !text.contains("\"rate\""),
+        "field name must not be quoted:\n{text}"
+    );
     // Class name: bareword.
-    assert!(text.contains("TestClass {"), "class name must be bareword:\n{text}");
+    assert!(
+        text.contains("TestClass {"),
+        "class name must be bareword:\n{text}"
+    );
     // Entry key: quoted (it is a path, not an identifier).
     assert!(
         text.contains("\"Characters/Test/Root\" = TestClass"),
@@ -298,10 +310,22 @@ fn mtx44_text_round_trips() {
     // read that back (regression: it used to expect a flat 16-float array and
     // failed with "invalid number ''" on the first inner brace).
     let m: [f32; 16] = [
-        -0.9999999, -0.00000008742277, 0.0, 0.0,
-        0.00000008742277, -0.9999999, 0.0, 0.0,
-        0.0, 0.0, 0.9999999, 0.0,
-        0.0, -100.0, 0.0, 1.0,
+        -0.9999999,
+        -0.00000008742277,
+        0.0,
+        0.0,
+        0.00000008742277,
+        -0.9999999,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.9999999,
+        0.0,
+        0.0,
+        -100.0,
+        0.0,
+        1.0,
     ];
     let mut fields = IndexMap::new();
     fields.insert(rs_hash::fnv1a("Transform"), BinValue::Mtx44(m));
@@ -321,15 +345,24 @@ fn mtx44_text_round_trips() {
     let text = rs_bin::to_text(&bin, None);
     // Sanity: the printer really does emit nested rows (field name is a hash
     // without a mapper, so match on the type + nested braces, not the name).
-    assert!(text.contains("mtx44 = {"), "printer should emit mtx44:\n{text}");
-    assert!(text.contains("{ -0.9999999,"), "printer should emit nested rows:\n{text}");
+    assert!(
+        text.contains("mtx44 = {"),
+        "printer should emit mtx44:\n{text}"
+    );
+    assert!(
+        text.contains("{ -0.9999999,"),
+        "printer should emit nested rows:\n{text}"
+    );
 
     let reparsed = rs_bin::from_text(&text, None).expect("mtx44 text must re-parse");
     match reparsed.entries[0].fields.get(&rs_hash::fnv1a("Transform")) {
         Some(BinValue::Mtx44(got)) => assert_eq!(*got, m, "mtx44 values must survive round-trip"),
         other => panic!("expected mtx44, got {other:?}"),
     }
-    assert_eq!(reparsed, bin, "bin -> text -> bin must reconstruct the matrix");
+    assert_eq!(
+        reparsed, bin,
+        "bin -> text -> bin must reconstruct the matrix"
+    );
 
     // Also accept a FLAT 16-float matrix (backward/forward compatible input).
     let flat = "\

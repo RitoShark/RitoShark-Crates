@@ -4,9 +4,9 @@ use std::io::Write;
 use rs_io::WriterExt;
 
 use crate::chunk::{WadChunk, WadCompression};
-use crate::encoder::{compress, DEFAULT_ZSTD_LEVEL};
+use crate::encoder::{DEFAULT_ZSTD_LEVEL, compress};
 use crate::error::{Error, Result};
-use crate::wad::{write_chunk, CHUNK_ENTRY_LEN, MAGIC, V3_TRAILER_LEN};
+use crate::wad::{CHUNK_ENTRY_LEN, MAGIC, V3_TRAILER_LEN, write_chunk};
 
 /** Assembles a WAD v3.4 archive from loose files. Chunks are registered by their in-WAD path (or
 raw path hash); at build time the builder pulls each chunk's uncompressed bytes from a caller
@@ -208,6 +208,9 @@ struct BlobPlan {
 }
 
 fn to_u32(value: usize) -> Result<u32> {
-    u32::try_from(value)
-        .map_err(|_| Error::Build(format!("value {value} exceeds the WAD 32-bit size/offset limit")))
+    u32::try_from(value).map_err(|_| {
+        Error::Build(format!(
+            "value {value} exceeds the WAD 32-bit size/offset limit"
+        ))
+    })
 }

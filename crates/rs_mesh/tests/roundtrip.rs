@@ -171,7 +171,11 @@ fn skn_nonstandard_minor_ok() {
     bytes[6] = 7; // minor low byte = 7
     let mesh = SkinnedMesh::from_bytes(&bytes).expect("parse v2 with minor 7");
     assert_eq!(mesh.minor, 7);
-    assert_eq!(mesh.to_bytes().unwrap(), bytes, "byte-exact round-trip preserves minor");
+    assert_eq!(
+        mesh.to_bytes().unwrap(),
+        bytes,
+        "byte-exact round-trip preserves minor"
+    );
 }
 
 fn build_scb(vertex_type: Option<u32>) -> Vec<u8> {
@@ -272,7 +276,11 @@ fn scb_v22_parses() {
     assert_eq!(mesh.version, (2, 2));
     assert!(mesh.colors().is_none());
     assert_eq!(mesh.faces().len(), 1);
-    assert_eq!(mesh.to_bytes().unwrap(), bytes, "byte-exact .scb round-trip (2.2)");
+    assert_eq!(
+        mesh.to_bytes().unwrap(),
+        bytes,
+        "byte-exact .scb round-trip (2.2)"
+    );
 }
 
 #[test]

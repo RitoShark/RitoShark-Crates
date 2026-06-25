@@ -37,22 +37,34 @@ fn parameters_table_present_and_resolvable() {
         let mut resolved = 0;
         for file in rman.files.iter().filter(|f| f.param_index.is_some()) {
             let ht = rman.file_hash_type(file);
-            assert!(ht.is_some(), "{name}: {:?} param_index out of range", file.name);
+            assert!(
+                ht.is_some(),
+                "{name}: {:?} param_index out of range",
+                file.name
+            );
             resolved += 1;
         }
         assert!(resolved > 0, "{name}: no files carried a param_index");
 
         // Live LoL manifests use SHA256 today; assert at least one resolves to a
         // concrete algorithm (guards against an all-None silent failure).
-        let any_concrete = rman
-            .parameters
-            .iter()
-            .any(|p| matches!(p.hash_type, Some(ChunkHashType::Sha256 | ChunkHashType::Hkdf | ChunkHashType::Blake3)));
+        let any_concrete = rman.parameters.iter().any(|p| {
+            matches!(
+                p.hash_type,
+                Some(ChunkHashType::Sha256 | ChunkHashType::Hkdf | ChunkHashType::Blake3)
+            )
+        });
         assert!(any_concrete, "{name}: no concrete hash type in parameters");
 
-        eprintln!("{name}: {} parameters, {resolved} files resolved", rman.parameters.len());
+        eprintln!(
+            "{name}: {} parameters, {resolved} files resolved",
+            rman.parameters.len()
+        );
         for p in &rman.parameters {
-            eprintln!("  param: {:?} min={} max={}", p.hash_type, p.min_chunk_size, p.max_chunk_size);
+            eprintln!(
+                "  param: {:?} min={} max={}",
+                p.hash_type, p.min_chunk_size, p.max_chunk_size
+            );
         }
     }
     if tested == 0 {

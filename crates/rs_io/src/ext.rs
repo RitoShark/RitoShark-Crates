@@ -97,7 +97,11 @@ pub trait ReaderExt: Read {
     }
 
     fn read_vec3(&mut self) -> Result<Vec3> {
-        Ok(Vec3::new(self.read_f32()?, self.read_f32()?, self.read_f32()?))
+        Ok(Vec3::new(
+            self.read_f32()?,
+            self.read_f32()?,
+            self.read_f32()?,
+        ))
     }
 
     fn read_vec4(&mut self) -> Result<Vec4> {

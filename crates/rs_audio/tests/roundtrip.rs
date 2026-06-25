@@ -59,7 +59,10 @@ fn wpk_round_trips_dead_slots_and_alignment() {
     let total_slots = 4u32; // 2 live + 2 dead
     let header_len = 12 + total_slots as usize * 4;
 
-    let entry_sizes: Vec<usize> = names.iter().map(|n| 12 + n.encode_utf16().count() * 2).collect();
+    let entry_sizes: Vec<usize> = names
+        .iter()
+        .map(|n| 12 + n.encode_utf16().count() * 2)
+        .collect();
     let mut entry_offsets = Vec::new();
     let mut cursor = header_len;
     for s in &entry_sizes {
@@ -101,7 +104,10 @@ fn wpk_round_trips_dead_slots_and_alignment() {
     assert_eq!(parsed.entries[0].name, "1.wem");
 
     let written = parsed.to_bytes().unwrap();
-    assert_eq!(written, bytes, "WPK with dead slots + alignment must round-trip byte-exact");
+    assert_eq!(
+        written, bytes,
+        "WPK with dead slots + alignment must round-trip byte-exact"
+    );
 }
 
 #[test]

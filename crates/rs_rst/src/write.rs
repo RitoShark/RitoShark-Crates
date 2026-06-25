@@ -16,12 +16,16 @@ impl Serialize for Rst {
         let mut offsets: IndexMap<&RstValue, u64> = IndexMap::with_capacity(self.entries.len());
 
         for value in &self.blob_order {
-            offsets.entry(value).or_insert_with(|| append(&mut blob, value));
+            offsets
+                .entry(value)
+                .or_insert_with(|| append(&mut blob, value));
         }
 
         let mut table = Vec::with_capacity(self.entries.len());
         for (hash, value) in &self.entries {
-            let offset = *offsets.entry(value).or_insert_with(|| append(&mut blob, value));
+            let offset = *offsets
+                .entry(value)
+                .or_insert_with(|| append(&mut blob, value));
             table.push((offset << bits) | (hash & ((1u64 << bits) - 1)));
         }
 

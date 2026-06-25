@@ -94,7 +94,9 @@ fn legacy_encrypted_entry_round_trips() {
     let cipher = vec![0x00u8, 0x10, 0xFE, 0x7F, 0x42];
     let mut rst = Rst::with_version(4);
     rst.mode = 1;
-    let hash = rst.add("secret_key", RstValue::Encrypted(cipher.clone())).unwrap();
+    let hash = rst
+        .add("secret_key", RstValue::Encrypted(cipher.clone()))
+        .unwrap();
     rst.add("plain_key", "Visible");
 
     let bytes = rst.to_bytes().expect("serialize");

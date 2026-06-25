@@ -20,7 +20,9 @@ pub fn decompress(
     match compression {
         WadCompression::None => Ok(raw.to_vec()),
         WadCompression::Gzip => decompress_gzip(raw, uncompressed_size),
-        WadCompression::Satellite => Err(Error::UnsupportedCompression(WadCompression::Satellite as u8)),
+        WadCompression::Satellite => Err(Error::UnsupportedCompression(
+            WadCompression::Satellite as u8,
+        )),
         WadCompression::Zstd => decompress_zstd(raw, uncompressed_size),
         WadCompression::ZstdMulti => decompress_zstd_multi(raw, uncompressed_size),
     }
@@ -65,11 +67,15 @@ pub fn decompress_zstd_multi_with_toc(
         let raw_end = raw_offset
             .checked_add(csize)
             .filter(|&end| end <= raw.len())
-            .ok_or_else(|| Error::Decompress(String::from("subchunk compressed range exceeds chunk")))?;
+            .ok_or_else(|| {
+                Error::Decompress(String::from("subchunk compressed range exceeds chunk"))
+            })?;
         let out_end = out_offset
             .checked_add(usize_)
             .filter(|&end| end <= out.len())
-            .ok_or_else(|| Error::Decompress(String::from("subchunk uncompressed range exceeds chunk")))?;
+            .ok_or_else(|| {
+                Error::Decompress(String::from("subchunk uncompressed range exceeds chunk"))
+            })?;
 
         let src = &raw[raw_offset..raw_end];
         if csize == usize_ {
@@ -100,7 +106,9 @@ fn decompress_zstd_multi(raw: &[u8], uncompressed_size: usize) -> Result<Vec<u8>
 
     let mut out = vec![0u8; uncompressed_size];
     if magic_offset > out.len() || magic_offset > raw.len() {
-        return Err(Error::Decompress(String::from("zstd frame offset out of range")));
+        return Err(Error::Decompress(String::from(
+            "zstd frame offset out of range",
+        )));
     }
     out[..magic_offset].copy_from_slice(&raw[..magic_offset]);
     zstd::Decoder::new(Cursor::new(&raw[magic_offset..]))

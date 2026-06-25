@@ -26,7 +26,7 @@ mod wad;
 pub use builder::WadBuilder;
 pub use chunk::{WadChunk, WadCompression, WadSubchunk};
 pub use decoder::{decompress, decompress_zstd_multi_with_toc};
-pub use encoder::{compress, DEFAULT_ZSTD_LEVEL};
+pub use encoder::{DEFAULT_ZSTD_LEVEL, compress};
 pub use error::{Error, Result};
 pub use wad::Wad;
 

@@ -34,13 +34,17 @@ fn check_round_trip(name: &str) {
 
     let written = bnk.to_bytes().expect("serialize bnk");
     assert_eq!(
-        written, original,
+        written,
+        original,
         "{name}: round-trip not byte-exact ({} sections: {:?})",
         section_tags.len(),
         section_tags
     );
 
-    eprintln!("{name}: sections={section_tags:?} round_trip=OK wems={}", bnk.wems().len());
+    eprintln!(
+        "{name}: sections={section_tags:?} round_trip=OK wems={}",
+        bnk.wems().len()
+    );
 }
 
 #[test]
@@ -55,10 +59,7 @@ fn aatrox_sfx_audio_round_trips() {
     let wems = bnk.wems();
     assert!(!wems.is_empty(), "audio bnk should expose embedded wems");
     for (id, bytes) in &wems {
-        assert!(
-            !bytes.is_empty(),
-            "wem {id} should have a non-empty body"
-        );
+        assert!(!bytes.is_empty(), "wem {id} should have a non-empty body");
     }
 }
 

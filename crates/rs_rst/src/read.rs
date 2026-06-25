@@ -73,9 +73,10 @@ fn read_value_at(blob: &[u8], offset: usize, has_trenc: bool) -> Result<RstValue
     if has_trenc && start.first() == Some(&0xFF) {
         let len_bytes = start.get(1..3).ok_or(eof(offset, 3, start.len()))?;
         let size = u16::from_le_bytes([len_bytes[0], len_bytes[1]]) as usize;
-        let payload = start
-            .get(3..3 + size)
-            .ok_or(eof(offset + 3, size, start.len().saturating_sub(3)))?;
+        let payload =
+            start
+                .get(3..3 + size)
+                .ok_or(eof(offset + 3, size, start.len().saturating_sub(3)))?;
         return Ok(RstValue::Encrypted(payload.to_vec()));
     }
 

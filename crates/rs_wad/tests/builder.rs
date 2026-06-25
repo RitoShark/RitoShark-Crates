@@ -40,10 +40,16 @@ fn builds_and_roundtrips_chunks() {
     assert_eq!(wad.chunks.len(), files.len());
 
     // TOC must be sorted ascending by path hash, or League refuses to mount the archive.
-    assert!(wad.chunks.windows(2).all(|w| w[0].path_hash < w[1].path_hash));
+    assert!(
+        wad.chunks
+            .windows(2)
+            .all(|w| w[0].path_hash < w[1].path_hash)
+    );
 
     for (path, data) in &files {
-        let chunk = wad.chunk_by_path(path).expect("chunk missing from built wad");
+        let chunk = wad
+            .chunk_by_path(path)
+            .expect("chunk missing from built wad");
         assert_eq!(chunk.compression, WadCompression::Zstd);
         assert_eq!(chunk.uncompressed_size as usize, data.len());
         assert_eq!(wad.chunk_data(chunk).unwrap(), *data);
@@ -60,9 +66,7 @@ fn identical_chunks_are_deduplicated() {
     builder.add_chunk("a/one.bin");
     builder.add_chunk("a/two.bin");
 
-    let bytes = builder
-        .build_to_bytes(|_hash, w| put(w, &payload))
-        .unwrap();
+    let bytes = builder.build_to_bytes(|_hash, w| put(w, &payload)).unwrap();
 
     let wad = Wad::from_bytes(&bytes).unwrap();
     let one = *wad.chunk_by_path("a/one.bin").unwrap();
@@ -73,7 +77,10 @@ fn identical_chunks_are_deduplicated() {
     assert_eq!(one.checksum, two.checksum);
     // v3.4 stores no `is_duplicated` byte, so both read back false; the shared offset above is the
     // dedup. (In v3.1–3.3 the later chunk would carry the flag.)
-    assert!(!one.is_duplicated && !two.is_duplicated, "v3.4 has no on-disk is_duplicated flag");
+    assert!(
+        !one.is_duplicated && !two.is_duplicated,
+        "v3.4 has no on-disk is_duplicated flag"
+    );
     assert_eq!(wad.chunk_data(&one).unwrap(), payload);
     assert_eq!(wad.chunk_data(&two).unwrap(), payload);
 }
@@ -126,7 +133,10 @@ fn v3_4_preserves_24bit_subchunk_start() {
     let bytes = wad.to_bytes().unwrap();
     let parsed = Wad::from_bytes(&bytes).unwrap();
     let c = parsed.chunks[0];
-    assert_eq!(c.subchunk_start, 0x12_3456, "24-bit start_frame must survive round-trip");
+    assert_eq!(
+        c.subchunk_start, 0x12_3456,
+        "24-bit start_frame must survive round-trip"
+    );
     assert!(!c.is_duplicated, "v3.4 always reads is_duplicated as false");
     assert_eq!(c.subchunk_count, 3);
 }

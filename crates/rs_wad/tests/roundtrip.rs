@@ -1,7 +1,9 @@
 use std::io::{Cursor, Write};
 
 use rs_io::{Parse, Serialize, WriterExt};
-use rs_wad::{decompress, decompress_zstd_multi_with_toc, Wad, WadChunk, WadCompression, WadSubchunk};
+use rs_wad::{
+    Wad, WadChunk, WadCompression, WadSubchunk, decompress, decompress_zstd_multi_with_toc,
+};
 
 const V3_TRAILER_LEN: usize = 256 + 8;
 
@@ -102,8 +104,7 @@ fn decompress_none_copies() {
 #[test]
 fn decompress_gzip_roundtrip() {
     let original = b"the quick brown fox jumps over the lazy dog";
-    let mut encoder =
-        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(original).unwrap();
     let compressed = encoder.finish().unwrap();
 
@@ -150,9 +151,21 @@ fn subchunk_toc_decode_mixed_stored_and_zstd() {
     raw.extend_from_slice(&c_z);
 
     let toc = [
-        WadSubchunk { compressed_size: a_z.len() as u32, uncompressed_size: a.len() as u32, checksum: 0 },
-        WadSubchunk { compressed_size: b.len() as u32, uncompressed_size: b.len() as u32, checksum: 0 },
-        WadSubchunk { compressed_size: c_z.len() as u32, uncompressed_size: c.len() as u32, checksum: 0 },
+        WadSubchunk {
+            compressed_size: a_z.len() as u32,
+            uncompressed_size: a.len() as u32,
+            checksum: 0,
+        },
+        WadSubchunk {
+            compressed_size: b.len() as u32,
+            uncompressed_size: b.len() as u32,
+            checksum: 0,
+        },
+        WadSubchunk {
+            compressed_size: c_z.len() as u32,
+            uncompressed_size: c.len() as u32,
+            checksum: 0,
+        },
     ];
 
     let total = a.len() + b.len() + c.len();

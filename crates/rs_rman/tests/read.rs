@@ -216,7 +216,14 @@ impl Body {
     fn empty_tables() -> Vec<u8> {
         let mut b = Self::new();
         b.i32(0); // body header length
-        let slots = [b.reserve(), b.reserve(), b.reserve(), b.reserve(), b.reserve(), b.reserve()];
+        let slots = [
+            b.reserve(),
+            b.reserve(),
+            b.reserve(),
+            b.reserve(),
+            b.reserve(),
+            b.reserve(),
+        ];
         for slot in slots {
             let target = b.pos();
             b.patch(slot, target);

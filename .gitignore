@@ -26,6 +26,7 @@ Thumbs.db
 
 # Claude working guide (kept local, not tracked)
 CLAUDE.md
+.superpowers/
 
 # Build/test logs
 *.log

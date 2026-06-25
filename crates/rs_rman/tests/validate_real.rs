@@ -11,7 +11,7 @@ use std::path::PathBuf;
 #[cfg(feature = "verify")]
 use rs_io::Parse;
 #[cfg(feature = "verify")]
-use rs_rman::{validate_chunk, Rman};
+use rs_rman::{Rman, validate_chunk};
 
 #[cfg(feature = "verify")]
 fn sample(name: &str) -> Option<PathBuf> {
@@ -41,7 +41,11 @@ fn validates_one_real_chunk() {
         .iter()
         .find_map(|f| {
             let ht = rman.file_hash_type(f)?;
-            if f.chunk_ids.is_empty() { None } else { Some((f, ht)) }
+            if f.chunk_ids.is_empty() {
+                None
+            } else {
+                Some((f, ht))
+            }
         })
         .expect("a validatable file");
 
@@ -60,12 +64,19 @@ fn validates_one_real_chunk() {
     let mut compressed = Vec::with_capacity(range.compressed_size as usize);
     std::io::Read::read_to_end(&mut resp.into_reader(), &mut compressed).expect("read body");
 
-    assert_eq!(compressed.len(), range.compressed_size as usize, "short read");
+    assert_eq!(
+        compressed.len(),
+        range.compressed_size as usize,
+        "short read"
+    );
     let decompressed = zstd::stream::decode_all(&compressed[..]).expect("zstd decode");
     assert!(
         validate_chunk(&decompressed, range.chunk_id, ht).expect("supported hash type"),
         "chunk {:#x} failed {ht:?} validation",
         range.chunk_id
     );
-    eprintln!("validated chunk {:#x} of {:?} as {ht:?}", range.chunk_id, file.name);
+    eprintln!(
+        "validated chunk {:#x} of {:?} as {ht:?}",
+        range.chunk_id, file.name
+    );
 }

@@ -15,12 +15,12 @@ pub fn compress(data: &[u8], compression: WadCompression, level: i32) -> Result<
         WadCompression::None => Ok(data.to_vec()),
         WadCompression::Gzip => compress_gzip(data),
         WadCompression::Zstd => compress_zstd(data, level),
-        WadCompression::Satellite => {
-            Err(Error::UnsupportedCompression(WadCompression::Satellite as u8))
-        }
-        WadCompression::ZstdMulti => {
-            Err(Error::UnsupportedCompression(WadCompression::ZstdMulti as u8))
-        }
+        WadCompression::Satellite => Err(Error::UnsupportedCompression(
+            WadCompression::Satellite as u8,
+        )),
+        WadCompression::ZstdMulti => Err(Error::UnsupportedCompression(
+            WadCompression::ZstdMulti as u8,
+        )),
     }
 }
 

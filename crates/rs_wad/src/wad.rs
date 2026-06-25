@@ -117,7 +117,10 @@ impl Wad {
     located by the XXH64 of the lowercased path ending in `.subchunktoc`; because the archive only
     stores hashes, the path is supplied by the caller (its base name varies by archive). Returns
     `Ok(None)` when no chunk matches that path. Each on-disk entry is 16 bytes. */
-    pub fn subchunk_toc_for_path(&self, subchunktoc_path: &str) -> Result<Option<Vec<WadSubchunk>>> {
+    pub fn subchunk_toc_for_path(
+        &self,
+        subchunktoc_path: &str,
+    ) -> Result<Option<Vec<WadSubchunk>>> {
         match self.chunk_by_path(subchunktoc_path) {
             Some(chunk) => Ok(Some(self.parse_subchunk_toc(chunk)?)),
             None => Ok(None),
@@ -137,7 +140,8 @@ impl Wad {
             let compressed_size = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
             let uncompressed_size = u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]);
             let checksum = u64::from_le_bytes([
-                entry[8], entry[9], entry[10], entry[11], entry[12], entry[13], entry[14], entry[15],
+                entry[8], entry[9], entry[10], entry[11], entry[12], entry[13], entry[14],
+                entry[15],
             ]);
             toc.push(WadSubchunk {
                 compressed_size,
@@ -165,10 +169,16 @@ impl Wad {
             .checked_add(chunk.subchunk_count as usize)
             .filter(|&end| end <= subchunk_toc.len())
             .ok_or_else(|| {
-                Error::Decompress(String::from("chunk subchunk range exceeds the subchunk toc"))
+                Error::Decompress(String::from(
+                    "chunk subchunk range exceeds the subchunk toc",
+                ))
             })?;
         let raw = self.chunk_raw(chunk)?;
-        decompress_zstd_multi_with_toc(raw, chunk.uncompressed_size as usize, &subchunk_toc[start..end])
+        decompress_zstd_multi_with_toc(
+            raw,
+            chunk.uncompressed_size as usize,
+            &subchunk_toc[start..end],
+        )
     }
 
     /** Extracts and decompresses every chunk, returning a map from path hash to decompressed bytes.

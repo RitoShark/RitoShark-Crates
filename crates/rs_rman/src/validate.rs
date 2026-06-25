@@ -2,8 +2,8 @@
 //! decompressed bytes. `validate_chunk` takes already-decompressed bytes and recomputes
 //! the hash for comparison — callers are expected to decompress before calling.
 
-use crate::error::{Error, Result};
 use crate::ChunkHashType;
+use crate::error::{Error, Result};
 
 /// SHA-256 of `data`, first 8 bytes as a little-endian `u64`.
 pub(crate) fn hash_sha256(data: &[u8]) -> u64 {
@@ -68,7 +68,11 @@ fn hash_hkdf(data: &[u8]) -> u64 {
 /// Recompute the chunk hash of `decompressed` (a chunk's already-inflated bytes) under
 /// `hash_type` and compare to `expected_id` (the chunk's manifest id). Chunk ids are
 /// hashes of the DECOMPRESSED chunk bytes. `Err` only for unsupported algorithms (SHA512).
-pub fn validate_chunk(decompressed: &[u8], expected_id: u64, hash_type: ChunkHashType) -> Result<bool> {
+pub fn validate_chunk(
+    decompressed: &[u8],
+    expected_id: u64,
+    hash_type: ChunkHashType,
+) -> Result<bool> {
     let got = match hash_type {
         ChunkHashType::Sha256 => hash_sha256(decompressed),
         ChunkHashType::Blake3 => hash_blake3(decompressed),
