@@ -62,7 +62,7 @@ impl Skeleton {
         buf.seek(SeekFrom::Start(joint_indices_offset as u64))
             .map_err(rs_io::Error::from)?;
         let mut hash_ids: Vec<(i16, u32)> = self.joints.iter().map(|j| (j.id, j.hash)).collect();
-        hash_ids.sort_by(|a, b| a.1.cmp(&b.1));
+        hash_ids.sort_by_key(|&(_, hash)| hash);
         for (id, hash) in hash_ids {
             buf.write_i16(id)?;
             buf.write_i16(0)?;

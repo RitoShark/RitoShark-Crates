@@ -130,8 +130,7 @@ impl StaticMesh {
         let mut positions: Vec<Vec3> = Vec::new();
         let mut faces: Vec<StaticMeshFace> = Vec::new();
 
-        loop {
-            let Some(line) = lines.next() else { break };
+        while let Some(line) = lines.next() {
             let tokens: Vec<&str> = line.split_whitespace().collect();
             let Some(&key) = tokens.first() else {
                 continue;
