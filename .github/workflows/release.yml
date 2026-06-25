@@ -15,19 +15,15 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            archive: zip
             label: x86_64-windows
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            archive: tar.gz
             label: x86_64-linux
           - os: macos-latest
             target: x86_64-apple-darwin
-            archive: tar.gz
             label: x86_64-macos
           - os: macos-latest
             target: aarch64-apple-darwin
-            archive: tar.gz
             label: aarch64-macos
     runs-on: ${{ matrix.os }}
     steps:
@@ -46,7 +42,7 @@ jobs:
           New-Item -ItemType Directory $name | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/rs_cli.exe" $name/
           Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE $name/
-          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          Compress-Archive -Path "$name/*" -DestinationPath "$name.zip"
       - name: Package (Unix)
         if: matrix.os != 'windows-latest'
         run: |
@@ -55,11 +51,30 @@ jobs:
           cp "target/${{ matrix.target }}/release/rs_cli" "$name/"
           cp README.md LICENSE-MIT LICENSE-APACHE "$name/"
           tar czf "$name.tar.gz" "$name"
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: rs_cli-${{ matrix.label }}
+          path: |
             rs_cli-${{ github.ref_name }}-${{ matrix.label }}.zip
             rs_cli-${{ github.ref_name }}-${{ matrix.label }}.tar.gz
-          fail_on_unmatched_files: false
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List collected artifacts
+        run: ls -R dist
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
           generate_release_notes: true
