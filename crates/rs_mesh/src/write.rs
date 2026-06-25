@@ -156,6 +156,18 @@ impl StaticMesh {
 
         Ok(())
     }
+
+    /// Serializes this mesh to an in-memory binary `.scb` (`"r3d2Mesh"`) buffer.
+    ///
+    /// This is the convenience entry point for the `.sco` -> `.scb` conversion path: parse the
+    /// text form with [`StaticMesh::from_sco_str`], then call this to get the binary bytes. A mesh
+    /// read from `.sco` carries version `(0, 0)`, which [`StaticMesh::to_scb_writer`] emits as the
+    /// modern `3.2` container (no per-vertex color word unless `colors` is present).
+    pub fn to_scb_bytes(&self) -> Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        self.to_scb_writer(&mut buf)?;
+        Ok(buf)
+    }
 }
 
 fn write_scb_face<W: Write>(w: &mut W, face: &StaticMeshFace) -> Result<()> {

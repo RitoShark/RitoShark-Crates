@@ -284,6 +284,53 @@ fn scb_v22_parses() {
 }
 
 #[test]
+fn sco_to_scb_roundtrip() {
+    // No real `.sco` fixture exists (the text form was removed from the game), so build a
+    // representative two-triangle `[ObjectBegin]` mesh, run the conversion path the caller wants
+    // (parse `.sco` -> write `.scb` -> re-read `.scb`), and assert the mesh data survives.
+    let text = "[ObjectBegin]\n\
+        Name= cube_face\n\
+        CentralPoint= 0.25 0.5 0.75\n\
+        Verts= 4\n\
+        0.0 0.0 0.0\n\
+        1.0 0.0 0.0\n\
+        1.0 1.0 0.0\n\
+        0.0 1.0 0.0\n\
+        Faces= 2\n\
+        3 0 1 2 brick 0.0 1.0 1.0 0.0 0.0 0.0\n\
+        3 0 2 3 brick 0.0 1.0 0.0 0.0 0.0 1.0\n\
+        [ObjectEnd]\n";
+
+    let from_sco = StaticMesh::from_sco_str(text).expect("parse sco");
+    assert_eq!(from_sco.version, (0, 0), "sco mesh carries (0,0) version");
+    assert_eq!(from_sco.positions().len(), 4);
+    assert_eq!(from_sco.faces().len(), 2);
+
+    // Convert to binary `.scb` via the named convenience entry point.
+    let scb = from_sco.to_scb_bytes().expect("write scb");
+    assert_eq!(&scb[..8], b"r3d2Mesh", "scb magic");
+    // (0,0) is emitted as the modern 3.2 container.
+    assert_eq!(u16::from_le_bytes([scb[8], scb[9]]), 3, "scb major == 3");
+    assert_eq!(u16::from_le_bytes([scb[10], scb[11]]), 2, "scb minor == 2");
+
+    // Re-read the binary and confirm the mesh data is identical to what the `.sco` produced.
+    let from_scb = StaticMesh::from_bytes(&scb).expect("reparse scb");
+    assert_eq!(from_scb.name(), "cube_face");
+    assert_eq!(from_scb.positions(), from_sco.positions(), "positions match");
+    assert_eq!(from_scb.central, from_sco.central, "central point match");
+    assert_eq!(from_scb.faces().len(), from_sco.faces().len());
+    for (a, b) in from_scb.faces().iter().zip(from_sco.faces()) {
+        assert_eq!(a.material, b.material, "face material match");
+        assert_eq!(a.indices, b.indices, "face indices match");
+        assert_eq!(a.uvs, b.uvs, "face uvs match");
+    }
+    assert!(from_scb.colors().is_none(), "no color block for plain mesh");
+
+    // The writer is deterministic: re-serializing the re-read mesh yields the same bytes.
+    assert_eq!(from_scb.to_scb_bytes().unwrap(), scb, "scb write is stable");
+}
+
+#[test]
 fn sco_text_parses() {
     let text = "[ObjectBegin]\n\
         Name= thing\n\
