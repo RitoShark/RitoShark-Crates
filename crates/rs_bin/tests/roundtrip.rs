@@ -427,3 +427,39 @@ fn ptch_patches_round_trip_binary_and_text() {
     assert_eq!(reparsed, bin, "ptch text round-trip");
     assert_eq!(reparsed.to_bytes().expect("serialize"), bytes);
 }
+
+/// Regression test for the `read_string` O(n²) text-parse bug.
+///
+/// The old `next_char` called `str::from_utf8` on the *entire remaining input*
+/// to decode a single character, making a text full of long strings quadratic in
+/// file size — a ~5 MB VFX bin took ~20 s to text-parse. The fixed `read_string`
+/// bulk-copies each run of plain bytes and only pays per-char cost on escapes.
+///
+/// This builds a string-heavy `Bin` (2000 long string fields, each carrying an
+/// escaped quote and a `\u` unicode escape), round-trips it through
+/// `to_text`/`from_text`, and asserts the result is exact. On the fixed parser it
+/// finishes effectively instantly; the pre-fix parser would spin for seconds.
+#[test]
+fn text_parser_handles_many_and_long_strings() {
+    let base = "assets/characters/foo/skins/skin99/particles/some_long_effect_name_v2";
+    let mut fields = IndexMap::new();
+    for i in 0..2000u32 {
+        // The runtime string value (what the printer will re-emit and the parser
+        // must read back): a real embedded quote and an é, plus a long path.
+        let value = format!("{base}_{i}/with a \"quote\" and \u{e9} accent.dds");
+        fields.insert(0xAAAA_0000 + i, BinValue::String(value));
+    }
+    let bin = Bin {
+        version: 3,
+        entries: vec![BinEntry {
+            path_hash: 0x1234_5678,
+            class_hash: 0x9ABC_DEF0,
+            fields,
+        }],
+        ..Bin::default()
+    };
+
+    let text = rs_bin::to_text(&bin, None);
+    let reparsed = rs_bin::from_text(&text, None).expect("parse string-heavy text");
+    assert_eq!(reparsed, bin, "string-heavy text round-trip must be exact");
+}

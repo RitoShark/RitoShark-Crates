@@ -127,7 +127,28 @@ impl<'a> Parser<'a> {
         };
         self.pos += 1;
         let mut out = String::new();
+        // The source is a `&str`, so any run of bytes that is neither the closing
+        // quote nor a backslash escape is already valid UTF-8 — copy the whole run
+        // in one shot instead of decoding a char at a time. Only escapes take the
+        // slow per-char path. (The old code called `str::from_utf8` on the *entire
+        // remaining input* for every character, which was O(n) per char → O(n²)
+        // over the file and made large VFX bins take tens of seconds to parse.)
         loop {
+            let start = self.pos;
+            while let Some(b) = self.peek() {
+                if b == quote || b == b'\\' {
+                    break;
+                }
+                self.pos += 1;
+            }
+            if self.pos > start {
+                // SAFETY-equivalent: bytes came from a `&str`, so this run is valid
+                // UTF-8. Use the checked conversion (still O(run), not O(rest)).
+                match std::str::from_utf8(&self.src[start..self.pos]) {
+                    Ok(s) => out.push_str(s),
+                    Err(_) => return self.err("invalid utf-8 in string"),
+                }
+            }
             match self.peek() {
                 None => return self.err("unterminated string literal"),
                 Some(b) if b == quote => {
@@ -138,31 +159,12 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     self.read_escape(&mut out)?;
                 }
-                Some(_) => {
-                    let ch = self.next_char()?;
-                    out.push(ch);
-                }
+                // The inner loop only stops on quote / backslash / EOF, all handled
+                // above, so this arm is unreachable.
+                Some(_) => unreachable!(),
             }
         }
         Ok(out)
-    }
-
-    fn next_char(&mut self) -> Result<char> {
-        let rest = &self.src[self.pos..];
-        match std::str::from_utf8(rest) {
-            Ok(s) => {
-                let ch = s.chars().next().ok_or(()).or_else(|_| self.err("eof"))?;
-                self.pos += ch.len_utf8();
-                Ok(ch)
-            }
-            Err(e) if e.valid_up_to() > 0 => {
-                let s = std::str::from_utf8(&rest[..e.valid_up_to()]).unwrap_or("");
-                let ch = s.chars().next().ok_or(()).or_else(|_| self.err("eof"))?;
-                self.pos += ch.len_utf8();
-                Ok(ch)
-            }
-            Err(_) => self.err("invalid utf-8 in string"),
-        }
     }
 
     fn read_escape(&mut self, out: &mut String) -> Result<()> {
