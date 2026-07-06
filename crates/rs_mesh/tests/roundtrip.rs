@@ -316,7 +316,11 @@ fn sco_to_scb_roundtrip() {
     // Re-read the binary and confirm the mesh data is identical to what the `.sco` produced.
     let from_scb = StaticMesh::from_bytes(&scb).expect("reparse scb");
     assert_eq!(from_scb.name(), "cube_face");
-    assert_eq!(from_scb.positions(), from_sco.positions(), "positions match");
+    assert_eq!(
+        from_scb.positions(),
+        from_sco.positions(),
+        "positions match"
+    );
     assert_eq!(from_scb.central, from_sco.central, "central point match");
     assert_eq!(from_scb.faces().len(), from_sco.faces().len());
     for (a, b) in from_scb.faces().iter().zip(from_sco.faces()) {
