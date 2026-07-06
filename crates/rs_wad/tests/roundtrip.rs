@@ -70,6 +70,25 @@ fn extracts_uncompressed_chunk() {
 }
 
 #[test]
+fn toc_only_mount_reads_no_data_but_seeks_chunks() {
+    let bytes = build_v3_wad(0x22, b"seek-me");
+    // A TOC-only mount parses the table but leaves the data section unread.
+    let mut reader = Cursor::new(bytes.clone());
+    let wad = Wad::from_reader_toc(&mut reader).unwrap();
+    assert_eq!(wad.chunks.len(), 1);
+    assert!(wad.data.is_empty());
+    // In-memory slice access must fail (no captured bytes)...
+    assert!(wad.chunk_data(&wad.chunks[0]).is_err());
+    // ...but seeking the chunk out of the same reader yields identical bytes to
+    // the whole-file path.
+    let seeked = wad.chunk_data_from(&mut reader, &wad.chunks[0]).unwrap();
+    assert_eq!(seeked, b"seek-me");
+
+    let full = Wad::from_bytes(&bytes).unwrap();
+    assert_eq!(seeked, full.chunk_data(&full.chunks[0]).unwrap());
+}
+
+#[test]
 fn rejects_bad_magic() {
     let bytes = vec![0x00u8; 64];
     assert!(Wad::from_bytes(&bytes).is_err());

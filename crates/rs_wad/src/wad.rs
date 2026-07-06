@@ -62,6 +62,107 @@ impl Wad {
         })
     }
 
+    /** Parses only the header and chunk table, leaving the data section unread (`data` is empty).
+
+    This is the cheap way to inspect a large archive: it touches just the few KB of header + table
+    at the front of the file instead of buffering the whole (often hundreds of MB) data section into
+    memory the way [`Wad::from_reader`] does. Chunk payloads are then pulled on demand with
+    [`Wad::chunk_data_from`], which seeks straight to each chunk's absolute `data_offset`.
+
+    A WAD mounted this way keeps every `chunk_by_hash` / `chunk_by_path` / TOC accessor working, but
+    the in-memory slice accessors ([`Wad::chunk_raw`], [`Wad::chunk_data`]) will fail because there
+    are no captured data bytes; use the `*_from` reader variants instead. It is also not suitable for
+    a round-trip write, since [`Wad::to_writer`] would emit an empty data section. */
+    pub fn from_reader_toc<R: Read + Seek>(reader: &mut R) -> Result<Self> {
+        let magic = reader.read_u16()?;
+        if magic != MAGIC {
+            return Err(Error::InvalidMagic);
+        }
+        let major = reader.read_u8()?;
+        let minor = reader.read_u8()?;
+
+        let trailer_len = match major {
+            2 => V2_TRAILER_LEN,
+            3 => V3_TRAILER_LEN,
+            _ => return Err(Error::UnsupportedVersion(major, minor)),
+        };
+        let header_trailer = reader.read_bytes(trailer_len)?;
+
+        let v3_4_plus = major == 3 && minor >= 4;
+        let chunk_count = reader.read_u32()? as usize;
+        let mut chunks = Vec::with_capacity(chunk_count);
+        for _ in 0..chunk_count {
+            chunks.push(read_chunk(reader, v3_4_plus)?);
+        }
+
+        Ok(Self {
+            version: (major, minor),
+            chunks,
+            header_trailer,
+            data: Vec::new(),
+        })
+    }
+
+    /** Reads a single chunk's raw (still-compressed) bytes directly from `reader` by seeking to its
+    absolute `data_offset`. Works whether or not the data section was captured in memory, so it pairs
+    with a TOC-only mount ([`Wad::from_reader_toc`]) to extract just the wanted chunks without ever
+    buffering the whole archive. */
+    pub fn chunk_raw_from<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        chunk: &WadChunk,
+    ) -> Result<Vec<u8>> {
+        reader
+            .seek(SeekFrom::Start(chunk.data_offset as u64))
+            .map_err(rs_io::Error::from)?;
+        let mut buf = vec![0u8; chunk.compressed_size as usize];
+        reader.read_exact(&mut buf).map_err(rs_io::Error::from)?;
+        Ok(buf)
+    }
+
+    /** Reads and decompresses a single chunk directly from `reader`, seeking to its `data_offset`.
+    The streaming counterpart to [`Wad::chunk_data`], for use with a TOC-only mount. `ZstdMulti`
+    chunks need the archive's sub-chunk table; pass it via [`Wad::chunk_data_from_with_toc`] when
+    extracting those (plain audio/bin/asset chunks are never `ZstdMulti`). */
+    pub fn chunk_data_from<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        chunk: &WadChunk,
+    ) -> Result<Vec<u8>> {
+        let raw = self.chunk_raw_from(reader, chunk)?;
+        decompress(&raw, chunk.compression, chunk.uncompressed_size as usize)
+    }
+
+    /** Reads and decompresses a single chunk directly from `reader`, using an explicit sub-chunk
+    table for [`WadCompression::ZstdMulti`] chunks. The streaming counterpart to
+    [`Wad::chunk_data_with_toc`]. Non-multi chunks ignore the table and decode normally, so this is a
+    safe drop-in when a TOC is available. */
+    pub fn chunk_data_from_with_toc<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        chunk: &WadChunk,
+        subchunk_toc: &[WadSubchunk],
+    ) -> Result<Vec<u8>> {
+        if chunk.compression != WadCompression::ZstdMulti {
+            return self.chunk_data_from(reader, chunk);
+        }
+        let start = chunk.subchunk_start as usize;
+        let end = start
+            .checked_add(chunk.subchunk_count as usize)
+            .filter(|&end| end <= subchunk_toc.len())
+            .ok_or_else(|| {
+                Error::Decompress(String::from(
+                    "chunk subchunk range exceeds the subchunk toc",
+                ))
+            })?;
+        let raw = self.chunk_raw_from(reader, chunk)?;
+        decompress_zstd_multi_with_toc(
+            &raw,
+            chunk.uncompressed_size as usize,
+            &subchunk_toc[start..end],
+        )
+    }
+
     /// Writes the header, chunk table, and data section, reproducing the input bytes exactly.
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_u16(MAGIC)?;
