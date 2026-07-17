@@ -521,7 +521,7 @@ impl<'a> Parser<'a> {
             BinType::Vec2 => BinValue::Vec2(self.read_float_array::<2>()?),
             BinType::Vec3 => BinValue::Vec3(self.read_float_array::<3>()?),
             BinType::Vec4 => BinValue::Vec4(self.read_float_array::<4>()?),
-            BinType::Mtx44 => BinValue::Mtx44(self.read_float_array::<16>()?),
+            BinType::Mtx44 => BinValue::Mtx44(self.read_mtx44()?),
             BinType::Rgba => {
                 let a = self.read_u8_array::<4>()?;
                 BinValue::Rgba(a)
@@ -587,6 +587,45 @@ impl<'a> Parser<'a> {
         }
         if i != N {
             return self.err("too few array elements");
+        }
+        Ok(out)
+    }
+
+    /// Reads a 4x4 matrix, accepting both the canonical flat form (one brace, 16 bare floats) and
+    /// the legacy per-row-brace form that a broken writer once emitted (`{ {..}, {..}, {..}, {..} }`).
+    ///
+    /// The per-row form is NOT valid ritobin and only ever existed in files produced by that buggy
+    /// writer. We tolerate it on read so upgrading the crate does not reject `.py`/`.ritobin` files
+    /// people already generated; on write we always emit the canonical flat form, so re-saving a
+    /// tolerated file silently repairs it.
+    fn read_mtx44(&mut self) -> Result<[f32; 16]> {
+        let mut out = [0.0f32; 16];
+        let mut i = 0;
+        let mut end = self.read_nested_begin()?;
+        while !end {
+            if i >= 16 {
+                return self.err("too many matrix elements");
+            }
+            self.skip_inline();
+            if self.peek() == Some(b'{') {
+                // Legacy row wrapper: read a nested brace of floats and splice them in flat.
+                let mut row_end = self.read_nested_begin()?;
+                while !row_end {
+                    if i >= 16 {
+                        return self.err("too many matrix elements");
+                    }
+                    out[i] = self.read_number::<f32>()?;
+                    i += 1;
+                    row_end = self.read_separator_or_end()?;
+                }
+            } else {
+                out[i] = self.read_number::<f32>()?;
+                i += 1;
+            }
+            end = self.read_separator_or_end()?;
+        }
+        if i != 16 {
+            return self.err("mtx44 requires 16 values");
         }
         Ok(out)
     }

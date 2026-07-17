@@ -140,11 +140,18 @@ fn push_value(out: &mut String, value: &BinValue, depth: usize, mapper: Option<&
         BinValue::Vec3(a) => push_floats(out, a),
         BinValue::Vec4(a) => push_floats(out, a),
         BinValue::Mtx44(a) => {
+            // ritobin renders mtx44 as one brace holding 16 bare floats, four per line, with no
+            // per-row braces. That flat form is the only shape ritobin's (and our) text reader
+            // accepts, so the rows must NOT be wrapped like vec2/3/4. See parse::read_float_array.
             out.push_str("{\n");
             for row in 0..4 {
                 indent(out, depth + 1);
-                let r = [a[row * 4], a[row * 4 + 1], a[row * 4 + 2], a[row * 4 + 3]];
-                push_floats(out, &r);
+                for col in 0..4 {
+                    if col > 0 {
+                        out.push_str(", ");
+                    }
+                    push_float(out, a[row * 4 + col]);
+                }
                 out.push('\n');
             }
             indent(out, depth);
