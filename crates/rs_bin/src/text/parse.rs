@@ -593,8 +593,9 @@ impl<'a> Parser<'a> {
         Ok(out)
     }
 
-    /// Reads a 4x4 matrix as 16 floats. The printer emits an `mtx44` as four
-    /// nested brace rows:
+    /// Reads a 4x4 matrix as 16 floats. Accepts both the canonical flat form
+    /// (one brace, 16 bare floats) and the legacy per-row-brace form that a
+    /// broken writer once emitted:
     ///
     /// ```text
     /// {
@@ -605,11 +606,13 @@ impl<'a> Parser<'a> {
     /// }
     /// ```
     ///
-    /// so the generic flat `read_float_array::<16>` (which hits the first inner
-    /// `{` where it expects a number) can't parse our own output. This reader is
-    /// brace-tolerant: it tracks brace depth, reading 16 floats and treating any
-    /// `{`/`}`/`,`/newlines as structure to skip until the outer brace closes.
-    /// A flat `{ f, f, ... }` matrix parses too.
+    /// The per-row form is not valid ritobin and only ever existed in files
+    /// produced by that buggy writer; the generic flat `read_float_array::<16>`
+    /// (which hits the first inner `{` where it expects a number) can't parse
+    /// it. This reader is brace-tolerant: it tracks brace depth, reading 16
+    /// floats and treating any `{`/`}`/`,`/newlines as structure to skip until
+    /// the outer brace closes. The writer always emits the flat form, so
+    /// re-saving a tolerated file silently repairs it.
     fn read_mtx44(&mut self) -> Result<[f32; 16]> {
         let mut out = [0.0f32; 16];
         if !self.read_symbol(b'{') {

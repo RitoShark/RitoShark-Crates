@@ -306,9 +306,9 @@ entries: map[hash,embed] = {
 
 #[test]
 fn mtx44_text_round_trips() {
-    // The printer emits an mtx44 as four nested `{ .. }` rows; the parser must
-    // read that back (regression: it used to expect a flat 16-float array and
-    // failed with "invalid number ''" on the first inner brace).
+    // The printer emits an mtx44 as one brace holding 16 bare floats, four per
+    // line (ritobin's canonical form). It must round-trip. The reader also
+    // tolerates the legacy per-row-brace form a broken writer once produced.
     let m: [f32; 16] = [
         -0.9999999,
         -0.00000008742277,
@@ -343,15 +343,19 @@ fn mtx44_text_round_trips() {
     };
 
     let text = rs_bin::to_text(&bin, None);
-    // Sanity: the printer really does emit nested rows (field name is a hash
-    // without a mapper, so match on the type + nested braces, not the name).
+    // Sanity: the printer emits the flat form (bare floats, no per-row braces).
     assert!(
         text.contains("mtx44 = {"),
         "printer should emit mtx44:\n{text}"
     );
+    // The first row is bare floats, not wrapped in its own braces.
     assert!(
-        text.contains("{ -0.9999999,"),
-        "printer should emit nested rows:\n{text}"
+        text.contains("-0.9999999, -0.00000008742277, 0, 0"),
+        "printer should emit flat rows:\n{text}"
+    );
+    assert!(
+        !text.contains("{ -0.9999999"),
+        "printer must NOT wrap rows in braces:\n{text}"
     );
 
     let reparsed = rs_bin::from_text(&text, None).expect("mtx44 text must re-parse");
