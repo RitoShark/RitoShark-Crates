@@ -103,10 +103,13 @@ fn real_file_bin_text_bin_roundtrip() {
     let matrices = |b: &Bin| -> Vec<[f32; 16]> {
         let mut out = Vec::new();
         for e in &b.entries {
-            collect_matrices(&BinValue::Embed {
-                class: e.class_hash,
-                fields: e.fields.clone(),
-            }, &mut out);
+            collect_matrices(
+                &BinValue::Embed {
+                    class: e.class_hash,
+                    fields: e.fields.clone(),
+                },
+                &mut out,
+            );
         }
         out
     };
@@ -127,7 +130,9 @@ fn collect_matrices(v: &BinValue, out: &mut Vec<[f32; 16]>) {
                 collect_matrices(it, out);
             }
         }
-        BinValue::Option { value: Some(inner), .. } => collect_matrices(inner, out),
+        BinValue::Option {
+            value: Some(inner), ..
+        } => collect_matrices(inner, out),
         BinValue::Map { entries, .. } => {
             for (_, val) in entries {
                 collect_matrices(val, out);
