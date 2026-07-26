@@ -34,4 +34,11 @@ meshes = cmds.ls(type="mesh")
 assert meshes, "no mesh created"
 count = cmds.polyEvaluate(meshes[0], vertex=True)
 assert count == skn.vertex_count, f"expected {skn.vertex_count} vertices, got {count}"
+
+transform = cmds.listRelatives(meshes[0], parent=True)[0]
+world_pos = cmds.xform(f"{transform}.vtx[0]", query=True, worldSpace=True, translation=True)
+expected_pos = floats[0:3]
+for got, want in zip(world_pos, expected_pos):
+    assert abs(got - want) < 1e-4, f"vertex 0 position mismatch: got {world_pos}, expected {expected_pos}"
+
 print(f"OK maya vertices={count}")
