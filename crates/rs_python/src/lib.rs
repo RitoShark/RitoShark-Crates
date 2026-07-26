@@ -7,6 +7,7 @@ vertex data into Blender or Maya with a single memcpy instead of a per-element P
 */
 
 mod anim;
+mod bin;
 mod convert;
 mod error;
 mod mesh;
@@ -24,5 +25,6 @@ fn ritoshark(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     anim::register(m)?;
     tex::register(m)?;
     wad::register(m)?;
+    bin::register(m)?;
     Ok(())
 }
