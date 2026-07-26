@@ -1,5 +1,4 @@
 #![forbid(unsafe_code)]
-#![allow(dead_code)]
 /*!
 Python bindings for the RitoShark format crates. Each format module wraps its `rs_*` type in a
 `#[pyclass]` and converts bulk geometry to tightly packed little-endian buffers, so callers move
@@ -10,6 +9,7 @@ mod anim;
 mod bin;
 mod convert;
 mod error;
+mod mapgeo;
 mod mesh;
 mod tex;
 mod wad;
@@ -26,5 +26,6 @@ fn ritoshark(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     tex::register(m)?;
     wad::register(m)?;
     bin::register(m)?;
+    mapgeo::register(m)?;
     Ok(())
 }
