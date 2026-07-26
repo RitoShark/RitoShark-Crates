@@ -6,6 +6,7 @@ Python bindings for the RitoShark format crates. Each format module wraps its `r
 vertex data into Blender or Maya with a single memcpy instead of a per-element Python loop.
 */
 
+mod anim;
 mod convert;
 mod error;
 mod mesh;
@@ -18,5 +19,6 @@ fn ritoshark(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     error::register(py, m)?;
     convert::register(m)?;
     mesh::register(m)?;
+    anim::register(m)?;
     Ok(())
 }
