@@ -8,6 +8,7 @@ vertex data into Blender or Maya with a single memcpy instead of a per-element P
 
 mod convert;
 mod error;
+mod mesh;
 
 use pyo3::prelude::*;
 
@@ -16,5 +17,6 @@ fn ritoshark(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     error::register(py, m)?;
     convert::register(m)?;
+    mesh::register(m)?;
     Ok(())
 }
