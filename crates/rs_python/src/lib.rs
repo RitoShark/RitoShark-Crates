@@ -10,6 +10,7 @@ mod anim;
 mod convert;
 mod error;
 mod mesh;
+mod tex;
 
 use pyo3::prelude::*;
 
@@ -20,5 +21,6 @@ fn ritoshark(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     convert::register(m)?;
     mesh::register(m)?;
     anim::register(m)?;
+    tex::register(m)?;
     Ok(())
 }
