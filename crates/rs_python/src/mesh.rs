@@ -415,8 +415,7 @@ impl Scb {
     }
 
     fn to_path(&self, path: std::path::PathBuf) -> PyResult<()> {
-        let data = self.inner.to_scb_bytes().map_err(write_err)?;
-        std::fs::write(path, data).map_err(write_err)
+        self.inner.to_path(path).map_err(write_err)
     }
 
     fn __repr__(&self) -> String {
