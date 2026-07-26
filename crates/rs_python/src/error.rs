@@ -9,12 +9,10 @@ create_exception!(ritoshark, ParseError, FormatError);
 create_exception!(ritoshark, UnsupportedVersion, FormatError);
 create_exception!(ritoshark, WriteError, FormatError);
 
-#[allow(dead_code)]
 pub fn parse_err<E: Display>(e: E) -> PyErr {
     ParseError::new_err(e.to_string())
 }
 
-#[allow(dead_code)]
 pub fn write_err<E: Display>(e: E) -> PyErr {
     WriteError::new_err(e.to_string())
 }
