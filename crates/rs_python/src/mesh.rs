@@ -2,13 +2,18 @@
 Wraps the `.skn` skinned mesh and `.scb`/`.sco` static mesh. Geometry is exposed as one packed
 buffer per attribute rather than per-vertex objects, since a Python object per vertex would cost
 more than parsing the file. `.sco` is read-only: the game dropped the format and `rs_mesh` writes
-only the binary `.scb` form.
+only the binary `.scb` form. `Scb`/`Sco` share one underlying `StaticMesh`, which is what
+`StaticMesh::from_path`/`from_bytes` auto-detect between by magic; face materials and per-corner
+UVs travel as `ScbFace` values rather than packed buffers since each face is small and irregular.
 */
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use ritoshark::math::Vec3;
-use ritoshark::mesh::{SkinnedMesh, SkinnedMeshRange, SkinnedMeshVertex, SkinnedMeshVertexType};
+use ritoshark::math::{Vec2, Vec3};
+use ritoshark::mesh::{
+    SkinnedMesh, SkinnedMeshRange, SkinnedMeshVertex, SkinnedMeshVertexType, StaticMesh,
+    StaticMeshFace,
+};
 use ritoshark::prelude::{Parse, Serialize};
 
 use crate::convert::{
@@ -265,6 +270,220 @@ impl Skn {
     }
 }
 
+#[pyclass]
+#[derive(Clone)]
+pub struct ScbFace {
+    #[pyo3(get)]
+    pub material: String,
+    #[pyo3(get)]
+    pub indices: (u32, u32, u32),
+    #[pyo3(get)]
+    pub uvs: ((f32, f32), (f32, f32), (f32, f32)),
+}
+
+#[pymethods]
+impl ScbFace {
+    #[new]
+    fn new(
+        material: String,
+        indices: (u32, u32, u32),
+        uvs: ((f32, f32), (f32, f32), (f32, f32)),
+    ) -> Self {
+        Self {
+            material,
+            indices,
+            uvs,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ScbFace(material={:?}, indices={:?})",
+            self.material, self.indices
+        )
+    }
+}
+
+fn face_to_py(f: &StaticMeshFace) -> ScbFace {
+    ScbFace {
+        material: f.material.clone(),
+        indices: (f.indices[0], f.indices[1], f.indices[2]),
+        uvs: (
+            (f.uvs[0].x, f.uvs[0].y),
+            (f.uvs[1].x, f.uvs[1].y),
+            (f.uvs[2].x, f.uvs[2].y),
+        ),
+    }
+}
+
+fn face_from_py(f: &ScbFace) -> StaticMeshFace {
+    StaticMeshFace::new(
+        f.material.clone(),
+        [f.indices.0, f.indices.1, f.indices.2],
+        [
+            Vec2::new(f.uvs.0.0, f.uvs.0.1),
+            Vec2::new(f.uvs.1.0, f.uvs.1.1),
+            Vec2::new(f.uvs.2.0, f.uvs.2.1),
+        ],
+    )
+}
+
+#[pyclass]
+pub struct Scb {
+    inner: StaticMesh,
+}
+
+#[pymethods]
+impl Scb {
+    #[staticmethod]
+    fn from_path(path: std::path::PathBuf) -> PyResult<Self> {
+        StaticMesh::from_path(path)
+            .map(|inner| Self { inner })
+            .map_err(parse_err)
+    }
+
+    #[staticmethod]
+    fn from_bytes(data: &[u8]) -> PyResult<Self> {
+        StaticMesh::from_bytes(data)
+            .map(|inner| Self { inner })
+            .map_err(parse_err)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (name, positions, faces))]
+    fn new(name: String, positions: &[u8], faces: Vec<ScbFace>) -> PyResult<Self> {
+        let positions = unpack_vec3(positions, "positions")?;
+        let n = positions.len();
+        for f in &faces {
+            for i in [f.indices.0, f.indices.1, f.indices.2] {
+                if i as usize >= n {
+                    return Err(write_err(format!(
+                        "faces: index {i} is out of range for {n} vertices"
+                    )));
+                }
+            }
+        }
+        let central = if positions.is_empty() {
+            Vec3::new(0.0, 0.0, 0.0)
+        } else {
+            let bb = bounds_of(&positions);
+            (bb.min + bb.max) * 0.5
+        };
+        Ok(Self {
+            inner: StaticMesh {
+                name,
+                version: (3, 2),
+                flags: 0,
+                bounding_box: bounds_of(&positions),
+                vertex_type: None,
+                central,
+                positions,
+                colors: None,
+                faces: faces.iter().map(face_from_py).collect(),
+                trailing: Vec::new(),
+            },
+        })
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    #[getter]
+    fn central(&self) -> (f32, f32, f32) {
+        (
+            self.inner.central.x,
+            self.inner.central.y,
+            self.inner.central.z,
+        )
+    }
+
+    #[getter]
+    fn positions<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &pack_vec3(self.inner.positions.iter().copied()))
+    }
+
+    #[getter]
+    fn faces(&self) -> Vec<ScbFace> {
+        self.inner.faces.iter().map(face_to_py).collect()
+    }
+
+    fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let data = self.inner.to_scb_bytes().map_err(write_err)?;
+        Ok(PyBytes::new(py, &data))
+    }
+
+    fn to_path(&self, path: std::path::PathBuf) -> PyResult<()> {
+        let data = self.inner.to_scb_bytes().map_err(write_err)?;
+        std::fs::write(path, data).map_err(write_err)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Scb(name={:?}, vertices={}, faces={})",
+            self.inner.name,
+            self.inner.positions.len(),
+            self.inner.faces.len()
+        )
+    }
+}
+
+#[pyclass]
+pub struct Sco {
+    inner: StaticMesh,
+}
+
+#[pymethods]
+impl Sco {
+    #[staticmethod]
+    fn from_path(path: std::path::PathBuf) -> PyResult<Self> {
+        StaticMesh::from_path(path)
+            .map(|inner| Self { inner })
+            .map_err(parse_err)
+    }
+
+    #[staticmethod]
+    fn from_bytes(data: &[u8]) -> PyResult<Self> {
+        StaticMesh::from_bytes(data)
+            .map(|inner| Self { inner })
+            .map_err(parse_err)
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    #[getter]
+    fn central(&self) -> (f32, f32, f32) {
+        (
+            self.inner.central.x,
+            self.inner.central.y,
+            self.inner.central.z,
+        )
+    }
+
+    #[getter]
+    fn positions<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &pack_vec3(self.inner.positions.iter().copied()))
+    }
+
+    #[getter]
+    fn faces(&self) -> Vec<ScbFace> {
+        self.inner.faces.iter().map(face_to_py).collect()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Sco(name={:?}, vertices={}, faces={})",
+            self.inner.name,
+            self.inner.positions.len(),
+            self.inner.faces.len()
+        )
+    }
+}
+
 fn bounds_of(positions: &[Vec3]) -> ritoshark::math::Aabb {
     let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
     let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
@@ -292,5 +511,8 @@ fn sphere_of(positions: &[Vec3]) -> ritoshark::math::Sphere {
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Skn>()?;
     m.add_class::<Submesh>()?;
+    m.add_class::<Scb>()?;
+    m.add_class::<Sco>()?;
+    m.add_class::<ScbFace>()?;
     Ok(())
 }
