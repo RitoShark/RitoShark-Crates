@@ -3,6 +3,12 @@ Reads `.bin` documents into plain Python values. This view is deliberately lossy
 hash-versus-resolved-name duality, the LIST/LIST2 distinction, and duplicate map keys, none of
 which a reader needs. Writing bins requires an editable tree that preserves every round-trip
 invariant, which is a separate design.
+
+`rs_bin` places no depth cap on `List`/`Map`/`Pointer`/`Embed`/`Option` nesting, so a malformed
+file can parse into a value tree deep enough to blow the native stack once walked recursively — a
+Rust stack overflow aborts the process outright, which Python cannot catch. `value_to_py` tracks
+its own recursion depth and fails with a `ParseError` past `MAX_DEPTH` instead, well before any
+real `.bin` file (observed real-world nesting tops out around 10) or the host stack is at risk.
 */
 
 use pyo3::prelude::*;
@@ -12,7 +18,14 @@ use ritoshark::prelude::Parse;
 
 use crate::error::parse_err;
 
-fn value_to_py<'py>(py: Python<'py>, v: &BinValue) -> PyResult<Bound<'py, PyAny>> {
+const MAX_DEPTH: usize = 128;
+
+fn value_to_py<'py>(py: Python<'py>, v: &BinValue, depth: usize) -> PyResult<Bound<'py, PyAny>> {
+    if depth > MAX_DEPTH {
+        return Err(parse_err(format!(
+            "bin value nesting exceeds maximum depth of {MAX_DEPTH}"
+        )));
+    }
     Ok(match v {
         BinValue::None => py.None().into_bound(py),
         BinValue::Bool(b) | BinValue::Flag(b) => b.into_pyobject(py)?.to_owned().into_any(),
@@ -36,14 +49,17 @@ fn value_to_py<'py>(py: Python<'py>, v: &BinValue) -> PyResult<Bound<'py, PyAny>
         BinValue::List { items, .. } => {
             let list = PyList::empty(py);
             for item in items {
-                list.append(value_to_py(py, item)?)?;
+                list.append(value_to_py(py, item, depth + 1)?)?;
             }
             list.into_any()
         }
         BinValue::Map { entries, .. } => {
             let dict = PyDict::new(py);
             for (k, val) in entries {
-                dict.set_item(value_to_py(py, k)?, value_to_py(py, val)?)?;
+                dict.set_item(
+                    value_to_py(py, k, depth + 1)?,
+                    value_to_py(py, val, depth + 1)?,
+                )?;
             }
             dict.into_any()
         }
@@ -51,12 +67,12 @@ fn value_to_py<'py>(py: Python<'py>, v: &BinValue) -> PyResult<Bound<'py, PyAny>
             let dict = PyDict::new(py);
             dict.set_item("__class__", class)?;
             for (name_hash, val) in fields {
-                dict.set_item(name_hash, value_to_py(py, val)?)?;
+                dict.set_item(name_hash, value_to_py(py, val, depth + 1)?)?;
             }
             dict.into_any()
         }
         BinValue::Option { value, .. } => match value {
-            Some(inner) => value_to_py(py, inner)?,
+            Some(inner) => value_to_py(py, inner, depth + 1)?,
             None => py.None().into_bound(py),
         },
     })
@@ -73,7 +89,7 @@ fn doc_to_py<'py>(py: Python<'py>, bin: &Bin) -> PyResult<Bound<'py, PyDict>> {
         let fields = PyDict::new(py);
         fields.set_item("__class__", entry.class_hash)?;
         for (name_hash, val) in &entry.fields {
-            fields.set_item(name_hash, value_to_py(py, val)?)?;
+            fields.set_item(name_hash, value_to_py(py, val, 0)?)?;
         }
         entries.set_item(entry.path_hash, fields)?;
     }

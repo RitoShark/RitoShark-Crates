@@ -1,4 +1,5 @@
 import glob
+import struct
 from pathlib import Path
 
 import pytest
@@ -8,10 +9,13 @@ import ritoshark
 FIXTURES = Path(__file__).parent.parent.parent.parent / "Sample-Files"
 BIN = FIXTURES / "aatrox.bin"
 
-_multi_matches = glob.glob(str(FIXTURES / "aatrox_multi_skins_skin0_*.bin"))
-MULTI_BIN = Path(_multi_matches[0]) if _multi_matches else None
+_multi_matches = glob.glob(str(FIXTURES / "aatrox_multi_skins_*.bin"))
+MULTI_BINS = [Path(p) for p in _multi_matches]
+MULTI_BIN = MULTI_BINS[0] if MULTI_BINS else None
 
 PLAIN_TYPES = (type(None), bool, int, float, str, tuple, list, dict)
+
+EMBED = 0x83
 
 
 def _walk(v, depth=0):
@@ -29,9 +33,45 @@ def _walk(v, depth=0):
     return max_depth
 
 
+def _fields(body: bytes) -> bytes:
+    return struct.pack("<H", 1) + struct.pack("<I", 1) + bytes([EMBED]) + body
+
+
+def _embed(class_hash: int, fields_bytes: bytes) -> bytes:
+    return (
+        struct.pack("<I", class_hash)
+        + struct.pack("<I", len(fields_bytes))
+        + fields_bytes
+    )
+
+
+def _build_deeply_nested_bin(depth: int) -> bytes:
+    value = _embed(1, struct.pack("<H", 0))
+    for _ in range(depth):
+        value = _embed(1, _fields(value))
+
+    entry_fields = _fields(value)
+    entry_body = struct.pack("<I", 1) + entry_fields
+    out = bytearray()
+    out += b"PROP"
+    out += struct.pack("<I", 3)
+    out += struct.pack("<I", 0)
+    out += struct.pack("<I", 1)
+    out += struct.pack("<I", 1)
+    out += struct.pack("<I", len(entry_body))
+    out += entry_body
+    return bytes(out)
+
+
 def test_parse_error_on_garbage():
     with pytest.raises(ritoshark.FormatError):
         ritoshark.read_bin_bytes(b"not a bin file")
+
+
+def test_deeply_nested_bin_raises_instead_of_crashing():
+    data = _build_deeply_nested_bin(1000)
+    with pytest.raises(ritoshark.FormatError):
+        ritoshark.read_bin_bytes(data)
 
 
 @pytest.mark.skipif(not BIN.exists(), reason="fixture not present")
@@ -112,3 +152,15 @@ def test_large_multi_skin_bin_parses():
     print(
         f"\n{MULTI_BIN.name}: {len(doc['entries'])} entries, max nesting depth {max_depth}"
     )
+
+
+@pytest.mark.skipif(
+    not (BIN.exists() or MULTI_BINS), reason="no fixture present"
+)
+def test_real_fixtures_parse_within_depth_guard():
+    for path in [BIN, *MULTI_BINS]:
+        if not path.exists():
+            continue
+        doc = ritoshark.read_bin(str(path))
+        for entry in doc["entries"].values():
+            _walk(entry)
