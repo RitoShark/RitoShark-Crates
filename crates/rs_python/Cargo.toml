@@ -13,3 +13,4 @@ crate-type = ["cdylib"]
 [dependencies]
 ritoshark = { workspace = true }
 pyo3 = { workspace = true }
+indexmap = { workspace = true }

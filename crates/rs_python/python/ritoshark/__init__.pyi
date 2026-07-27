@@ -287,6 +287,25 @@ def read_bin(path: str) -> dict:
 def read_bin_bytes(data: bytes) -> dict:
     """Same as read_bin but from an in-memory buffer."""
 
+def read_bin_editable(path: str) -> dict:
+    """Reads a .bin file into a faithful, editable document tree: entries is a list of
+    {"hash", "class", "fields"}, fields is a dict keyed by raw field hash, and containers
+    (list/list2/pointer/embed/map/option) are tagged dicts carrying their declared element
+    type. write_bin_bytes(read_bin_editable(f)) is byte-identical to f for any valid .bin.
+    Raises FormatError on malformed input or nesting past the recursion guard."""
+
+def read_bin_editable_bytes(data: bytes) -> dict:
+    """Same as read_bin_editable but from an in-memory buffer."""
+
+def write_bin(path: str, doc: dict) -> None:
+    """Writes an editable document tree (as produced by read_bin_editable, or built by
+    hand) to a .bin file at path. Validates the whole document before writing any bytes;
+    raises WriteError carrying the path to the offending value on malformed structure, an
+    unknown __type__, a wrong-typed value, or nesting past the recursion guard."""
+
+def write_bin_bytes(doc: dict) -> bytes:
+    """Same as write_bin but returns the encoded bytes instead of writing to a path."""
+
 def bin_to_text(path: str, hashes: str | None = None) -> str:
     """Renders a .bin file as #PROP_text (the ritobin text form). With hashes, a path to a
     hash-dictionary file loaded via HashMapper, field/class/entry names resolve to their

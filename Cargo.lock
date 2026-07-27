@@ -1221,6 +1221,7 @@ dependencies = [
 name = "rs_python"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "pyo3",
  "ritoshark",
 ]

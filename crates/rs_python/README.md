@@ -11,7 +11,8 @@ a per-vertex Python loop.
 AnimFrame, AnimTrack, Anm, FormatError, Joint, MapGeo, MapModel, MapSubmesh, ParseError,
 Scb, ScbFace, Sco, Skl, Skn, Submesh, Tex, UnsupportedVersion, Wad, WadChunk, WriteError,
 bin_to_text, bin_to_text_bytes, build_wad, build_wad_to_path, read_bin, read_bin_bytes,
-text_to_bin_bytes, text_to_bin_path, wad_hash
+read_bin_editable, read_bin_editable_bytes, write_bin, write_bin_bytes, text_to_bin_bytes,
+text_to_bin_path, wad_hash
 ```
 
 plus `__version__`. `ParseError`, `UnsupportedVersion`, and `WriteError` all derive from
@@ -44,7 +45,7 @@ all of them.
 | `.sco` static mesh | yes | **no** — Riot removed the format; `rs_mesh` writes no `.sco` |
 | `.tex` texture | yes | no |
 | `.wad` archive | yes | yes |
-| `.bin` property bin | yes (plain Python values) | no — text round-trip only (see below) |
+| `.bin` property bin | yes (plain Python values, or the editable tree) | yes, via the editable tree or text round-trip (see below) |
 
 ## Buffer layouts
 
@@ -117,7 +118,7 @@ for i in range(skn.vertex_count):
 Maya's API takes Python sequences rather than a flat buffer, so `struct.unpack` is the
 practical middle step there instead of a zero-copy `memoryview` cast.
 
-## `.bin` reading is lossy
+## `.bin` reading is lossy — `read_bin_editable` is not
 
 `read_bin` / `read_bin_bytes` return a plain Python `dict`. This is a deliberate, lossy view,
 not a bug:
@@ -128,8 +129,32 @@ not a bug:
 - The pointer-vs-embed struct distinction is dropped.
 - Duplicate map keys are dropped (Python dicts can't represent them).
 
-There is no `write_bin`. Writing requires an editable tree that preserves all of the above,
-which is a separate future design, not an oversight here.
+There is no `write_bin` for that view — writing from it would silently corrupt files.
+
+`read_bin_editable` / `read_bin_editable_bytes` return a faithful document instead: `entries` is
+a list of `{"hash", "class", "fields"}` (a list, not a dict, since duplicate entry hashes are
+legal), `fields` is a dict keyed by raw field hash, and containers round-trip as tagged dicts —
+`{"__type__": "list2", "item": "string", "items": [...]}`,
+`{"__type__": "pointer", "class": ..., "fields": {...}}`, and so on. `write_bin` / `write_bin_bytes`
+take that same shape back. `write_bin_bytes(read_bin_editable(f))` is byte-identical to `f` for
+every `.bin` file:
+
+```python
+import ritoshark
+
+doc = ritoshark.read_bin_editable("aatrox_skin01.bin")
+entry = doc["entries"][0]
+entry["fields"][0xe095d841] = "characters/aatrox/skins/skin01/new_texture.dds"
+ritoshark.write_bin("aatrox_skin01.bin", doc)
+```
+
+A struct field with no declaring container infers `int -> I32`, `float -> F32`, `str -> String`,
+`bool -> Bool`, `None -> None`; anything else (`U32`, `Hash`, `Vec3`, ...) must use the explicit
+`{"__type__": "u32", "value": ...}` form, which is exactly what `read_bin_editable` already emits
+wherever bare inference would not reproduce the original type — so an unmodified round-trip needs
+no type reasoning at all, and edits only need it where the new value's type actually differs.
+Malformed documents raise `WriteError` with a path to the offending value, e.g.
+`entries[3].fields[0xe095d841].items[2]: expected str for item type 'string', got int`.
 
 ## Text round-trip
 

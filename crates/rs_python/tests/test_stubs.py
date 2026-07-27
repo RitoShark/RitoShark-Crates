@@ -42,7 +42,8 @@ def test_public_names_match_expected_set():
         "MapModel", "MapSubmesh", "ParseError", "Scb", "ScbFace", "Sco",
         "Skl", "Skn", "Submesh", "Tex", "UnsupportedVersion", "Wad",
         "WadChunk", "WriteError", "bin_to_text", "bin_to_text_bytes", "build_wad",
-        "build_wad_to_path", "read_bin", "read_bin_bytes", "text_to_bin_bytes",
+        "build_wad_to_path", "read_bin", "read_bin_bytes", "read_bin_editable",
+        "read_bin_editable_bytes", "write_bin", "write_bin_bytes", "text_to_bin_bytes",
         "text_to_bin_path", "wad_hash", "__version__",
     }
     public = {n for n in dir(ritoshark) if not n.startswith("_")}
