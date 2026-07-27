@@ -24,27 +24,38 @@ impl Skeleton {
 
         let joint_indices_offset = JOINTS_OFFSET + joint_count * JOINT_RECORD_SIZE;
         let influences_offset = joint_indices_offset + joint_count * JOINT_INDEX_SIZE;
-        let joint_names_offset = influences_offset + influence_count * 2;
+
+        /* Real files always reserve a 4-byte slot for the skeleton name and another for the
+        asset name, immediately after the influence table and aligned to 4, with the joint
+        name pool following them. The slots hold an empty string when unnamed, so the offsets
+        still point at them rather than being zeroed; emitting 0 would drop both slots and
+        shorten the file. */
+        let name_offset = (influences_offset + influence_count * 2).next_multiple_of(4);
+        let asset_offset = name_offset + 4;
+        let joint_names_offset = asset_offset + 4;
 
         buf.write_i32(JOINTS_OFFSET as i32)?;
         buf.write_i32(joint_indices_offset as i32)?;
         buf.write_i32(influences_offset as i32)?;
-
-        let name_offset_pos = buf.stream_position().map_err(rs_io::Error::from)?;
-        buf.write_i32(0)?; // skeleton name offset, patched if present
-        let asset_offset_pos = buf.stream_position().map_err(rs_io::Error::from)?;
-        buf.write_i32(0)?; // asset name offset, patched if present
+        buf.write_i32(name_offset as i32)?;
+        buf.write_i32(asset_offset as i32)?;
         buf.write_i32(joint_names_offset as i32)?;
         for _ in 0..5 {
             buf.write_u32(0xFFFF_FFFF)?;
         }
 
+        /* Joint names sit in one pool, each NUL-terminated string padded out to a 4-byte
+        boundary. */
         buf.seek(SeekFrom::Start(joint_names_offset as u64))
             .map_err(rs_io::Error::from)?;
         let mut joint_name_offsets = Vec::with_capacity(joint_count);
         for joint in &self.joints {
             joint_name_offsets.push(buf.stream_position().map_err(rs_io::Error::from)?);
             buf.write_cstring(&joint.name)?;
+            let pad = (joint.name.len() + 1).next_multiple_of(4) - (joint.name.len() + 1);
+            for _ in 0..pad {
+                buf.write_u8(0)?;
+            }
         }
 
         buf.seek(SeekFrom::Start(JOINTS_OFFSET as u64))
@@ -69,33 +80,31 @@ impl Skeleton {
             buf.write_u32(hash)?;
         }
 
-        let mut name_off = 0i32;
-        let mut asset_off = 0i32;
-        if !self.name.is_empty() {
-            let end = buf.seek(SeekFrom::End(0)).map_err(rs_io::Error::from)?;
-            name_off = end as i32;
-            buf.write_cstring(&self.name)?;
+        /* The name and asset slots are 4 bytes each including the terminator; a longer name
+        would run into the next section, so it is rejected rather than silently corrupting
+        the file. */
+        if self.name.len() >= 4 {
+            return Err(Error::NameTooLong(self.name.clone()));
         }
-        if !self.asset.is_empty() {
-            let end = buf.seek(SeekFrom::End(0)).map_err(rs_io::Error::from)?;
-            asset_off = end as i32;
-            buf.write_cstring(&self.asset)?;
+        if self.asset.len() >= 4 {
+            return Err(Error::NameTooLong(self.asset.clone()));
         }
 
-        let file_size = buf.seek(SeekFrom::End(0)).map_err(rs_io::Error::from)? as u32;
+        buf.seek(SeekFrom::Start(name_offset as u64))
+            .map_err(rs_io::Error::from)?;
+        buf.write_cstring(&self.name)?;
+        buf.seek(SeekFrom::Start(asset_offset as u64))
+            .map_err(rs_io::Error::from)?;
+        buf.write_cstring(&self.asset)?;
 
-        if name_off != 0 {
-            buf.seek(SeekFrom::Start(name_offset_pos))
-                .map_err(rs_io::Error::from)?;
-            buf.write_i32(name_off)?;
+        let end = buf.seek(SeekFrom::End(0)).map_err(rs_io::Error::from)? as usize;
+        let file_size = end.next_multiple_of(4);
+        for _ in 0..file_size - end {
+            buf.write_u8(0)?;
         }
-        if asset_off != 0 {
-            buf.seek(SeekFrom::Start(asset_offset_pos))
-                .map_err(rs_io::Error::from)?;
-            buf.write_i32(asset_off)?;
-        }
+
         buf.seek(SeekFrom::Start(0)).map_err(rs_io::Error::from)?;
-        buf.write_u32(file_size)?;
+        buf.write_u32(file_size as u32)?;
         Ok(())
     }
 }

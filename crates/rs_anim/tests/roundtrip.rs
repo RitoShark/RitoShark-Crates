@@ -37,6 +37,68 @@ fn skeleton_round_trip() {
     assert_eq!(bytes, bytes2, "skl write is deterministic / byte-exact");
 }
 
+/* Real skeletons always reserve a 4-byte slot for the skeleton name and one for the asset
+name after the influence table, keep every joint name padded to a 4-byte boundary, and pad the
+file to a multiple of 4. A writer that zeroed the name offsets or skipped the padding still
+round-tripped through its own reader while producing files several bytes shorter than the game's,
+so these offsets are asserted against the header directly. */
+#[test]
+fn skeleton_layout_matches_on_disk_contract() {
+    let mut skl = Skeleton::new();
+    skl.joints = vec![
+        sample_joint("Root", 0, -1, 0x1111_2222),
+        sample_joint("Spine1", 1, 0, 0x3333_4444),
+    ];
+    skl.influences = vec![0, 1];
+
+    let bytes = skl.to_bytes().expect("write skl");
+    let u32_at = |off: usize| u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+    let i32_at = |off: usize| i32::from_le_bytes(bytes[off..off + 4].try_into().unwrap()) as usize;
+
+    let influences_offset = i32_at(28);
+    let name_offset = i32_at(32);
+    let asset_offset = i32_at(36);
+    let joint_names_offset = i32_at(40);
+
+    assert_eq!(
+        name_offset,
+        (influences_offset + skl.influences.len() * 2).next_multiple_of(4),
+        "name slot follows the influence table, aligned to 4"
+    );
+    assert_eq!(asset_offset, name_offset + 4, "asset slot follows the name");
+    assert_eq!(
+        joint_names_offset,
+        asset_offset + 4,
+        "joint name pool follows both slots"
+    );
+
+    assert_eq!(
+        &bytes[joint_names_offset..joint_names_offset + 16],
+        b"Root\0\0\0\0Spine1\0\0",
+        "each joint name is NUL-terminated and padded to 4 bytes"
+    );
+
+    assert_eq!(
+        u32_at(0) as usize,
+        bytes.len(),
+        "the size field matches the emitted length"
+    );
+    assert_eq!(bytes.len() % 4, 0, "the file is padded to a multiple of 4");
+}
+
+#[test]
+fn skeleton_name_longer_than_its_slot_is_rejected() {
+    let mut skl = Skeleton::new();
+    skl.joints = vec![sample_joint("Root", 0, -1, 0x1111_2222)];
+    skl.influences = vec![0];
+    skl.name = "toolong".to_string();
+
+    assert!(
+        skl.to_bytes().is_err(),
+        "a name that would overrun its 4-byte slot must be rejected, not silently truncated"
+    );
+}
+
 #[test]
 fn skeleton_joint_index_section_sorted_by_hash_ascending() {
     // Joints whose hashes are deliberately out of id order. The joint-id-hash section must be

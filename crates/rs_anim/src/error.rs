@@ -11,6 +11,9 @@ pub enum Error {
 
     #[error("unsupported: {0}")]
     Unsupported(&'static str),
+
+    #[error("skeleton name does not fit its 4-byte slot: {0:?}")]
+    NameTooLong(String),
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
