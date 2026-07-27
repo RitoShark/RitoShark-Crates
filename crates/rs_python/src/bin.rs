@@ -223,7 +223,11 @@ fn primitive_to_editable_py<'py>(py: Python<'py>, v: &BinValue) -> PyResult<Boun
         BinValue::Link(h) => h.into_pyobject(py)?.into_any(),
         BinValue::File(h) => h.into_pyobject(py)?.into_any(),
         BinValue::Flag(b) => b.into_pyobject(py)?.to_owned().into_any(),
-        _ => unreachable!("primitive_to_editable_py called on a container value"),
+        _ => {
+            return Err(write_err(
+                "primitive_to_editable_py called on a container value",
+            ));
+        }
     })
 }
 

@@ -1,9 +1,21 @@
 import glob
+import re
 from pathlib import Path
 
 import pytest
 
 import ritoshark
+
+FNV_BASIS = 0x811C9DC5
+FNV_PRIME = 0x01000193
+
+
+def fnv1a(name: str) -> int:
+    h = FNV_BASIS
+    for b in name.lower().encode("ascii"):
+        h = ((h ^ b) * FNV_PRIME) & 0xFFFFFFFF
+    return h
+
 
 FIXTURES = Path(__file__).parent.parent.parent.parent / "Sample-Files"
 BIN = FIXTURES / "aatrox.bin"
@@ -111,3 +123,49 @@ def test_text_level_edit_round_trips():
         search(entry)
 
     assert found_replacement, "expected the edited string to appear in the rebuilt bin"
+
+
+@pytest.mark.skipif(not BIN.exists(), reason="fixture not present")
+def test_wrong_dictionary_does_not_corrupt_round_trip(tmp_path):
+    original = BIN.read_bytes()
+
+    doc = ritoshark.read_bin(str(BIN))
+    real_hashes = set()
+    for entry in doc["entries"].values():
+        for key in entry:
+            if key != "__class__":
+                real_hashes.add(key)
+    assert len(real_hashes) >= 3, "expected at least 3 distinct field hashes in fixture"
+
+    wrong_names = ["totallyWrongFieldName", "anotherBadName", "definitelyNotReal"]
+    lines = [
+        f"{h:08x} {name}"
+        for h, name in zip(sorted(real_hashes)[:3], wrong_names)
+    ]
+    dictionary = tmp_path / "wrong_hashes.txt"
+    dictionary.write_text("\n".join(lines) + "\n")
+
+    text = ritoshark.bin_to_text(str(BIN), hashes=str(dictionary))
+    for name in wrong_names:
+        assert name not in text, f"wrong dictionary name {name!r} must not be trusted into output"
+
+    rebuilt = ritoshark.text_to_bin_bytes(text)
+    assert rebuilt == original
+
+
+@pytest.mark.skipif(not BIN.exists(), reason="fixture not present")
+def test_correct_dictionary_resolves_name(tmp_path):
+    original = BIN.read_bytes()
+
+    # "mName" is a real field of aatrox.bin; its FNV1a-32 hash is computed here rather
+    # than hardcoded, so the test documents exactly how the dictionary line is derived.
+    name = "mName"
+    real_hash = fnv1a(name)
+    dictionary = tmp_path / "correct_hashes.txt"
+    dictionary.write_text(f"{real_hash:08x} {name}\n")
+
+    text = ritoshark.bin_to_text(str(BIN), hashes=str(dictionary))
+    assert name in text
+
+    rebuilt = ritoshark.text_to_bin_bytes(text)
+    assert rebuilt == original

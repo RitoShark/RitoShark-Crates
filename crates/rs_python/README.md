@@ -175,12 +175,19 @@ text = text.replace('"old/texture/path.dds"', '"new/texture/path.dds"')
 ritoshark.text_to_bin_path("aatrox_skin01.bin", text)
 ```
 
-`hashes` is an optional path to a hash-dictionary file loaded via `HashMapper`; with one, field
-and class names in the emitted text are resolved (`mFieldName:`) instead of raw hashes
-(`0xe095d841:`), which is the difference between an editable document and one nobody can read.
-Without it, raw hashes are emitted and the round-trip is still exact. `text_to_bin_*` takes no
-`hashes` parameter — the parser only ever reads hashes back out of the text, it never resolves
-names while parsing, so there is nothing for it to do.
+`hashes` is an optional path to a hash-dictionary file; with one, field and class names in the
+emitted text are resolved (`mFieldName:`) instead of raw hashes (`0xe095d841:`), which is the
+difference between an editable document and one nobody can read. Without it, raw hashes are
+emitted and the round-trip is still exact.
+
+Every name from the dictionary is re-hashed with FNV1a and checked against the key it was
+loaded under before it is trusted; a stale, wrong, or colliding entry fails that check and
+falls back to the raw hash instead of being printed, so `text_to_bin_*` always reproduces the
+source `.bin` byte-for-byte regardless of dictionary quality — a bad dictionary only costs you
+readability, never correctness. XXH64-keyed file-path entries fall outside FNV1a and cannot be
+verified this way, so they are resolved as given. `text_to_bin_*` takes no `hashes` parameter —
+the parser only ever reads hashes back out of the text, it never resolves names while parsing,
+so there is nothing for it to do.
 
 ## `Anm` byte-exactness
 

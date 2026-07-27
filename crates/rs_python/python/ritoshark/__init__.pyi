@@ -308,9 +308,12 @@ def write_bin_bytes(doc: dict) -> bytes:
 
 def bin_to_text(path: str, hashes: str | None = None) -> str:
     """Renders a .bin file as #PROP_text (the ritobin text form). With hashes, a path to a
-    hash-dictionary file loaded via HashMapper, field/class/entry names resolve to their
-    original strings instead of raw hashes. Raises FormatError if path or hashes cannot be
-    read or parsed."""
+    hash-dictionary file, field/class/entry names resolve to their original strings instead
+    of raw hashes. Every FNV1a-keyed name is re-hashed and checked against its own dictionary
+    entry before being emitted; a stale, wrong, or colliding entry silently falls back to the
+    raw hash instead of being trusted, so a bad dictionary can never corrupt the round-trip.
+    XXH64-keyed file names cannot be verified this way and are always resolved as given.
+    Raises FormatError if path or hashes cannot be read or parsed."""
 
 def bin_to_text_bytes(data: bytes, hashes: str | None = None) -> str:
     """Same as bin_to_text but from an in-memory .bin buffer."""
