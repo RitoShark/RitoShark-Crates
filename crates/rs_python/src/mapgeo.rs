@@ -164,8 +164,27 @@ impl PyMapModel {
             return Ok(PyBytes::new(py, &[]));
         }
 
-        let mut out = Vec::with_capacity(model.vertex_count as usize * 12);
-        for i in 0..model.vertex_count as usize {
+        let vertex_count = model.vertex_count as usize;
+        if vertex_count > 0 {
+            let last_vertex_end = vertex_count
+                .checked_sub(1)
+                .and_then(|last| last.checked_mul(stride))
+                .and_then(|span| span.checked_add(position_offset))
+                .and_then(|end| end.checked_add(12))
+                .ok_or_else(|| parse_err("vertex_count overflows while validating buffer size"))?;
+            if last_vertex_end > buffer.data.len() {
+                return Err(parse_err(format!(
+                    "vertex buffer is too short for its description: vertex_count={} needs at \
+                     least {} bytes, buffer has {}",
+                    vertex_count,
+                    last_vertex_end,
+                    buffer.data.len()
+                )));
+            }
+        }
+
+        let mut out = Vec::with_capacity(vertex_count * 12);
+        for i in 0..vertex_count {
             let base = i * stride + position_offset;
             let Some(slice) = buffer.data.get(base..base + 12) else {
                 return Err(parse_err("vertex buffer is too short for its description"));

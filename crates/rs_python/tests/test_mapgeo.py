@@ -13,6 +13,62 @@ ALL_MAPGEOS = [
     FIXTURES / "ultbook.mapgeo",
 ]
 
+MAX_VERTEX_ELEMENTS = 15
+
+
+def _first_model_vertex_count_offset(data: bytes) -> int:
+    pos = 4
+    (version,) = struct.unpack_from("<I", data, pos)
+    pos += 4
+
+    if version < 7:
+        pos += 1
+
+    if version >= 17:
+        (count,) = struct.unpack_from("<I", data, pos)
+        pos += 4
+        for _ in range(count):
+            pos += 4
+            (length,) = struct.unpack_from("<I", data, pos)
+            pos += 4 + length
+    else:
+        if version >= 9:
+            (length,) = struct.unpack_from("<I", data, pos)
+            pos += 4 + length
+        if version >= 11:
+            (length,) = struct.unpack_from("<I", data, pos)
+            pos += 4 + length
+
+    (desc_count,) = struct.unpack_from("<I", data, pos)
+    pos += 4
+    for _ in range(desc_count):
+        pos += 4
+        (element_count,) = struct.unpack_from("<I", data, pos)
+        pos += 4 + element_count * 8
+        pos += (MAX_VERTEX_ELEMENTS - element_count) * 8
+
+    (vb_count,) = struct.unpack_from("<I", data, pos)
+    pos += 4
+    for _ in range(vb_count):
+        if version >= 13:
+            pos += 1
+        (size,) = struct.unpack_from("<I", data, pos)
+        pos += 4 + size
+
+    (ib_count,) = struct.unpack_from("<I", data, pos)
+    pos += 4
+    for _ in range(ib_count):
+        if version >= 13:
+            pos += 1
+        (size,) = struct.unpack_from("<I", data, pos)
+        pos += 4 + size
+
+    pos += 4  # model count
+    if version < 12:
+        (name_len,) = struct.unpack_from("<I", data, pos)
+        pos += 4 + name_len
+    return pos
+
 
 def test_parse_error_on_garbage():
     with pytest.raises(ritoshark.FormatError):
@@ -123,3 +179,27 @@ def test_mapgeo_len_and_repr():
     mg = ritoshark.MapGeo.from_path(str(MAPGEO))
     assert len(mg) == len(mg.models)
     repr(mg)
+
+
+@pytest.mark.parametrize("path", ALL_MAPGEOS, ids=lambda p: p.name)
+def test_vertex_count_offset_is_located_correctly(path):
+    if not path.exists():
+        pytest.skip("fixture not present")
+    raw = bytearray(path.read_bytes())
+    offset = _first_model_vertex_count_offset(bytes(raw))
+    (found,) = struct.unpack_from("<I", raw, offset)
+    mg = ritoshark.MapGeo.from_path(str(path))
+    assert found == mg.models[0].vertex_count
+
+
+@pytest.mark.parametrize("path", ALL_MAPGEOS, ids=lambda p: p.name)
+def test_oversized_vertex_count_raises_format_error_instead_of_aborting(path):
+    if not path.exists():
+        pytest.skip("fixture not present")
+    raw = bytearray(path.read_bytes())
+    offset = _first_model_vertex_count_offset(bytes(raw))
+    struct.pack_into("<I", raw, offset, 0xFFFFFF00)
+
+    mg = ritoshark.MapGeo.from_bytes(bytes(raw))
+    with pytest.raises(ritoshark.FormatError):
+        mg.models[0].positions()
