@@ -45,7 +45,8 @@ mesh.loops.foreach_set("vertex_index", memoryview(skn.indices).cast("I"))
 mesh.polygons.add(triangle_count)
 mesh.polygons.foreach_set("loop_start", range(0, corner_count, 3))
 mesh.update()
-mesh.validate(verbose=True)
+corrected = mesh.validate(verbose=True)
+assert not corrected, "mesh.validate() had to repair the mesh — loop_start-only derivation is wrong"
 
 assert len(mesh.vertices) == skn.vertex_count, "vertex count mismatch"
 assert len(mesh.polygons) == triangle_count, "triangle count mismatch"
