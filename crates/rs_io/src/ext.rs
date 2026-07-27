@@ -304,7 +304,10 @@ mod tests {
     fn read_bytes_hostile_size_errors_without_aborting() {
         let mut c = Cursor::new(vec![0u8; 10]);
         let err = c.read_bytes(0xFFFF_FF00).unwrap_err();
-        let _ = err;
+        let crate::Error::Io(io_err) = err else {
+            panic!("expected Error::Io, got {err:?}");
+        };
+        assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
     }
 
     #[test]

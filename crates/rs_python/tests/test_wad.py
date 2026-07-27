@@ -140,6 +140,56 @@ def test_build_wad_rejects_bad_value_type():
         ritoshark.build_wad({"assets/foo.bin": "not bytes"})
 
 
+def test_build_wad_rejects_list_value():
+    with pytest.raises(TypeError):
+        ritoshark.build_wad({"a": [104, 105]})
+
+
+def test_build_wad_rejects_tuple_value():
+    with pytest.raises(TypeError):
+        ritoshark.build_wad({"a": (65, 66, 67)})
+
+
+def test_build_wad_rejects_str_value():
+    with pytest.raises(TypeError):
+        ritoshark.build_wad({"a": "hi"})
+
+
+def test_build_wad_accepts_bytearray_value():
+    data = ritoshark.build_wad({"a": bytearray(b"hi")})
+    wad = ritoshark.Wad.from_bytes(data)
+    assert wad.read_path("a") == b"hi"
+
+
+def test_build_wad_accepts_memoryview_value():
+    data = ritoshark.build_wad({"a": memoryview(b"hi")})
+    wad = ritoshark.Wad.from_bytes(data)
+    assert wad.read_path("a") == b"hi"
+
+
+def test_build_wad_rejects_bool_key_true():
+    with pytest.raises(TypeError):
+        ritoshark.build_wad({True: b"x"})
+
+
+def test_build_wad_rejects_bool_key_false():
+    with pytest.raises(TypeError):
+        ritoshark.build_wad({False: b"x"})
+
+
+def test_build_wad_negative_int_key_still_raises():
+    with pytest.raises(TypeError):
+        ritoshark.build_wad({-1: b"x"})
+
+
+def test_build_wad_str_and_int_keys_still_work():
+    chunks = {"assets/foo.bin": b"hi", ritoshark.wad_hash("assets/bar.bin"): b"bye"}
+    data = ritoshark.build_wad(chunks)
+    wad = ritoshark.Wad.from_bytes(data)
+    assert wad.read_path("assets/foo.bin") == b"hi"
+    assert wad.read_path("assets/bar.bin") == b"bye"
+
+
 @pytest.mark.skipif(not WAD.exists(), reason="fixture not present")
 def test_build_wad_round_trips_real_archive():
     original = ritoshark.Wad.from_path(str(WAD))

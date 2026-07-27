@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict};
+use pyo3::types::{PyBool, PyByteArray, PyBytes, PyDict, PyMemoryView};
 use ritoshark::prelude::Parse;
 use ritoshark::wad::{DEFAULT_ZSTD_LEVEL, Wad as RsWad, WadBuilder, WadChunk};
 
@@ -29,9 +29,31 @@ pub fn wad_hash(path: &str) -> u64 {
     ritoshark::hash::xxh64(path)
 }
 
+fn extract_chunk_bytes(key: &Bound<'_, PyAny>, value: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    if let Ok(bytes) = value.downcast::<PyBytes>() {
+        return Ok(bytes.as_bytes().to_vec());
+    }
+    if let Ok(bytearray) = value.downcast::<PyByteArray>() {
+        return Ok(bytearray.to_vec());
+    }
+    if let Ok(view) = value.downcast::<PyMemoryView>() {
+        let owned: Vec<u8> = view.call_method0("tobytes")?.extract()?;
+        return Ok(owned);
+    }
+    Err(PyTypeError::new_err(format!(
+        "chunk value for key {key} must be bytes, bytearray, or memoryview, got {}",
+        value.get_type().name()?
+    )))
+}
+
 fn collect_chunks(chunks: &Bound<'_, PyDict>) -> PyResult<HashMap<u64, Vec<u8>>> {
     let mut out = HashMap::with_capacity(chunks.len());
     for (key, value) in chunks.iter() {
+        if key.is_instance_of::<PyBool>() {
+            return Err(PyTypeError::new_err(format!(
+                "chunk key {key} must be str (path) or int (path hash), not bool"
+            )));
+        }
         let path_hash = if let Ok(path) = key.extract::<String>() {
             wad_hash(&path)
         } else if let Ok(hash) = key.extract::<u64>() {
@@ -41,9 +63,7 @@ fn collect_chunks(chunks: &Bound<'_, PyDict>) -> PyResult<HashMap<u64, Vec<u8>>>
                 "chunk keys must be str (path) or int (path hash)",
             ));
         };
-        let data: Vec<u8> = value
-            .extract()
-            .map_err(|_| PyTypeError::new_err("chunk values must be bytes"))?;
+        let data = extract_chunk_bytes(&key, &value)?;
         out.insert(path_hash, data);
     }
     Ok(out)
