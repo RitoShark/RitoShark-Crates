@@ -84,8 +84,14 @@ class Scb:
     def from_bytes(data: bytes) -> Scb: ...
     @staticmethod
     def new(name: str, positions: bytes, faces: list[ScbFace]) -> Scb: ...
-    @property
-    def name(self) -> str: ...
+    def replace_geometry(self, positions: bytes, faces: list[ScbFace]) -> None:
+        """Swaps in new geometry while preserving what a caller cannot reconstruct: the
+        container version, the raw flag word, the vertexType word, per-vertex colors, and the
+        opaque trailing block holding per-face VCP data and the local-origin/pivot vectors.
+        Use this to edit a file read from disk; use new() for a mesh built from scratch.
+        Raises WriteError if an index is out of range, or if the mesh carries per-vertex
+        colors and the replacement changes the vertex count."""
+    name: str
     @property
     def central(self) -> tuple[float, float, float]: ...
     @property

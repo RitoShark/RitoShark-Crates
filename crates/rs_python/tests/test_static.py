@@ -73,3 +73,38 @@ def test_reimport_preserves_face_uvs():
     assert len(back.faces) == len(src.faces)
     for a, b in zip(back.faces, src.faces):
         assert a.uvs == b.uvs
+
+
+@pytest.mark.skipif(not SCB.exists(), reason="fixture not present")
+def test_replace_geometry_round_trips_byte_exact():
+    """Scb.new cannot reproduce an imported file: it has no way to carry the flag word, the
+    vertexType word, per-vertex colors or the trailing VCP/pivot block, and it recomputes bounds
+    that real files do not always agree with. replace_geometry keeps all of it."""
+    source = SCB.read_bytes()
+    scb = ritoshark.Scb.from_path(str(SCB))
+    scb.replace_geometry(scb.positions, list(scb.faces))
+    assert scb.to_bytes() == source
+
+
+@pytest.mark.skipif(not SCB.exists(), reason="fixture not present")
+def test_replace_geometry_keeps_disagreeing_bounds_unless_asked():
+    """floorslash.scb ships a bounding box whose min.y (10.0) exceeds its max.y (0.0).
+    Recomputing it by default would silently rewrite the file, so it is opt-in."""
+    scb = ritoshark.Scb.from_path(str(SCB))
+    kept = scb.central
+    scb.replace_geometry(scb.positions, list(scb.faces))
+    assert scb.central == kept
+
+    scb.replace_geometry(scb.positions, list(scb.faces), recompute_bounds=True)
+    assert scb.central != kept
+
+
+@pytest.mark.skipif(not SCB.exists(), reason="fixture not present")
+def test_replace_geometry_rejects_out_of_range_face_index():
+    scb = ritoshark.Scb.from_path(str(SCB))
+    count = len(scb.positions) // 12
+    with pytest.raises(ritoshark.WriteError):
+        scb.replace_geometry(
+            scb.positions,
+            [ritoshark.ScbFace("mat", (0, 1, count), ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0)))],
+        )

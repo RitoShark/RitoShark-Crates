@@ -25,14 +25,17 @@ impl Skeleton {
         let joint_indices_offset = JOINTS_OFFSET + joint_count * JOINT_RECORD_SIZE;
         let influences_offset = joint_indices_offset + joint_count * JOINT_INDEX_SIZE;
 
-        /* Real files always reserve a 4-byte slot for the skeleton name and another for the
-        asset name, immediately after the influence table and aligned to 4, with the joint
-        name pool following them. The slots hold an empty string when unnamed, so the offsets
-        still point at them rather than being zeroed; emitting 0 would drop both slots and
-        shorten the file. */
+        /* Real files reserve a slot for the skeleton name and another for the asset name,
+        immediately after the influence table and aligned to 4, with the joint name pool
+        following them. Both slots hold an empty string when unnamed -- every shipped file is
+        unnamed, giving each the 4 bytes a lone terminator rounds up to -- so the offsets still
+        point at them rather than being zeroed; emitting 0 would drop both slots and shorten the
+        file. Each slot grows to fit a longer name rather than being fixed at 4. */
+        let name_slot = (self.name.len() + 1).next_multiple_of(4);
+        let asset_slot = (self.asset.len() + 1).next_multiple_of(4);
         let name_offset = (influences_offset + influence_count * 2).next_multiple_of(4);
-        let asset_offset = name_offset + 4;
-        let joint_names_offset = asset_offset + 4;
+        let asset_offset = name_offset + name_slot;
+        let joint_names_offset = asset_offset + asset_slot;
 
         buf.write_i32(JOINTS_OFFSET as i32)?;
         buf.write_i32(joint_indices_offset as i32)?;
@@ -78,16 +81,6 @@ impl Skeleton {
             buf.write_i16(id)?;
             buf.write_i16(0)?;
             buf.write_u32(hash)?;
-        }
-
-        /* The name and asset slots are 4 bytes each including the terminator; a longer name
-        would run into the next section, so it is rejected rather than silently corrupting
-        the file. */
-        if self.name.len() >= 4 {
-            return Err(Error::NameTooLong(self.name.clone()));
-        }
-        if self.asset.len() >= 4 {
-            return Err(Error::NameTooLong(self.asset.clone()));
         }
 
         buf.seek(SeekFrom::Start(name_offset as u64))

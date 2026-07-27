@@ -385,9 +385,64 @@ impl Scb {
         })
     }
 
+    /** Replaces the geometry while keeping everything the caller cannot reconstruct: the
+    container version, the raw flag word, the `vertexType` word, per-vertex colors, and the
+    opaque trailing block that carries the per-face VCP data and the local-origin/pivot vectors.
+    Editing a file read from disk goes through here; `new` is for meshes built from scratch.
+
+    The stored bounding box and central point are kept as-is unless `recompute_bounds` is set,
+    because real files do not always agree with their own geometry: `floorslash.scb` ships a box
+    whose `min.y` (10.0) exceeds its `max.y` (0.0). Recomputing by default would silently rewrite
+    that and break byte-exact round-trips, so widening the bounds is opt-in. */
+    #[pyo3(signature = (positions, faces, recompute_bounds = false))]
+    fn replace_geometry(
+        &mut self,
+        positions: &[u8],
+        faces: Vec<ScbFace>,
+        recompute_bounds: bool,
+    ) -> PyResult<()> {
+        let positions = unpack_vec3(positions, "positions")?;
+        let n = positions.len();
+        for f in &faces {
+            for i in [f.indices.0, f.indices.1, f.indices.2] {
+                if i as usize >= n {
+                    return Err(write_err(format!(
+                        "faces: index {i} is out of range for {n} vertices"
+                    )));
+                }
+            }
+        }
+        if let Some(colors) = &self.inner.colors {
+            if colors.len() != n {
+                return Err(write_err(format!(
+                    "positions: this mesh carries {} per-vertex colors, so the replacement must \
+                     have the same vertex count, got {n}",
+                    colors.len()
+                )));
+            }
+        }
+        if recompute_bounds {
+            let bb = bounds_of(&positions);
+            self.inner.central = if positions.is_empty() {
+                Vec3::new(0.0, 0.0, 0.0)
+            } else {
+                (bb.min + bb.max) * 0.5
+            };
+            self.inner.bounding_box = bb;
+        }
+        self.inner.positions = positions;
+        self.inner.faces = faces.iter().map(face_from_py).collect();
+        Ok(())
+    }
+
     #[getter]
     fn name(&self) -> &str {
         &self.inner.name
+    }
+
+    #[setter]
+    fn set_name(&mut self, name: String) {
+        self.inner.name = name;
     }
 
     #[getter]

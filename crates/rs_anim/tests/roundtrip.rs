@@ -86,16 +86,30 @@ fn skeleton_layout_matches_on_disk_contract() {
     assert_eq!(bytes.len() % 4, 0, "the file is padded to a multiple of 4");
 }
 
+/* Every shipped skeleton is unnamed, so its name and asset slots are the 4 bytes a lone
+terminator rounds up to. A named skeleton has to grow those slots rather than overrun the joint
+name pool that follows them. */
 #[test]
-fn skeleton_name_longer_than_its_slot_is_rejected() {
+fn skeleton_name_longer_than_four_bytes_grows_its_slot() {
     let mut skl = Skeleton::new();
     skl.joints = vec![sample_joint("Root", 0, -1, 0x1111_2222)];
     skl.influences = vec![0];
-    skl.name = "toolong".to_string();
+    skl.name = "a_long_skeleton_name".to_string();
+    skl.asset = "a_long_asset_name.skl".to_string();
 
-    assert!(
-        skl.to_bytes().is_err(),
-        "a name that would overrun its 4-byte slot must be rejected, not silently truncated"
+    let bytes = skl.to_bytes().expect("write named skl");
+    let parsed = Skeleton::from_bytes(&bytes).expect("read named skl");
+    assert_eq!(parsed.name, skl.name);
+    assert_eq!(parsed.asset, skl.asset);
+    assert_eq!(
+        parsed.joints[0].name, "Root",
+        "the joint name pool is intact"
+    );
+
+    assert_eq!(
+        bytes,
+        parsed.to_bytes().expect("rewrite named skl"),
+        "a named skeleton still round-trips byte-exactly"
     );
 }
 
