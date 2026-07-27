@@ -10,10 +10,25 @@ Build the wheel first:
 ## Blender
 
 Targets **Blender 4.x only**. `MeshPolygon.loop_total` is read-only from Blender 4.0
-onward, so the script only sets `loop_start` (evenly spaced by 3) and lets Blender
-derive each triangle's loop count from polygon order — this does not work on
+onward (confirmed via Blender's own API docs, and via the exact `AttributeError` a real
+4.x run raised against an earlier version of this script), so the script only sets
+`loop_start` (evenly spaced by 3) and never touches `loop_total`. This does not work on
 Blender 3.x, which requires `loop_total` to be set explicitly. No version-branching is
 implemented; if 3.x support is ever needed, that is a separate script.
+
+**What is documentation-level confidence, not execution-verified:** whether a
+`loop_start`-only polygons array actually makes Blender derive every polygon's loop
+count correctly, in particular for the *last* polygon. Blender's internal face-offset
+representation is understood to use N+1 offset entries for N faces, the last being a
+sentinel equal to the total corner count — whether `mesh.update()` reconstructs that
+sentinel correctly from a `loop_start`-only array was not confirmed by any source
+consulted while writing this script. If it does not, the last triangle specifically is
+the one at risk of being malformed or dropped, which would still print something that
+looks almost right on a casual glance. The script calls `mesh.validate(verbose=True)`
+after `update()` and asserts both the polygon count and every polygon's `loop_total`
+(via `foreach_get`) equal 3, specifically to catch that failure mode loudly. Treat the
+first real run on Blender 4.x as the actual test of this design, not this script's mere
+existence.
 
 Install the wheel into Blender's bundled Python, then:
 
@@ -24,7 +39,9 @@ Expected: `OK blender vertices=N triangles=M`
 Status on this machine: unverified. Blender is not installed here, so this script has
 only been checked by inspection (buffer layouts, API usage, the `loop_total` read-only
 change) — it has never actually been executed. Run it on a machine with Blender 4.x
-before trusting it as a passing gate.
+before trusting it as a passing gate, and watch specifically for a `validate()` warning
+or a wrong last-`loop_total` assertion failure, since that is the one part of this
+script's design that documentation alone cannot confirm.
 
 ## Maya
 
