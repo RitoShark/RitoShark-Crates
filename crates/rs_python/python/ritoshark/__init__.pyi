@@ -223,11 +223,13 @@ class Tex:
     def mip_count(self) -> int: ...
     @property
     def rgba(self) -> bytes:
-        """Decodes on every access. 4 x uint8 per pixel, row-major, top-down."""
+        """Decodes on every access. 4 x uint8 per pixel, row-major, top-down.
+        Empty if width or height is 0."""
     @property
     def rgba_f32(self) -> bytes:
         """Decodes on every access. 4 x float32 per pixel in 0..1, row-flipped
-        bottom-up to match Blender's image.pixels layout."""
+        bottom-up to match Blender's image.pixels layout. Empty if width or
+        height is 0."""
 
 class WadChunk:
     path_hash: int

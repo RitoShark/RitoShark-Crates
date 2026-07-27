@@ -55,12 +55,18 @@ impl Tex {
 
     #[getter]
     fn rgba<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        if self.inner.width == 0 || self.inner.height == 0 {
+            return Ok(PyBytes::new(py, &[]));
+        }
         let image = self.inner.decode_rgba().map_err(parse_err)?;
         Ok(PyBytes::new(py, image.as_raw()))
     }
 
     #[getter]
     fn rgba_f32<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        if self.inner.width == 0 || self.inner.height == 0 {
+            return Ok(PyBytes::new(py, &[]));
+        }
         let image = self.inner.decode_rgba().map_err(parse_err)?;
         let raw = image.as_raw();
         let row = self.inner.width as usize * 4;

@@ -67,3 +67,18 @@ def test_mip_count_and_format_are_sane():
     assert tex.mip_count >= 1
     assert isinstance(tex.format, str)
     assert len(tex.format) > 0
+
+
+def _bgra8_tex_bytes(width: int, height: int) -> bytes:
+    header = struct.pack("<IHHBBBB", 0x00584554, width, height, 0, 20, 0, 0)
+    payload = bytes(max(width, 1) * max(height, 1) * 4)
+    return header + payload
+
+
+@pytest.mark.parametrize("width,height", [(0, 4), (4, 0), (0, 0)])
+def test_rgba_and_rgba_f32_agree_on_degenerate_dimensions(width, height):
+    tex = ritoshark.Tex.from_bytes(_bgra8_tex_bytes(width, height))
+    assert len(tex.rgba) == width * height * 4
+    assert len(tex.rgba_f32) == width * height * 16
+    assert tex.rgba == b""
+    assert tex.rgba_f32 == b""
