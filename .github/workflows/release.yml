@@ -9,55 +9,28 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            label: x86_64-windows
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            label: x86_64-linux
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            label: x86_64-macos
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            label: aarch64-macos
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
         run: |
           rustup show
-          rustup target add ${{ matrix.target }}
+          rustup target add x86_64-pc-windows-msvc
       - name: Build
-        run: cargo build -p rs_cli --release --target ${{ matrix.target }}
-      - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
+        run: cargo build -p rs_cli --release --target x86_64-pc-windows-msvc
+      - name: Package
         shell: pwsh
         run: |
-          $name = "rs_cli-${{ github.ref_name }}-${{ matrix.label }}"
+          $name = "rs_cli-${{ github.ref_name }}-x86_64-windows"
           New-Item -ItemType Directory $name | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/rs_cli.exe" $name/
+          Copy-Item "target/x86_64-pc-windows-msvc/release/rs_cli.exe" $name/
           Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE $name/
           Compress-Archive -Path "$name/*" -DestinationPath "$name.zip"
-      - name: Package (Unix)
-        if: matrix.os != 'windows-latest'
-        run: |
-          name="rs_cli-${{ github.ref_name }}-${{ matrix.label }}"
-          mkdir "$name"
-          cp "target/${{ matrix.target }}/release/rs_cli" "$name/"
-          cp README.md LICENSE-MIT LICENSE-APACHE "$name/"
-          tar czf "$name.tar.gz" "$name"
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rs_cli-${{ matrix.label }}
-          path: |
-            rs_cli-${{ github.ref_name }}-${{ matrix.label }}.zip
-            rs_cli-${{ github.ref_name }}-${{ matrix.label }}.tar.gz
+          name: rs_cli-x86_64-windows
+          path: rs_cli-${{ github.ref_name }}-x86_64-windows.zip
           if-no-files-found: error
           retention-days: 1
 
