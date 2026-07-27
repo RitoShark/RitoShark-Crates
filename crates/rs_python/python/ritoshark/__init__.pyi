@@ -239,8 +239,6 @@ class WadChunk:
     is_duplicated: bool
 
 class Wad:
-    """Read-only: building .wad archives is out of scope for the Python bindings."""
-
     @staticmethod
     def from_path(path: str) -> Wad: ...
     @staticmethod
@@ -259,6 +257,20 @@ class Wad:
 def wad_hash(path: str) -> int:
     """xxh64 of the lowercased path, seed 0 — the WAD chunk path hash. Always lowercases
     internally; never lowercase the input yourself before calling this."""
+
+def build_wad(chunks: dict[str, bytes] | dict[int, bytes], zstd_level: int = ...) -> bytes:
+    """Builds a WAD v3.4 archive from a mapping of chunk path (str, hashed with wad_hash)
+    or path hash (int) to uncompressed chunk bytes, and returns the archive bytes. The
+    whole mapping is taken eagerly rather than as a callback, since the underlying builder
+    pulls each chunk's data twice (once to size it, once to write it) and a Python callback
+    reading from a file or generator could silently return different bytes on the second
+    pass. zstd_level defaults to the library's DEFAULT_ZSTD_LEVEL. Raises TypeError for a
+    non-str/int key or non-bytes value, WriteError if the archive cannot be built."""
+
+def build_wad_to_path(
+    path: str, chunks: dict[str, bytes] | dict[int, bytes], zstd_level: int = ...
+) -> None:
+    """Equivalent to build_wad but writes the archive directly to path."""
 
 def read_bin(path: str) -> dict:
     """Reads a .bin file into a plain Python dict. This view is lossy by design: it drops

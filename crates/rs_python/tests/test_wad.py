@@ -73,3 +73,85 @@ def test_both_fixtures_parse(path):
     assert 0 <= major <= 10
     assert 0 <= minor <= 100
     assert len(wad.chunks) > 0
+
+
+def _synthetic_chunks():
+    return {
+        "assets/empty.bin": b"",
+        "assets/small.txt": b"hello world",
+        "assets/repeating.bin": b"ab" * 51200,
+    }
+
+
+def test_build_wad_round_trips_chunk_data():
+    chunks = _synthetic_chunks()
+    data = ritoshark.build_wad(chunks)
+    wad = ritoshark.Wad.from_bytes(data)
+    for path, expected in chunks.items():
+        assert wad.read_path(path) == expected
+
+
+def test_build_wad_version_and_chunk_count():
+    chunks = _synthetic_chunks()
+    data = ritoshark.build_wad(chunks)
+    wad = ritoshark.Wad.from_bytes(data)
+    assert wad.version == (3, 4)
+    assert len(wad) == len(chunks)
+
+
+def test_build_wad_path_and_hash_keys_agree():
+    chunks = _synthetic_chunks()
+    by_path = ritoshark.build_wad(chunks)
+    by_hash = ritoshark.build_wad(
+        {ritoshark.wad_hash(path): data for path, data in chunks.items()}
+    )
+    wad_path = ritoshark.Wad.from_bytes(by_path)
+    wad_hash = ritoshark.Wad.from_bytes(by_hash)
+    assert sorted(c.path_hash for c in wad_path.chunks) == sorted(
+        c.path_hash for c in wad_hash.chunks
+    )
+
+
+def test_build_wad_compresses_repetitive_data():
+    chunks = _synthetic_chunks()
+    data = ritoshark.build_wad(chunks)
+    wad = ritoshark.Wad.from_bytes(data)
+    repeating_hash = ritoshark.wad_hash("assets/repeating.bin")
+    chunk = next(c for c in wad.chunks if c.path_hash == repeating_hash)
+    assert chunk.compressed_size < chunk.uncompressed_size
+
+
+def test_build_wad_to_path_writes_file(tmp_path):
+    chunks = _synthetic_chunks()
+    out = tmp_path / "out.wad.client"
+    ritoshark.build_wad_to_path(str(out), chunks)
+    wad = ritoshark.Wad.from_path(str(out))
+    for path, expected in chunks.items():
+        assert wad.read_path(path) == expected
+
+
+def test_build_wad_rejects_bad_key_type():
+    with pytest.raises(TypeError):
+        ritoshark.build_wad({1.5: b"data"})
+
+
+def test_build_wad_rejects_bad_value_type():
+    with pytest.raises(TypeError):
+        ritoshark.build_wad({"assets/foo.bin": "not bytes"})
+
+
+@pytest.mark.skipif(not WAD.exists(), reason="fixture not present")
+def test_build_wad_round_trips_real_archive():
+    original = ritoshark.Wad.from_path(str(WAD))
+    chunks = {}
+    for c in original.chunks:
+        data = original.read(c.path_hash)
+        assert data is not None
+        chunks[c.path_hash] = data
+
+    rebuilt_bytes = ritoshark.build_wad(chunks)
+    rebuilt = ritoshark.Wad.from_bytes(rebuilt_bytes)
+
+    assert len(rebuilt) == len(original)
+    for c in original.chunks:
+        assert rebuilt.read(c.path_hash) == chunks[c.path_hash]

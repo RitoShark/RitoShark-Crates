@@ -41,8 +41,8 @@ def test_public_names_match_expected_set():
         "AnimFrame", "AnimTrack", "Anm", "FormatError", "Joint", "MapGeo",
         "MapModel", "MapSubmesh", "ParseError", "Scb", "ScbFace", "Sco",
         "Skl", "Skn", "Submesh", "Tex", "UnsupportedVersion", "Wad",
-        "WadChunk", "WriteError", "read_bin", "read_bin_bytes", "wad_hash",
-        "__version__",
+        "WadChunk", "WriteError", "build_wad", "build_wad_to_path", "read_bin",
+        "read_bin_bytes", "wad_hash", "__version__",
     }
     public = {n for n in dir(ritoshark) if not n.startswith("_")}
     public.add("__version__")

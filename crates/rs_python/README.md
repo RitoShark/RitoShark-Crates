@@ -42,7 +42,7 @@ all of them.
 | `.mapgeo` map geometry | yes | yes (re-emit only, no construction) |
 | `.sco` static mesh | yes | **no** — Riot removed the format; `rs_mesh` writes no `.sco` |
 | `.tex` texture | yes | no |
-| `.wad` archive | yes | no (packaging belongs elsewhere) |
+| `.wad` archive | yes | yes |
 | `.bin` property bin | yes (plain Python values) | no |
 
 ## Buffer layouts
@@ -66,6 +66,24 @@ little-endian bytes; unpack with `struct`, `array`, or `memoryview(...).cast(...
 `MapModel.positions()` and `MapModel.indices()` are **methods**, not properties — `MapModel`
 doesn't own its vertex data, it references a shared interleaved buffer on the parent `MapGeo`
 and de-interleaves it on every call. Everything else in the table is a property.
+
+## Building a `.wad`
+
+```python
+import ritoshark
+
+data = ritoshark.build_wad({
+    "assets/characters/aatrox/aatrox.skn": skn_bytes,
+    "assets/characters/aatrox/aatrox.dds": dds_bytes,
+})
+ritoshark.build_wad_to_path("aatrox.wad.client", {...})
+```
+
+Chunk keys are either the in-WAD path (hashed with `wad_hash` internally) or an
+already-computed path hash — mix both in the same dict if convenient. There is no
+callback form: the builder pulls each chunk's bytes twice internally (once to size it,
+once to write it), so the whole mapping is taken eagerly rather than as a generator or
+file-like callback that could return different bytes on the second pass.
 
 ## Blender example
 

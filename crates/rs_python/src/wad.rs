@@ -1,20 +1,91 @@
 /*!
-Reads `.wad` archives: lists the table of contents and decompresses chunks on demand. Building
-archives is deliberately absent, since packaging belongs to the tools that ship mods rather than to
-a DCC plugin. `wad_hash` is exported so callers never hash a path without lowercasing it first;
-`ritoshark::hash::xxh64` already lowercases internally, so the binding must not do it again.
+Reads `.wad` archives: lists the table of contents and decompresses chunks on demand. `wad_hash`
+is exported so callers never hash a path without lowercasing it first; `ritoshark::hash::xxh64`
+already lowercases internally, so the binding must not do it again.
+
+`build_wad`/`build_wad_to_path` wrap [`ritoshark::wad::WadBuilder`], which drives its `provide`
+callback twice per chunk (once to measure, once to write) and requires it to be reproducible
+across both calls. A Python callback naturally reading from a file handle or generator would
+silently break that contract on the second pass and produce a corrupt archive, so no callback
+crosses the Python boundary: callers hand over a `dict[int, bytes]` or `dict[str, bytes]` up
+front, every chunk's bytes already resident in memory, and reproducibility follows from there
+being only one copy of the data to hand back on either pass. A free function rather than a
+builder class matches `read_bin`'s precedent and fits the eager-dict shape, since there is
+nothing incremental left to do once the whole mapping is in hand.
 */
 
-use pyo3::prelude::*;
-use pyo3::types::PyBytes;
-use ritoshark::prelude::Parse;
-use ritoshark::wad::{Wad as RsWad, WadChunk};
+use std::collections::HashMap;
 
-use crate::error::parse_err;
+use pyo3::exceptions::PyTypeError;
+use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyDict};
+use ritoshark::prelude::Parse;
+use ritoshark::wad::{DEFAULT_ZSTD_LEVEL, Wad as RsWad, WadBuilder, WadChunk};
+
+use crate::error::{parse_err, write_err};
 
 #[pyfunction]
 pub fn wad_hash(path: &str) -> u64 {
     ritoshark::hash::xxh64(path)
+}
+
+fn collect_chunks(chunks: &Bound<'_, PyDict>) -> PyResult<HashMap<u64, Vec<u8>>> {
+    let mut out = HashMap::with_capacity(chunks.len());
+    for (key, value) in chunks.iter() {
+        let path_hash = if let Ok(path) = key.extract::<String>() {
+            wad_hash(&path)
+        } else if let Ok(hash) = key.extract::<u64>() {
+            hash
+        } else {
+            return Err(PyTypeError::new_err(
+                "chunk keys must be str (path) or int (path hash)",
+            ));
+        };
+        let data: Vec<u8> = value
+            .extract()
+            .map_err(|_| PyTypeError::new_err("chunk values must be bytes"))?;
+        out.insert(path_hash, data);
+    }
+    Ok(out)
+}
+
+fn build_wad_bytes(chunks: &Bound<'_, PyDict>, zstd_level: i32) -> PyResult<Vec<u8>> {
+    let entries = collect_chunks(chunks)?;
+    let mut builder = WadBuilder::new().with_zstd_level(zstd_level);
+    for &path_hash in entries.keys() {
+        builder = builder.with_chunk_hash(path_hash);
+    }
+    builder
+        .build_to_bytes(|path_hash, w| {
+            let data = entries
+                .get(&path_hash)
+                .expect("builder requested an unregistered chunk");
+            w.write_all(data).map_err(ritoshark::io::Error::from)?;
+            Ok(())
+        })
+        .map_err(write_err)
+}
+
+#[pyfunction]
+#[pyo3(signature = (chunks, zstd_level=DEFAULT_ZSTD_LEVEL))]
+pub fn build_wad<'py>(
+    py: Python<'py>,
+    chunks: &Bound<'py, PyDict>,
+    zstd_level: i32,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let data = build_wad_bytes(chunks, zstd_level)?;
+    Ok(PyBytes::new(py, &data))
+}
+
+#[pyfunction]
+#[pyo3(signature = (path, chunks, zstd_level=DEFAULT_ZSTD_LEVEL))]
+pub fn build_wad_to_path(
+    path: std::path::PathBuf,
+    chunks: &Bound<'_, PyDict>,
+    zstd_level: i32,
+) -> PyResult<()> {
+    let data = build_wad_bytes(chunks, zstd_level)?;
+    std::fs::write(path, data).map_err(write_err)
 }
 
 #[pyclass(name = "WadChunk")]
@@ -114,5 +185,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Wad>()?;
     m.add_class::<WadChunkInfo>()?;
     m.add_function(wrap_pyfunction!(wad_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(build_wad, m)?)?;
+    m.add_function(wrap_pyfunction!(build_wad_to_path, m)?)?;
     Ok(())
 }
