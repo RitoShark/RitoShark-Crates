@@ -287,6 +287,23 @@ def read_bin(path: str) -> dict:
 def read_bin_bytes(data: bytes) -> dict:
     """Same as read_bin but from an in-memory buffer."""
 
+def bin_to_text(path: str, hashes: str | None = None) -> str:
+    """Renders a .bin file as #PROP_text (the ritobin text form). With hashes, a path to a
+    hash-dictionary file loaded via HashMapper, field/class/entry names resolve to their
+    original strings instead of raw hashes. Raises FormatError if path or hashes cannot be
+    read or parsed."""
+
+def bin_to_text_bytes(data: bytes, hashes: str | None = None) -> str:
+    """Same as bin_to_text but from an in-memory .bin buffer."""
+
+def text_to_bin_path(path: str, text: str) -> None:
+    """Parses #PROP_text and writes the resulting .bin file to path. Raises FormatError on
+    malformed text."""
+
+def text_to_bin_bytes(text: str) -> bytes:
+    """Parses #PROP_text and returns the encoded .bin bytes. Raises FormatError on malformed
+    text."""
+
 class MapSubmesh:
     hash: int
     name: str

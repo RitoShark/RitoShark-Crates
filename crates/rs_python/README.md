@@ -10,7 +10,8 @@ a per-vertex Python loop.
 ```
 AnimFrame, AnimTrack, Anm, FormatError, Joint, MapGeo, MapModel, MapSubmesh, ParseError,
 Scb, ScbFace, Sco, Skl, Skn, Submesh, Tex, UnsupportedVersion, Wad, WadChunk, WriteError,
-read_bin, read_bin_bytes, wad_hash
+bin_to_text, bin_to_text_bytes, build_wad, build_wad_to_path, read_bin, read_bin_bytes,
+text_to_bin_bytes, text_to_bin_path, wad_hash
 ```
 
 plus `__version__`. `ParseError`, `UnsupportedVersion`, and `WriteError` all derive from
@@ -43,7 +44,7 @@ all of them.
 | `.sco` static mesh | yes | **no** — Riot removed the format; `rs_mesh` writes no `.sco` |
 | `.tex` texture | yes | no |
 | `.wad` archive | yes | yes |
-| `.bin` property bin | yes (plain Python values) | no |
+| `.bin` property bin | yes (plain Python values) | no — text round-trip only (see below) |
 
 ## Buffer layouts
 
@@ -129,6 +130,32 @@ not a bug:
 
 There is no `write_bin`. Writing requires an editable tree that preserves all of the above,
 which is a separate future design, not an oversight here.
+
+## Text round-trip
+
+`bin_to_text` / `text_to_bin_bytes` (and their path/bytes variants) convert a `.bin` to and
+from `#PROP_text`, the ritobin text form. Unlike `read_bin`, this path is faithful — `LIST2`,
+pointer-vs-embed, duplicate map keys, and the `PTCH` patches section all survive, because the
+text is the same document, just rendered as text. `text_to_bin_bytes(bin_to_text(f))` is
+byte-identical to the source file.
+
+This is the practical way to bulk find-and-replace across many `.bin` files without building
+an editable tree:
+
+```python
+import ritoshark
+
+text = ritoshark.bin_to_text("aatrox_skin01.bin", hashes="hashes.txt")
+text = text.replace('"old/texture/path.dds"', '"new/texture/path.dds"')
+ritoshark.text_to_bin_path("aatrox_skin01.bin", text)
+```
+
+`hashes` is an optional path to a hash-dictionary file loaded via `HashMapper`; with one, field
+and class names in the emitted text are resolved (`mFieldName:`) instead of raw hashes
+(`0xe095d841:`), which is the difference between an editable document and one nobody can read.
+Without it, raw hashes are emitted and the round-trip is still exact. `text_to_bin_*` takes no
+`hashes` parameter — the parser only ever reads hashes back out of the text, it never resolves
+names while parsing, so there is nothing for it to do.
 
 ## `Anm` byte-exactness
 
