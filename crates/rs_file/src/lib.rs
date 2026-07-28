@@ -2,8 +2,9 @@
 rs_file identifies a League of Legends file format from the magic bytes at the start of a file.
 `detect` inspects a leading byte slice and returns the matching [`FileKind`], or [`FileKind::Unknown`]
 when nothing matches or the slice is too short for the candidate magic. `detect_path` reads the
-leading bytes of a file and defers to `detect`. Detection is ordered so that longer, higher-entropy
-tags are tested before their shorter prefixes (the `r3d2*` family, the `RW` two-byte WAD tag).
+leading 32 bytes of a file and defers to `detect`. Detection is ordered so that longer, higher-entropy
+tags are tested before their shorter prefixes (the 25-byte `Preload` tag, the `r3d2*` family, the
+9-byte `LuaBin`/`LuaBin64` pair that differ only at their last byte, and the `RW` two-byte WAD tag).
 */
 
 #![forbid(unsafe_code)]
@@ -29,6 +30,10 @@ pub enum FileKind {
     Rman,
     Wpk,
     Bnk,
+    LuaBin,
+    LuaBin64,
+    TroyBin,
+    Preload,
     Unknown,
 }
 
@@ -38,9 +43,24 @@ const fn u32_le(b: &[u8]) -> u32 {
 
 /** Identifies the file format from the magic at the start of `bytes`. Longer `r3d2*` tags are
 matched before the bare `r3d2` WPK tag, and offset-4 signatures (skeleton) are guarded by a length
-check so short slices fall through to [`FileKind::Unknown`] instead of panicking. */
+check so short slices fall through to [`FileKind::Unknown`] instead of panicking. `LuaBin` and
+`LuaBin64` share an eight-byte prefix and are told apart only by their ninth byte, so they are
+matched with a nine-byte comparison; an eight-byte `LuaQ` prefix alone is genuinely ambiguous and
+resolves to [`FileKind::Unknown`] rather than guessing. */
 pub fn detect(bytes: &[u8]) -> FileKind {
     let len = bytes.len();
+
+    if len >= 25 && &bytes[0..25] == b"PreLoadBuildingBlocks = {" {
+        return FileKind::Preload;
+    }
+
+    if len >= 9 {
+        match &bytes[0..9] {
+            [0x1b, b'L', b'u', b'a', b'Q', 0x00, 0x01, 0x04, 0x04] => return FileKind::LuaBin,
+            [0x1b, b'L', b'u', b'a', b'Q', 0x00, 0x01, 0x04, 0x08] => return FileKind::LuaBin64,
+            _ => {}
+        }
+    }
 
     if len >= 8 {
         match &bytes[0..8] {
@@ -67,6 +87,7 @@ pub fn detect(bytes: &[u8]) -> FileKind {
             b"DDS " => return FileKind::Dds,
             [0x54, 0x45, 0x58, 0x00] => return FileKind::Tex,
             [0x33, 0x22, 0x11, 0x00] => return FileKind::SkinnedMesh,
+            [0x02, 0x3d, 0x00, 0x28] => return FileKind::TroyBin,
             _ => {}
         }
     }
@@ -88,12 +109,12 @@ pub fn detect(bytes: &[u8]) -> FileKind {
     FileKind::Unknown
 }
 
-/** Reads the first 16 bytes of the file at `path` and identifies its format with [`detect`].
-Fewer than 16 bytes is not an error; the available prefix is passed through and may still match a
+/** Reads the first 32 bytes of the file at `path` and identifies its format with [`detect`].
+Fewer than 32 bytes is not an error; the available prefix is passed through and may still match a
 short magic or yield [`FileKind::Unknown`]. */
 pub fn detect_path(path: impl AsRef<Path>) -> std::io::Result<FileKind> {
     let mut file = std::fs::File::open(path)?;
-    let mut buf = [0u8; 16];
+    let mut buf = [0u8; 32];
     let mut filled = 0;
     while filled < buf.len() {
         match file.read(&mut buf[filled..])? {
@@ -184,5 +205,37 @@ mod tests {
     #[test]
     fn empty_slice_is_unknown() {
         assert_eq!(detect(&[]), FileKind::Unknown);
+    }
+
+    #[test]
+    fn detects_luabin_and_luabin64_which_differ_only_at_byte_eight() {
+        let b32 = [0x1b, b'L', b'u', b'a', b'Q', 0x00, 0x01, 0x04, 0x04];
+        let b64 = [0x1b, b'L', b'u', b'a', b'Q', 0x00, 0x01, 0x04, 0x08];
+        assert_eq!(detect(&b32), FileKind::LuaBin);
+        assert_eq!(detect(&b64), FileKind::LuaBin64);
+    }
+
+    #[test]
+    fn an_eight_byte_luaq_prefix_is_unknown_not_a_coin_flip() {
+        // The two LuaBin variants are distinguished by byte 8, so eight bytes is
+        // genuinely ambiguous and must not resolve to either.
+        let ambiguous = [0x1b, b'L', b'u', b'a', b'Q', 0x00, 0x01, 0x04];
+        assert_eq!(detect(&ambiguous), FileKind::Unknown);
+    }
+
+    #[test]
+    fn detects_troybin() {
+        assert_eq!(detect(&[0x02, 0x3d, 0x00, 0x28, 0xff]), FileKind::TroyBin);
+    }
+
+    #[test]
+    fn detects_preload_whose_signature_exceeds_sixteen_bytes() {
+        // 25 bytes — this is why detect_path reads 32.
+        assert_eq!(detect(b"PreLoadBuildingBlocks = {"), FileKind::Preload);
+    }
+
+    #[test]
+    fn a_truncated_preload_signature_is_unknown() {
+        assert_eq!(detect(b"PreLoadBuilding"), FileKind::Unknown);
     }
 }
