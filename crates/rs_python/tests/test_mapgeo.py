@@ -1,3 +1,4 @@
+import array
 import struct
 from pathlib import Path
 
@@ -203,3 +204,123 @@ def test_oversized_vertex_count_raises_format_error_instead_of_aborting(path):
     mg = ritoshark.MapGeo.from_bytes(bytes(raw))
     with pytest.raises(ritoshark.FormatError):
         mg.models[0].positions()
+
+
+def _floats(data: bytes) -> array.array:
+    out = array.array("f")
+    out.frombytes(data)
+    return out
+
+
+TRIANGLE_POSITIONS = array.array("f", [0, 0, 0, 100, 0, 0, 0, 100, 0]).tobytes()
+TRIANGLE_NORMALS = array.array("f", [0, 1, 0, 0, 1, 0, 0, 1, 0]).tobytes()
+TRIANGLE_UVS = array.array("f", [0, 0, 1, 0, 0, 1]).tobytes()
+TRIANGLE_INDICES = array.array("H", [0, 1, 2]).tobytes()
+
+
+@pytest.mark.parametrize("path", ALL_MAPGEOS, ids=lambda p: p.name)
+def test_every_model_decodes_all_the_attributes_its_streams_declare(path):
+    """A model's buffers use consecutive descriptions from its vertex_description_id, not the
+    stored one for all of them, so attributes living in a later stream must still decode."""
+    if not path.exists():
+        pytest.skip("fixture not present")
+    mg = ritoshark.MapGeo.from_path(str(path))
+    for model in mg.models:
+        if not model.vertex_count:
+            continue
+        assert len(model.positions()) // 12 == model.vertex_count
+        assert len(model.normals()) // 12 in (0, model.vertex_count)
+        assert len(model.uvs()) // 8 in (0, model.vertex_count)
+
+
+@pytest.mark.parametrize("path", ALL_MAPGEOS, ids=lambda p: p.name)
+def test_replace_geometry_keeps_the_rest_of_the_file(path):
+    if not path.exists():
+        pytest.skip("fixture not present")
+    mg = ritoshark.MapGeo.from_path(str(path))
+    before = len(mg)
+    last = mg.models[-1]
+    last_positions = last.positions()
+    last_transform = last.transform
+
+    mg.replace_geometry(
+        0, "ritoshark_test", TRIANGLE_POSITIONS, TRIANGLE_INDICES,
+        TRIANGLE_NORMALS, TRIANGLE_UVS,
+    )
+    out = ritoshark.MapGeo.from_bytes(mg.to_bytes())
+
+    assert len(out) == before
+    assert out.version == mg.version
+    edited = out.models[0]
+    assert edited.vertex_count == 3
+    assert list(_floats(edited.positions())) == [0, 0, 0, 100, 0, 0, 0, 100, 0]
+    assert edited.submeshes[0].name == "ritoshark_test"
+    assert out.models[-1].positions() == last_positions
+    assert out.models[-1].transform == last_transform
+
+
+@pytest.mark.parametrize("path", ALL_MAPGEOS, ids=lambda p: p.name)
+def test_add_and_remove_model(path):
+    if not path.exists():
+        pytest.skip("fixture not present")
+    mg = ritoshark.MapGeo.from_path(str(path))
+    before = len(mg)
+
+    index = mg.add_model(
+        "RitoShark_Added", TRIANGLE_POSITIONS, TRIANGLE_INDICES,
+        TRIANGLE_NORMALS, TRIANGLE_UVS, None, 255,
+    )
+    assert index == before
+    out = ritoshark.MapGeo.from_bytes(mg.to_bytes())
+    assert len(out) == before + 1
+    added = out.models[index]
+    assert added.layer == 255
+    assert list(_floats(added.positions())) == [0, 0, 0, 100, 0, 0, 0, 100, 0]
+    assert list(_floats(added.normals())) == [0, 1, 0, 0, 1, 0, 0, 1, 0]
+    assert list(_floats(added.uvs())) == [0, 0, 1, 0, 0, 1]
+
+    mg.remove_model(index)
+    out = ritoshark.MapGeo.from_bytes(mg.to_bytes())
+    assert len(out) == before
+
+
+@pytest.mark.skipif(not MAPGEO.exists(), reason="fixture not present")
+def test_set_transform_and_layer():
+    mg = ritoshark.MapGeo.from_path(str(MAPGEO))
+    mg.set_transform(0, [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 10, 20, 30, 1])
+    mg.set_layer(0, 7)
+    out = ritoshark.MapGeo.from_bytes(mg.to_bytes())
+    assert out.models[0].transform[0] == 2.0
+    assert out.models[0].transform[12] == 10.0
+    assert out.models[0].layer == 7
+
+
+@pytest.mark.skipif(not MAPGEO.exists(), reason="fixture not present")
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"indices": array.array("H", [0, 1, 9]).tobytes()},
+        {"positions": b"\x00\x00\x00"},
+        {"normals": array.array("f", [0, 1, 0]).tobytes()},
+    ],
+)
+def test_invalid_geometry_is_rejected(kwargs):
+    mg = ritoshark.MapGeo.from_path(str(MAPGEO))
+    call = {
+        "positions": TRIANGLE_POSITIONS,
+        "indices": TRIANGLE_INDICES,
+        "normals": TRIANGLE_NORMALS,
+        "uvs": TRIANGLE_UVS,
+    }
+    call.update(kwargs)
+    with pytest.raises(ritoshark.WriteError):
+        mg.replace_geometry(0, "bad", **call)
+
+
+@pytest.mark.skipif(not MAPGEO.exists(), reason="fixture not present")
+def test_bad_model_index_is_rejected():
+    mg = ritoshark.MapGeo.from_path(str(MAPGEO))
+    with pytest.raises(ritoshark.WriteError):
+        mg.replace_geometry(999999, "bad", TRIANGLE_POSITIONS, TRIANGLE_INDICES)
+    with pytest.raises(ritoshark.WriteError):
+        mg.remove_model(999999)

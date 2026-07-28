@@ -205,38 +205,60 @@ fn default_description() -> VertexDescription {
 }
 
 impl MapGeometry {
-    /** Replaces the geometry of the model at `index`, keeping its transform, layer, lighting,
-    texture overrides, render flags and scene-graph association. Submesh names come from the supplied
-    geometry, so a caller that renames or re-splits materials is reflected in the file.
+    /** The description that decodes each of a model's vertex buffers, paired with that buffer's id.
 
-    The model keeps the vertex layout it already had. Attributes the layout does not carry are
-    dropped, and attributes it carries that the geometry does not supply are written as zero. When
-    the model read from several buffers, each is rewritten so the layout stays intact.
-
-    `bounds` is recomputed from the new positions. */
-    pub fn replace_geometry(&mut self, index: usize, geometry: &Geometry) -> Result<()> {
-        geometry.validate()?;
+    A model stores one `vertex_description_id` but may reference several buffers. The descriptions
+    are consumed consecutively from that id: the first buffer uses it, the second the one after it,
+    and so on. Riot splits a vertex that way — positions and normals in one stream, texture
+    coordinates in the next — so treating the single stored id as describing every buffer silently
+    loses every attribute past the first stream. */
+    fn buffer_layouts(&self, index: usize) -> Result<Vec<(i32, VertexDescription)>> {
         let model = self
             .models
             .get(index)
             .ok_or_else(|| Error::InvalidData(format!("no model at index {index}")))?;
 
-        let description = self
-            .vertex_descriptions
-            .get(model.vertex_description_id as usize)
-            .ok_or_else(|| {
-                Error::InvalidData(format!(
-                    "model {index} references vertex description {} which does not exist",
-                    model.vertex_description_id
-                ))
-            })?
-            .clone();
-
-        let source_buffer_ids = model.vertex_buffer_ids.clone();
-        let buffer_layers: Vec<u8> = source_buffer_ids
+        let first = model.vertex_description_id as usize;
+        model
+            .vertex_buffer_ids
             .iter()
-            .map(|&id| {
-                usize::try_from(id)
+            .enumerate()
+            .map(|(offset, &id)| {
+                let description = self
+                    .vertex_descriptions
+                    .get(first + offset)
+                    .ok_or_else(|| {
+                        Error::InvalidData(format!(
+                            "model {index} needs vertex description {} for its buffer {offset} but \
+                             the file only has {}",
+                            first + offset,
+                            self.vertex_descriptions.len()
+                        ))
+                    })?
+                    .clone();
+                Ok((id, description))
+            })
+            .collect()
+    }
+
+    /** Replaces the geometry of the model at `index`, keeping its transform, layer, lighting,
+    texture overrides, render flags and scene-graph association. Submesh names come from the supplied
+    geometry, so a caller that renames or re-splits materials is reflected in the file.
+
+    The model keeps the vertex layout it already had, across every stream it was split over.
+    Attributes the layout does not carry are dropped, and attributes it carries that the geometry
+    does not supply are written as zero.
+
+    `bounds` is recomputed from the new positions. */
+    pub fn replace_geometry(&mut self, index: usize, geometry: &Geometry) -> Result<()> {
+        geometry.validate()?;
+        let layouts = self.buffer_layouts(index)?;
+        let model = &self.models[index];
+
+        let buffer_layers: Vec<u8> = layouts
+            .iter()
+            .map(|(id, _)| {
+                usize::try_from(*id)
                     .ok()
                     .and_then(|id| self.vertex_buffers.get(id))
                     .map_or(0, |buffer| buffer.layer)
@@ -247,7 +269,8 @@ impl MapGeometry {
             .and_then(|id| self.index_buffers.get(id))
             .map_or(0, |buffer| buffer.layer);
 
-        let new_vertex_ids = self.write_vertex_buffers(&description, geometry, &buffer_layers)?;
+        let descriptions: Vec<VertexDescription> = layouts.into_iter().map(|(_, d)| d).collect();
+        let new_vertex_ids = self.write_vertex_buffers(&descriptions, geometry, &buffer_layers)?;
         self.index_buffers.push(IndexBuffer {
             layer: index_layer,
             indices: geometry.indices.clone(),
@@ -292,7 +315,8 @@ impl MapGeometry {
             }
         } as u32;
 
-        let vertex_buffer_ids = self.write_vertex_buffers(&description, geometry, &[0])?;
+        let vertex_buffer_ids =
+            self.write_vertex_buffers(std::slice::from_ref(&description), geometry, &[0])?;
         self.index_buffers.push(IndexBuffer {
             layer: 0,
             indices: geometry.indices.clone(),
@@ -343,36 +367,41 @@ impl MapGeometry {
         Ok(self.models.remove(index))
     }
 
-    /** Writes `geometry` into newly appended vertex buffers laid out by `description`, one per entry
-    in `layers`, and returns their ids. Each buffer receives every attribute the description carries,
-    which matches how a multi-buffer model is read: the description spans the whole vertex and each
-    buffer is one stream of it. */
+    /** Writes `geometry` into one newly appended vertex buffer per entry of `descriptions`, and
+    returns their ids. Each buffer receives only the attributes its own description declares, which
+    is how a model split across several streams is laid out: positions and normals in one, texture
+    coordinates in the next. An attribute a description declares but the geometry does not supply is
+    left zeroed rather than refused, so replacing a mesh that has no UVs into a layout that expects
+    them still produces a file the game can load. */
     fn write_vertex_buffers(
         &mut self,
-        description: &VertexDescription,
+        descriptions: &[VertexDescription],
         geometry: &Geometry,
         layers: &[u8],
     ) -> Result<Vec<i32>> {
-        let stride = description.vertex_size();
-        if stride == 0 {
-            return Err(Error::InvalidData(
-                "vertex description has a zero stride".to_string(),
-            ));
-        }
         let vertex_count = geometry.vertex_count();
-        let layers = if layers.is_empty() { &[0][..] } else { layers };
-
-        let mut ids = Vec::with_capacity(layers.len());
-        for &layer in layers {
+        let mut ids = Vec::with_capacity(descriptions.len());
+        for (offset, description) in descriptions.iter().enumerate() {
+            let stride = description.vertex_size();
+            if stride == 0 {
+                return Err(Error::InvalidData(format!(
+                    "vertex description for buffer {offset} has a zero stride"
+                )));
+            }
             let mut data = vec![0u8; vertex_count * stride];
-            description.write_attribute(&mut data, ElementName::Position, &geometry.positions)?;
-            if !geometry.normals.is_empty() && description.element(ElementName::Normal).is_some() {
-                description.write_attribute(&mut data, ElementName::Normal, &geometry.normals)?;
+            for (name, values) in [
+                (ElementName::Position, &geometry.positions),
+                (ElementName::Normal, &geometry.normals),
+                (ElementName::Texcoord0, &geometry.uvs),
+            ] {
+                if !values.is_empty() && description.element(name).is_some() {
+                    description.write_attribute(&mut data, name, values)?;
+                }
             }
-            if !geometry.uvs.is_empty() && description.element(ElementName::Texcoord0).is_some() {
-                description.write_attribute(&mut data, ElementName::Texcoord0, &geometry.uvs)?;
-            }
-            self.vertex_buffers.push(VertexBuffer { layer, data });
+            self.vertex_buffers.push(VertexBuffer {
+                layer: layers.get(offset).copied().unwrap_or(0),
+                data,
+            });
             ids.push((self.vertex_buffers.len() - 1) as i32);
         }
         Ok(ids)
@@ -382,52 +411,31 @@ impl MapGeometry {
     caller can round-trip a model through an editor without knowing the layout. Attributes the
     layout does not carry come back empty. */
     pub fn geometry(&self, index: usize) -> Result<Geometry> {
-        let model = self
-            .models
-            .get(index)
-            .ok_or_else(|| Error::InvalidData(format!("no model at index {index}")))?;
-        let description = self
-            .vertex_descriptions
-            .get(model.vertex_description_id as usize)
-            .ok_or_else(|| {
-                Error::InvalidData(format!(
-                    "model {index} references vertex description {} which does not exist",
-                    model.vertex_description_id
-                ))
-            })?;
-
+        let layouts = self.buffer_layouts(index)?;
+        let model = &self.models[index];
         let vertex_count = model.vertex_count as usize;
+
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut uvs = Vec::new();
-        for &id in &model.vertex_buffer_ids {
-            let Some(buffer) = usize::try_from(id)
+        for (id, description) in &layouts {
+            let Some(buffer) = usize::try_from(*id)
                 .ok()
                 .and_then(|id| self.vertex_buffers.get(id))
             else {
                 continue;
             };
-            if positions.is_empty() {
-                if let Some(values) =
-                    description.read_attribute(&buffer.data, ElementName::Position, vertex_count)?
-                {
-                    positions = values;
-                }
-            }
-            if normals.is_empty() {
-                if let Some(values) =
-                    description.read_attribute(&buffer.data, ElementName::Normal, vertex_count)?
-                {
-                    normals = values;
-                }
-            }
-            if uvs.is_empty() {
-                if let Some(values) = description.read_attribute(
-                    &buffer.data,
-                    ElementName::Texcoord0,
-                    vertex_count,
-                )? {
-                    uvs = values;
+            for (name, slot) in [
+                (ElementName::Position, &mut positions),
+                (ElementName::Normal, &mut normals),
+                (ElementName::Texcoord0, &mut uvs),
+            ] {
+                if slot.is_empty() {
+                    if let Some(values) =
+                        description.read_attribute(&buffer.data, name, vertex_count)?
+                    {
+                        *slot = values;
+                    }
                 }
             }
         }

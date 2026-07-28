@@ -341,9 +341,10 @@ class MapSubmesh:
     max_vertex: int
 
 class MapModel:
-    """Does not own its vertex/index data: positions() and indices() de-interleave the
-    referenced shared buffer on every call, so they are methods, not properties. There is
-    no writer; only read and byte-exact re-emission of the containing MapGeo are exposed."""
+    """Does not own its vertex/index data: positions(), normals(), uvs() and indices()
+    de-interleave the referenced shared buffer on every call, so they are methods, not
+    properties. A model is a read-only view; edit it through the containing MapGeo, whose
+    replace_geometry/set_transform/set_layer take the model's index."""
 
     @property
     def name(self) -> str: ...
@@ -364,13 +365,20 @@ class MapModel:
     def submeshes(self) -> list[MapSubmesh]: ...
     def positions(self) -> bytes:
         """METHOD, not a property. Tightly packed little-endian, 3 x float32 per vertex."""
+    def normals(self) -> bytes:
+        """METHOD, not a property. 3 x float32 per vertex, or empty when this model's layout
+        carries no normals. Packed formats decode to the normalised 0..=1 range they store."""
+    def uvs(self) -> bytes:
+        """METHOD, not a property. 2 x float32 per vertex for channel 0, or empty when this
+        model's layout carries none."""
     def indices(self) -> bytes:
         """METHOD, not a property. Tightly packed little-endian, 1 x uint32 per corner."""
 
 class MapGeo:
-    """Construction from scratch is out of scope: the format carries scene graphs,
-    bucketed geometry, planar reflectors, and per-version lighting that a DCC does not
-    author. Only read and byte-exact re-emission are exposed."""
+    """A file that was read can be edited. Construction from scratch stays out of scope:
+    the scene graphs, bucketed geometry, planar reflectors and per-version baked lighting
+    the format carries are not derivable from a mesh, so an edit keeps them from the file
+    it started with."""
 
     @staticmethod
     def from_path(path: str) -> MapGeo: ...
@@ -380,6 +388,37 @@ class MapGeo:
     def version(self) -> int: ...
     @property
     def models(self) -> list[MapModel]: ...
+    def replace_geometry(
+        self,
+        index: int,
+        name: str,
+        positions: bytes,
+        indices: bytes,
+        normals: bytes = ...,
+        uvs: bytes = ...,
+        submeshes: list[tuple[str, int, int]] = ...,
+    ) -> None:
+        """Replaces one model's geometry, keeping its transform, layer, lighting, texture
+        overrides and scene-graph association. positions/normals are 3 x float32 per vertex,
+        uvs 2 x float32, indices 1 x uint16 per corner, tightly packed little-endian.
+        submeshes is (name, index_start, index_count); empty draws everything as one."""
+
+    def add_model(
+        self,
+        name: str,
+        positions: bytes,
+        indices: bytes,
+        normals: bytes = ...,
+        uvs: bytes = ...,
+        transform: list[float] | None = ...,
+        layer: int = 255,
+        submeshes: list[tuple[str, int, int]] = ...,
+    ) -> int:
+        """Appends a model and returns its index. transform is 16 floats, column-major."""
+
+    def remove_model(self, index: int) -> None: ...
+    def set_transform(self, index: int, transform: list[float]) -> None: ...
+    def set_layer(self, index: int, layer: int) -> None: ...
     def to_bytes(self) -> bytes: ...
     def to_path(self, path: str) -> None: ...
     def __len__(self) -> int: ...

@@ -4,19 +4,97 @@ vertex/index data: it holds indices into the document's shared `vertex_buffers`/
 and the interleaved layout of each vertex buffer is described separately by a `VertexDescription`.
 `MapModel` therefore keeps an `Arc` handle to the parsed document plus its own index, and
 `positions()`/`indices()` are methods rather than getters because each call walks the vertex
-description and de-interleaves the referenced buffer. Constructing a `.mapgeo` from scratch is out
-of scope: the format carries scene graphs, bucketed geometry, planar reflectors and per-version
-lighting that a DCC does not author, so only read and byte-exact re-emission are exposed.
+description and de-interleaves the referenced buffer.
+
+A file that was read can be edited: geometry replaced, models appended and removed, transforms and
+layers set. Constructing one from scratch stays out of scope, because the scene graphs, bucketed
+geometry, planar reflectors and per-version baked lighting a `.mapgeo` carries are not derivable
+from a mesh — an edit keeps them from the file it started with.
 */
 
 use std::sync::Arc;
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use ritoshark::mapgeo::{ElementFormat, ElementName, MapGeometry, Submesh as RsSubmesh};
+use ritoshark::mapgeo::{ElementName, Geometry, MapGeometry, Submesh as RsSubmesh, SubmeshRange};
+use ritoshark::math::Mat4;
 use ritoshark::prelude::{Parse, Serialize};
 
 use crate::error::{parse_err, write_err};
+
+/** Reinterprets a tightly packed little-endian `f32` buffer as floats. Geometry crosses the binding
+as `bytes` rather than a Python list because a map model runs to tens of thousands of vertices and
+`array.array('f').tobytes()` is what a DCC already has. */
+fn unpack_floats(data: &[u8], name: &str) -> PyResult<Vec<f32>> {
+    if data.len() % 4 != 0 {
+        return Err(write_err(format!(
+            "{name}: expected whole float32 values, got {} bytes",
+            data.len()
+        )));
+    }
+    Ok(data
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect())
+}
+
+fn unpack_indices(data: &[u8]) -> PyResult<Vec<u16>> {
+    if data.len() % 2 != 0 {
+        return Err(write_err(format!(
+            "indices: expected whole uint16 values, got {} bytes",
+            data.len()
+        )));
+    }
+    Ok(data
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect())
+}
+
+fn pack_floats(values: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(values.len() * 4);
+    for value in values {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    out
+}
+
+/** Builds the library's [`Geometry`] from the plain buffers a DCC supplies. `submeshes` is a list of
+`(name, index_start, index_count)`; an empty list means one submesh named `name` covering every
+index, which is what a single-material mesh wants. */
+fn build_geometry(
+    name: &str,
+    positions: &[u8],
+    normals: &[u8],
+    uvs: &[u8],
+    indices: &[u8],
+    submeshes: Vec<(String, u32, u32)>,
+) -> PyResult<Geometry> {
+    let indices = unpack_indices(indices)?;
+    let ranges = if submeshes.is_empty() {
+        vec![SubmeshRange {
+            name: name.to_string(),
+            index_start: 0,
+            index_count: indices.len() as u32,
+        }]
+    } else {
+        submeshes
+            .into_iter()
+            .map(|(name, index_start, index_count)| SubmeshRange {
+                name,
+                index_start,
+                index_count,
+            })
+            .collect()
+    };
+    Ok(Geometry {
+        positions: unpack_floats(positions, "positions")?,
+        normals: unpack_floats(normals, "normals")?,
+        uvs: unpack_floats(uvs, "uvs")?,
+        indices,
+        submeshes: ranges,
+    })
+}
 
 #[pyclass(name = "MapSubmesh")]
 #[derive(Clone)]
@@ -67,6 +145,38 @@ pub struct PyMapModel {
 impl PyMapModel {
     fn model(&self) -> &ritoshark::mapgeo::MapModel {
         &self.doc.models[self.index]
+    }
+
+    /** De-interleaves one attribute out of whichever of the model's vertex buffers carries it.
+
+    A model stores one `vertex_description_id` but may reference several buffers, and the
+    descriptions are consumed consecutively from that id rather than the stored one describing all
+    of them: Riot splits a vertex into streams, positions and normals in the first and texture
+    coordinates in the next. An attribute no stream declares comes back empty rather than as an
+    error, since that is a normal state for a `.mapgeo`. */
+    fn attribute<'py>(&self, py: Python<'py>, name: ElementName) -> PyResult<Bound<'py, PyBytes>> {
+        let model = self.model();
+        let vertex_count = model.vertex_count as usize;
+        let first = model.vertex_description_id as usize;
+
+        for (offset, &id) in model.vertex_buffer_ids.iter().enumerate() {
+            let Some(description) = self.doc.vertex_descriptions.get(first + offset) else {
+                continue;
+            };
+            let Some(buffer) = usize::try_from(id)
+                .ok()
+                .and_then(|id| self.doc.vertex_buffers.get(id))
+            else {
+                continue;
+            };
+            if let Some(values) = description
+                .read_attribute(&buffer.data, name, vertex_count)
+                .map_err(parse_err)?
+            {
+                return Ok(PyBytes::new(py, &pack_floats(&values)));
+            }
+        }
+        Ok(PyBytes::new(py, &[]))
     }
 }
 
@@ -121,77 +231,21 @@ impl PyMapModel {
             .collect()
     }
 
+    /** Per-vertex normals as 3 x float32, or empty when this model's layout carries none. Packed
+    normal formats are decoded to the normalised `0..=1` range they are stored in. */
+    fn normals<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        self.attribute(py, ElementName::Normal)
+    }
+
+    /** Per-vertex texture coordinates for channel 0 as 2 x float32, or empty when this model's
+    layout carries none. */
+    fn uvs<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        self.attribute(py, ElementName::Texcoord0)
+    }
+
+    /// Per-vertex positions as 3 x float32.
     fn positions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let model = self.model();
-        let description = self
-            .doc
-            .vertex_descriptions
-            .get(model.vertex_description_id as usize)
-            .ok_or_else(|| parse_err("vertex_description_id is out of range"))?;
-
-        let mut offset = 0usize;
-        let mut position_offset = None;
-        for element in &description.elements {
-            if element.name == ElementName::Position {
-                if element.format != ElementFormat::XyzFloat32 {
-                    return Err(parse_err(format!(
-                        "position element has format {:?}, expected XyzFloat32",
-                        element.format
-                    )));
-                }
-                position_offset = Some(offset);
-                break;
-            }
-            offset += element.format.byte_size();
-        }
-        let Some(position_offset) = position_offset else {
-            return Err(parse_err("vertex description has no Position element"));
-        };
-        let stride = description.vertex_size();
-
-        let Some(&buffer_id) = model.vertex_buffer_ids.first() else {
-            return Ok(PyBytes::new(py, &[]));
-        };
-        if buffer_id < 0 {
-            return Ok(PyBytes::new(py, &[]));
-        }
-        let Some(buffer) = self.doc.vertex_buffers.get(buffer_id as usize) else {
-            return Err(parse_err(
-                "vertex_buffer_ids references an out-of-range buffer",
-            ));
-        };
-        if stride == 0 {
-            return Ok(PyBytes::new(py, &[]));
-        }
-
-        let vertex_count = model.vertex_count as usize;
-        if vertex_count > 0 {
-            let last_vertex_end = vertex_count
-                .checked_sub(1)
-                .and_then(|last| last.checked_mul(stride))
-                .and_then(|span| span.checked_add(position_offset))
-                .and_then(|end| end.checked_add(12))
-                .ok_or_else(|| parse_err("vertex_count overflows while validating buffer size"))?;
-            if last_vertex_end > buffer.data.len() {
-                return Err(parse_err(format!(
-                    "vertex buffer is too short for its description: vertex_count={} needs at \
-                     least {} bytes, buffer has {}",
-                    vertex_count,
-                    last_vertex_end,
-                    buffer.data.len()
-                )));
-            }
-        }
-
-        let mut out = Vec::with_capacity(vertex_count * 12);
-        for i in 0..vertex_count {
-            let base = i * stride + position_offset;
-            let Some(slice) = buffer.data.get(base..base + 12) else {
-                return Err(parse_err("vertex buffer is too short for its description"));
-            };
-            out.extend_from_slice(slice);
-        }
-        Ok(PyBytes::new(py, &out))
+        self.attribute(py, ElementName::Position)
     }
 
     fn indices<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
@@ -258,6 +312,107 @@ impl MapGeo {
                 index,
             })
             .collect()
+    }
+
+    /** Replaces one model's geometry, keeping its transform, layer, lighting, texture overrides and
+    scene-graph association. `positions` and `normals` are 3 x float32 per vertex, `uvs` 2 x float32,
+    and `indices` 1 x uint16 per triangle corner, all tightly packed little-endian. `submeshes` is a
+    list of `(name, index_start, index_count)`; leaving it empty draws everything as one submesh
+    named `name`. Attributes the model's vertex layout does not carry are ignored. */
+    #[pyo3(signature = (index, name, positions, indices, normals=None, uvs=None, submeshes=Vec::new()))]
+    #[allow(clippy::too_many_arguments)]
+    fn replace_geometry(
+        &mut self,
+        index: usize,
+        name: &str,
+        positions: &[u8],
+        indices: &[u8],
+        normals: Option<&[u8]>,
+        uvs: Option<&[u8]>,
+        submeshes: Vec<(String, u32, u32)>,
+    ) -> PyResult<()> {
+        let geometry = build_geometry(
+            name,
+            positions,
+            normals.unwrap_or_default(),
+            uvs.unwrap_or_default(),
+            indices,
+            submeshes,
+        )?;
+        Arc::make_mut(&mut self.inner)
+            .replace_geometry(index, &geometry)
+            .map_err(write_err)
+    }
+
+    /** Appends a model and returns its index. `transform` is 16 floats, column-major, and `layer` is
+    the visibility bitmask (255 draws on every layer). The new model carries no baked lighting and no
+    scene-graph association, which is what a mesh authored outside Riot's tools can claim. */
+    #[pyo3(signature = (name, positions, indices, normals=None, uvs=None, transform=None, layer=255, submeshes=Vec::new()))]
+    #[allow(clippy::too_many_arguments)]
+    fn add_model(
+        &mut self,
+        name: &str,
+        positions: &[u8],
+        indices: &[u8],
+        normals: Option<&[u8]>,
+        uvs: Option<&[u8]>,
+        transform: Option<Vec<f32>>,
+        layer: u8,
+        submeshes: Vec<(String, u32, u32)>,
+    ) -> PyResult<usize> {
+        let geometry = build_geometry(
+            name,
+            positions,
+            normals.unwrap_or_default(),
+            uvs.unwrap_or_default(),
+            indices,
+            submeshes,
+        )?;
+        let matrix = match transform {
+            None => Mat4::IDENTITY,
+            Some(values) => {
+                let values: [f32; 16] = values.try_into().map_err(|v: Vec<f32>| {
+                    write_err(format!("transform: expected 16 floats, got {}", v.len()))
+                })?;
+                Mat4::from_cols_array(&values)
+            }
+        };
+        Arc::make_mut(&mut self.inner)
+            .add_model(name, &geometry, matrix, layer)
+            .map_err(write_err)
+    }
+
+    /// Removes the model at `index`; the ones after it shift down.
+    fn remove_model(&mut self, index: usize) -> PyResult<()> {
+        Arc::make_mut(&mut self.inner)
+            .remove_model(index)
+            .map(|_| ())
+            .map_err(write_err)
+    }
+
+    /// Sets a model's placement matrix from 16 floats, column-major.
+    fn set_transform(&mut self, index: usize, transform: Vec<f32>) -> PyResult<()> {
+        let values: [f32; 16] = transform.try_into().map_err(|v: Vec<f32>| {
+            write_err(format!("transform: expected 16 floats, got {}", v.len()))
+        })?;
+        let doc = Arc::make_mut(&mut self.inner);
+        let model = doc
+            .models
+            .get_mut(index)
+            .ok_or_else(|| write_err(format!("no model at index {index}")))?;
+        model.transform = Mat4::from_cols_array(&values);
+        Ok(())
+    }
+
+    /// Sets a model's visibility layer bitmask.
+    fn set_layer(&mut self, index: usize, layer: u8) -> PyResult<()> {
+        let doc = Arc::make_mut(&mut self.inner);
+        let model = doc
+            .models
+            .get_mut(index)
+            .ok_or_else(|| write_err(format!("no model at index {index}")))?;
+        model.layer = layer;
+        Ok(())
     }
 
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {

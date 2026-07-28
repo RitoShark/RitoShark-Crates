@@ -4,7 +4,7 @@ the suite still passes on a clean checkout, since game assets are never committe
 */
 
 use rs_io::{Parse, Serialize};
-use rs_mapgeo::{Geometry, MapGeometry, SubmeshRange};
+use rs_mapgeo::{ElementName, Geometry, MapGeometry, SubmeshRange};
 use rs_math::Mat4;
 
 fn sample(name: &str) -> Option<MapGeometry> {
@@ -206,6 +206,57 @@ fn every_model_reads_back_the_positions_the_raw_buffer_holds() {
             checked += 1;
         }
         assert!(checked > 0, "{name} decoded no model geometry at all");
+    }
+}
+
+/** A model stores one vertex_description_id but may reference several buffers, and the descriptions
+are consumed consecutively from it rather than the stored one describing them all. Reading every
+buffer through the first description silently drops whichever attributes live in a later stream, and
+nothing else in this suite notices because positions are always in the first one. */
+#[test]
+fn multi_buffer_models_decode_the_attributes_in_their_later_streams() {
+    for name in SAMPLES {
+        let Some(map) = sample(name) else { continue };
+
+        let mut multi = 0;
+        let mut complete = 0;
+        for (i, model) in map.models.iter().enumerate() {
+            if model.vertex_buffer_ids.len() < 2 || model.vertex_count == 0 {
+                continue;
+            }
+            multi += 1;
+
+            let declared: Vec<_> = (0..model.vertex_buffer_ids.len())
+                .filter_map(|offset| {
+                    map.vertex_descriptions
+                        .get(model.vertex_description_id as usize + offset)
+                })
+                .flat_map(|description| description.elements.iter().map(|e| e.name))
+                .collect();
+            let geometry = map.geometry(i).unwrap();
+            let vertex_count = model.vertex_count as usize;
+
+            for (name_of, values, per_vertex) in [
+                (ElementName::Position, &geometry.positions, 3),
+                (ElementName::Normal, &geometry.normals, 3),
+                (ElementName::Texcoord0, &geometry.uvs, 2),
+            ] {
+                if declared.contains(&name_of) {
+                    assert_eq!(
+                        values.len(),
+                        vertex_count * per_vertex,
+                        "{name} model {i} declares {name_of:?} across its streams but decoded {} \
+                         floats for {vertex_count} vertices",
+                        values.len()
+                    );
+                }
+            }
+            complete += 1;
+        }
+        assert!(
+            multi == 0 || complete == multi,
+            "{name}: {complete} of {multi} multi-buffer models decoded completely"
+        );
     }
 }
 
