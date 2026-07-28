@@ -6,15 +6,24 @@ references, submeshes, transform, bounding box, visibility layer, render flags a
 lighting), and the trailing bucketed scene graphs and planar reflectors. The writer is the
 byte-exact inverse for every version it reads. Versions 8, 10 and 16 are not defined by the
 reference oracle and are reported as `Error::UnsupportedVersion`.
+
+On top of that it supports editing a parsed file: replacing a model's geometry, appending a model
+and removing one, with the vertex codec needed to write attributes into whichever interleaved layout
+the target description declares. Editing is expressed against a file that was read rather than as
+construction from nothing, because the scene graphs, baked lighting and shader tables a `.mapgeo`
+carries are not derivable from geometry.
 */
 
 #![forbid(unsafe_code)]
 
+mod edit;
 mod error;
 mod mapgeo;
 mod read;
+mod vertex;
 mod write;
 
+pub use edit::{Geometry, SubmeshRange};
 pub use error::{Error, Result};
 pub use mapgeo::{
     AssetChannel, ElementFormat, ElementName, GeometryBucket, IndexBuffer, MapGeometry, MapModel,

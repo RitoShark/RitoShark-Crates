@@ -1196,6 +1196,7 @@ dependencies = [
 name = "rs_mapgeo"
 version = "0.1.0"
 dependencies = [
+ "rs_hash",
  "rs_io",
  "rs_math",
  "thiserror",
