@@ -126,9 +126,14 @@ impl Skn {
                 "indices: {bad} is out of range for {n} vertices"
             )));
         }
+        /* A blend index is a u8 slot in the skeleton's influence table, not a joint id. The
+        table itself holds u16 joint ids, so a skeleton may carry far more than 256 joints as
+        long as no single mesh is weighted to more than 256 of them. */
         if let Some(bad) = blend_indices.iter().find(|&&i| i > u8::MAX as u32) {
             return Err(write_err(format!(
-                "blend_indices: {bad} exceeds the .skn joint limit of 255"
+                "blend_indices: {bad} exceeds 255. A blend index selects a slot in the \
+                 skeleton's influence table, so a mesh can use at most 256 influences, though \
+                 the skeleton itself may have more joints than that."
             )));
         }
 
