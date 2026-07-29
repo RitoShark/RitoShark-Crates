@@ -57,8 +57,16 @@ pub trait ReaderExt: Read {
     }
 
     fn read_bytes(&mut self, n: usize) -> Result<Vec<u8>> {
-        let mut buf = vec![0u8; n];
-        self.read_exact(&mut buf)?;
+        const CHUNK: usize = 64 * 1024;
+        let mut buf = Vec::new();
+        let mut remaining = n;
+        while remaining > 0 {
+            let want = remaining.min(CHUNK);
+            let start = buf.len();
+            buf.resize(start + want, 0u8);
+            self.read_exact(&mut buf[start..])?;
+            remaining -= want;
+        }
         Ok(buf)
     }
 
@@ -290,5 +298,76 @@ mod tests {
         c.write_vec3(v).unwrap();
         c.set_position(0);
         assert_eq!(c.read_vec3().unwrap(), v);
+    }
+
+    #[test]
+    fn read_bytes_hostile_size_errors_without_aborting() {
+        let mut c = Cursor::new(vec![0u8; 10]);
+        let err = c.read_bytes(0xFFFF_FF00).unwrap_err();
+        let crate::Error::Io(io_err) = err else {
+            panic!("expected Error::Io, got {err:?}");
+        };
+        assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn read_bytes_hostile_size_never_allocates_past_stream_end() {
+        struct CountingReader<'a> {
+            data: &'a [u8],
+            pos: usize,
+            max_buf_seen: usize,
+        }
+
+        impl Read for CountingReader<'_> {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                self.max_buf_seen = self.max_buf_seen.max(out.len());
+                let remaining = &self.data[self.pos..];
+                let n = remaining.len().min(out.len());
+                out[..n].copy_from_slice(&remaining[..n]);
+                self.pos += n;
+                Ok(n)
+            }
+        }
+
+        let mut r = CountingReader {
+            data: &[0u8; 10],
+            pos: 0,
+            max_buf_seen: 0,
+        };
+        let result = r.read_bytes(usize::MAX - 1);
+        assert!(result.is_err());
+        assert!(
+            r.max_buf_seen <= 64 * 1024,
+            "single read request exceeded the chunk cap: {}",
+            r.max_buf_seen
+        );
+    }
+
+    #[test]
+    fn read_bytes_exact_available_length() {
+        let data = vec![1u8, 2, 3, 4, 5];
+        let mut c = Cursor::new(data.clone());
+        assert_eq!(c.read_bytes(5).unwrap(), data);
+    }
+
+    #[test]
+    fn read_bytes_zero() {
+        let mut c = Cursor::new(vec![1u8, 2, 3]);
+        assert_eq!(c.read_bytes(0).unwrap(), Vec::<u8>::new());
+        assert_eq!(c.read_bytes(3).unwrap(), vec![1u8, 2, 3]);
+    }
+
+    #[test]
+    fn read_bytes_partial_available_errors() {
+        let mut c = Cursor::new(vec![1u8, 2, 3]);
+        assert!(c.read_bytes(10).is_err());
+    }
+
+    #[test]
+    fn read_string_u16_hostile_length_errors() {
+        let mut data = Vec::new();
+        data.write_u16(0xFFFF).unwrap();
+        let mut c = Cursor::new(data);
+        assert!(c.read_string_u16().is_err());
     }
 }

@@ -1,0 +1,16 @@
+[package]
+name = "rs_python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lib]
+name = "ritoshark"
+crate-type = ["cdylib"]
+
+[dependencies]
+ritoshark = { workspace = true }
+pyo3 = { workspace = true }
+indexmap = { workspace = true }

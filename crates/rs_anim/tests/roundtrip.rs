@@ -37,6 +37,82 @@ fn skeleton_round_trip() {
     assert_eq!(bytes, bytes2, "skl write is deterministic / byte-exact");
 }
 
+/* Real skeletons always reserve a 4-byte slot for the skeleton name and one for the asset
+name after the influence table, keep every joint name padded to a 4-byte boundary, and pad the
+file to a multiple of 4. A writer that zeroed the name offsets or skipped the padding still
+round-tripped through its own reader while producing files several bytes shorter than the game's,
+so these offsets are asserted against the header directly. */
+#[test]
+fn skeleton_layout_matches_on_disk_contract() {
+    let mut skl = Skeleton::new();
+    skl.joints = vec![
+        sample_joint("Root", 0, -1, 0x1111_2222),
+        sample_joint("Spine1", 1, 0, 0x3333_4444),
+    ];
+    skl.influences = vec![0, 1];
+
+    let bytes = skl.to_bytes().expect("write skl");
+    let u32_at = |off: usize| u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+    let i32_at = |off: usize| i32::from_le_bytes(bytes[off..off + 4].try_into().unwrap()) as usize;
+
+    let influences_offset = i32_at(28);
+    let name_offset = i32_at(32);
+    let asset_offset = i32_at(36);
+    let joint_names_offset = i32_at(40);
+
+    assert_eq!(
+        name_offset,
+        (influences_offset + skl.influences.len() * 2).next_multiple_of(4),
+        "name slot follows the influence table, aligned to 4"
+    );
+    assert_eq!(asset_offset, name_offset + 4, "asset slot follows the name");
+    assert_eq!(
+        joint_names_offset,
+        asset_offset + 4,
+        "joint name pool follows both slots"
+    );
+
+    assert_eq!(
+        &bytes[joint_names_offset..joint_names_offset + 16],
+        b"Root\0\0\0\0Spine1\0\0",
+        "each joint name is NUL-terminated and padded to 4 bytes"
+    );
+
+    assert_eq!(
+        u32_at(0) as usize,
+        bytes.len(),
+        "the size field matches the emitted length"
+    );
+    assert_eq!(bytes.len() % 4, 0, "the file is padded to a multiple of 4");
+}
+
+/* Every shipped skeleton is unnamed, so its name and asset slots are the 4 bytes a lone
+terminator rounds up to. A named skeleton has to grow those slots rather than overrun the joint
+name pool that follows them. */
+#[test]
+fn skeleton_name_longer_than_four_bytes_grows_its_slot() {
+    let mut skl = Skeleton::new();
+    skl.joints = vec![sample_joint("Root", 0, -1, 0x1111_2222)];
+    skl.influences = vec![0];
+    skl.name = "a_long_skeleton_name".to_string();
+    skl.asset = "a_long_asset_name.skl".to_string();
+
+    let bytes = skl.to_bytes().expect("write named skl");
+    let parsed = Skeleton::from_bytes(&bytes).expect("read named skl");
+    assert_eq!(parsed.name, skl.name);
+    assert_eq!(parsed.asset, skl.asset);
+    assert_eq!(
+        parsed.joints[0].name, "Root",
+        "the joint name pool is intact"
+    );
+
+    assert_eq!(
+        bytes,
+        parsed.to_bytes().expect("rewrite named skl"),
+        "a named skeleton still round-trips byte-exactly"
+    );
+}
+
 #[test]
 fn skeleton_joint_index_section_sorted_by_hash_ascending() {
     // Joints whose hashes are deliberately out of id order. The joint-id-hash section must be

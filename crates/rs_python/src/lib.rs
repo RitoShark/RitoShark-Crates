@@ -1,0 +1,33 @@
+#![forbid(unsafe_code)]
+/*!
+Python bindings for the RitoShark format crates. Each format module wraps its `rs_*` type in a
+`#[pyclass]` and converts bulk geometry to tightly packed little-endian buffers, so callers move
+vertex data into Blender or Maya with a single memcpy instead of a per-element Python loop.
+*/
+
+mod anim;
+mod bin;
+mod bintext;
+mod convert;
+mod error;
+mod mapgeo;
+mod mesh;
+mod tex;
+mod wad;
+
+use pyo3::prelude::*;
+
+#[pymodule]
+fn ritoshark(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    error::register(py, m)?;
+    convert::register(m)?;
+    mesh::register(m)?;
+    anim::register(m)?;
+    tex::register(m)?;
+    wad::register(m)?;
+    bin::register(m)?;
+    bintext::register(m)?;
+    mapgeo::register(m)?;
+    Ok(())
+}

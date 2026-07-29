@@ -1,0 +1,219 @@
+# rs_python
+
+Python bindings for RitoShark, published as the `ritoshark` module (pyo3 + maturin). Each
+format wraps its `rs_*` type in a `#[pyclass]` and exposes bulk geometry as tightly packed
+little-endian buffers, so a Blender or Maya plugin moves vertex data with one memcpy instead of
+a per-vertex Python loop.
+
+## Public surface
+
+```
+AnimFrame, AnimTrack, Anm, FormatError, Joint, MapGeo, MapModel, MapSubmesh, ParseError,
+Scb, ScbFace, Sco, Skl, Skn, Submesh, Tex, UnsupportedVersion, Wad, WadChunk, WriteError,
+bin_to_text, bin_to_text_bytes, build_wad, build_wad_to_path, read_bin, read_bin_bytes,
+read_bin_editable, read_bin_editable_bytes, write_bin, write_bin_bytes, text_to_bin_bytes,
+text_to_bin_path, wad_hash
+```
+
+plus `__version__`. `ParseError`, `UnsupportedVersion`, and `WriteError` all derive from
+`FormatError`, so callers can catch either the specific exception or the base class.
+
+## Installation
+
+Two channels, because a plugin's host interpreter is not always the system one:
+
+1. **`pip install ritoshark`** — for standalone scripting against a normal Python install.
+2. **Vendoring** — Blender and Maya both bundle their own interpreter, and telling an end user
+   to `pip install` into a DCC's private Python is a support burden. Instead, drop the built
+   `.pyd` (renamed `ritoshark.pyd` / `ritoshark.so`) straight into the plugin's own folder and
+   `import ritoshark` from there — no interpreter-wide install needed.
+
+The wheel is built `cp39-abi3`: one wheel covers CPython 3.9 through 3.14+, which is what makes
+vendoring practical across hosts that each embed a different minor version — Maya 2023 ships
+Python 3.9, Maya 2024/2025 ship 3.10/3.11, and Blender 4.x ships 3.11. The same `.pyd` loads in
+all of them.
+
+## Support matrix
+
+| Format | Read | Write |
+|---|---|---|
+| `.skn` skinned mesh | yes | yes |
+| `.skl` skeleton | yes | yes |
+| `.anm` animation | yes | yes |
+| `.scb` static mesh | yes | yes |
+| `.mapgeo` map geometry | yes | yes (re-emit only, no construction) |
+| `.sco` static mesh | yes | **no** — Riot removed the format; `rs_mesh` writes no `.sco` |
+| `.tex` texture | yes | no |
+| `.wad` archive | yes | yes |
+| `.bin` property bin | yes (plain Python values, or the editable tree) | yes, via the editable tree or text round-trip (see below) |
+
+## Buffer layouts
+
+This is the contract callers write DCC code against. Every geometry buffer is tightly packed
+little-endian bytes; unpack with `struct`, `array`, or `memoryview(...).cast(...)`.
+
+| Buffer | Layout |
+|---|---|
+| `Skn.positions` / `Skn.normals` | 3 x float32 per vertex |
+| `Skn.uvs` | 2 x float32 per vertex |
+| `Skn.blend_indices` | 4 x uint32 per vertex |
+| `Skn.blend_weights` | 4 x float32 per vertex |
+| `Skn.indices` | 1 x uint32 per corner (narrowed to uint16 on write; values above 65535 raise `WriteError`) |
+| `Scb.positions` | 3 x float32 per vertex |
+| `Tex.rgba` | 4 x uint8 per pixel, row-major, top-down |
+| `Tex.rgba_f32` | 4 x float32 per pixel in 0..1, row-flipped bottom-up to match Blender's `image.pixels` |
+| `MapModel.positions()` | 3 x float32 per vertex |
+| `MapModel.indices()` | 1 x uint32 per corner |
+
+`MapModel.positions()` and `MapModel.indices()` are **methods**, not properties — `MapModel`
+doesn't own its vertex data, it references a shared interleaved buffer on the parent `MapGeo`
+and de-interleaves it on every call. Everything else in the table is a property.
+
+## Building a `.wad`
+
+```python
+import ritoshark
+
+data = ritoshark.build_wad({
+    "assets/characters/aatrox/aatrox.skn": skn_bytes,
+    "assets/characters/aatrox/aatrox.dds": dds_bytes,
+})
+ritoshark.build_wad_to_path("aatrox.wad.client", {...})
+```
+
+Chunk keys are either the in-WAD path (hashed with `wad_hash` internally) or an
+already-computed path hash — mix both in the same dict if convenient. There is no
+callback form: the builder pulls each chunk's bytes twice internally (once to size it,
+once to write it), so the whole mapping is taken eagerly rather than as a generator or
+file-like callback that could return different bytes on the second pass.
+
+## Blender example
+
+```python
+import ritoshark
+
+skn = ritoshark.Skn.from_path("aatrox.skn")
+mesh = bpy.data.meshes.new("aatrox")
+mesh.vertices.add(skn.vertex_count)
+mesh.vertices.foreach_set("co", memoryview(skn.positions).cast("f"))
+```
+
+`foreach_set` reads directly from the packed buffer, so there's no per-vertex Python loop
+between the parsed file and the mesh data.
+
+## Maya example
+
+```python
+import struct
+import ritoshark
+from maya.api.OpenMaya import MFloatPointArray
+
+skn = ritoshark.Skn.from_path("aatrox.skn")
+floats = struct.unpack(f"<{skn.vertex_count * 3}f", skn.positions)
+points = MFloatPointArray()
+for i in range(skn.vertex_count):
+    points.append((floats[i * 3], floats[i * 3 + 1], floats[i * 3 + 2], 1.0))
+```
+
+Maya's API takes Python sequences rather than a flat buffer, so `struct.unpack` is the
+practical middle step there instead of a zero-copy `memoryview` cast.
+
+## `.bin` reading is lossy — `read_bin_editable` is not
+
+`read_bin` / `read_bin_bytes` return a plain Python `dict`. This is a deliberate, lossy view,
+not a bug:
+
+- Field, class, and entry names come back as raw FNV1a-32 integers. `rs_bin` stores no names on
+  disk — resolving a hash to a name is a hash-dictionary concern that lives outside this crate.
+- The `LIST` vs `LIST2` tag distinction is dropped.
+- The pointer-vs-embed struct distinction is dropped.
+- Duplicate map keys are dropped (Python dicts can't represent them).
+
+There is no `write_bin` for that view — writing from it would silently corrupt files.
+
+`read_bin_editable` / `read_bin_editable_bytes` return a faithful document instead: `entries` is
+a list of `{"hash", "class", "fields"}` (a list, not a dict, since duplicate entry hashes are
+legal), `fields` is a dict keyed by raw field hash, and containers round-trip as tagged dicts —
+`{"__type__": "list2", "item": "string", "items": [...]}`,
+`{"__type__": "pointer", "class": ..., "fields": {...}}`, and so on. `write_bin` / `write_bin_bytes`
+take that same shape back. `write_bin_bytes(read_bin_editable(f))` is byte-identical to `f` for
+every `.bin` file:
+
+```python
+import ritoshark
+
+doc = ritoshark.read_bin_editable("aatrox_skin01.bin")
+entry = doc["entries"][0]
+entry["fields"][0xe095d841] = "characters/aatrox/skins/skin01/new_texture.dds"
+ritoshark.write_bin("aatrox_skin01.bin", doc)
+```
+
+A struct field with no declaring container infers `int -> I32`, `float -> F32`, `str -> String`,
+`bool -> Bool`, `None -> None`; anything else (`U32`, `Hash`, `Vec3`, ...) must use the explicit
+`{"__type__": "u32", "value": ...}` form, which is exactly what `read_bin_editable` already emits
+wherever bare inference would not reproduce the original type — so an unmodified round-trip needs
+no type reasoning at all, and edits only need it where the new value's type actually differs.
+Malformed documents raise `WriteError` with a path to the offending value, e.g.
+`entries[3].fields[0xe095d841].items[2]: expected str for item type 'string', got int`.
+
+## Text round-trip
+
+`bin_to_text` / `text_to_bin_bytes` (and their path/bytes variants) convert a `.bin` to and
+from `#PROP_text`, the ritobin text form. Unlike `read_bin`, this path is faithful — `LIST2`,
+pointer-vs-embed, duplicate map keys, and the `PTCH` patches section all survive, because the
+text is the same document, just rendered as text. `text_to_bin_bytes(bin_to_text(f))` is
+byte-identical to the source file.
+
+This is the practical way to bulk find-and-replace across many `.bin` files without building
+an editable tree:
+
+```python
+import ritoshark
+
+text = ritoshark.bin_to_text("aatrox_skin01.bin", hashes="hashes.txt")
+text = text.replace('"old/texture/path.dds"', '"new/texture/path.dds"')
+ritoshark.text_to_bin_path("aatrox_skin01.bin", text)
+```
+
+`hashes` is an optional path to a hash-dictionary file; with one, field and class names in the
+emitted text are resolved (`mFieldName:`) instead of raw hashes (`0xe095d841:`), which is the
+difference between an editable document and one nobody can read. Without it, raw hashes are
+emitted and the round-trip is still exact.
+
+Every name from the dictionary is re-hashed with FNV1a and checked against the key it was
+loaded under before it is trusted; a stale, wrong, or colliding entry fails that check and
+falls back to the raw hash instead of being printed, so `text_to_bin_*` always reproduces the
+source `.bin` byte-for-byte regardless of dictionary quality — a bad dictionary only costs you
+readability, never correctness. XXH64-keyed file-path entries fall outside FNV1a and cannot be
+verified this way, so they are resolved as given. `text_to_bin_*` takes no `hashes` parameter —
+the parser only ever reads hashes back out of the text, it never resolves names while parsing,
+so there is nothing for it to do.
+
+## `Anm` byte-exactness
+
+An unedited `Anm.from_path(...).to_bytes()` round-trip is byte-exact — the original source
+bytes are reproduced verbatim. Calling `make_editable()` switches the instance to an editable
+track representation and drops that byte-exact passthrough permanently: subsequent writes
+re-emit as uncompressed `r3d2anmd` (v4), not the original encoding.
+
+`make_editable()` is of limited use today: tracks are exposed as read-only clones via the
+`tracks` property, so there is no way to mutate a track in place after calling it. The only way
+to build a new animation is `Anm.new(fps, tracks)` from scratch — `make_editable()` does not
+currently unlock in-place editing of an existing one.
+
+## Tests
+
+```bash
+cd crates/rs_python
+python -m pytest tests/ -v
+```
+
+Fixtures come from the repo-root `Sample-Files/` directory, gitignored per CLAUDE.md §11 since
+real game assets are never committed. No `.skl` or `.sco` fixture exists there, so those tests
+skip by design rather than fail.
+
+`tests/dcc/` holds smoke scripts that load the built wheel inside an actual Blender or Maya
+interpreter. They are not collected by pytest — see `tests/dcc/README.md` for how to run them.
+The abi3 wheel has been verified to load under Maya 2023's `mayapy` (Python 3.9.7, the abi3
+floor) and build a mesh from a real `.skn`; the Blender script is written and reviewed but has
+not been executed on this machine, since Blender isn't installed here.

@@ -11,6 +11,9 @@ pub enum Error {
 
     #[error("unsupported: {0}")]
     Unsupported(&'static str),
+
+    #[error("invalid data: {0}")]
+    InvalidData(String),
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

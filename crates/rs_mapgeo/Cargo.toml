@@ -7,6 +7,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+rs_hash = { workspace = true }
 rs_io = { workspace = true }
 rs_math = { workspace = true }
 thiserror = { workspace = true }
