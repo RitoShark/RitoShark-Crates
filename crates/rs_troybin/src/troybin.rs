@@ -162,7 +162,7 @@ impl Bucket {
     /// Rebuilds a bucket for `flag_bit` from `(hash, value)` pairs, re-packing booleans and rebuilding
     /// the strings blob/offsets. Every value must match the bit's layout, else
     /// [`Error::ValueTypeMismatch`](crate::Error::ValueTypeMismatch).
-    fn rebuilt(flag_bit: u8, entries: Vec<(u32, ScalarValue)>) -> Result<Bucket> {
+    pub(crate) fn rebuilt(flag_bit: u8, entries: Vec<(u32, ScalarValue)>) -> Result<Bucket> {
         let (hashes, values): (Vec<u32>, Vec<ScalarValue>) = entries.into_iter().unzip();
         let values = encode_bucket(flag_bit, &values)?;
         Ok(Bucket {

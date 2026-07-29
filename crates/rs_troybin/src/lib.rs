@@ -15,16 +15,26 @@ property without tracking bucket bits, packed booleans, or the strings blob — 
 its offsets are recomputed automatically on edit, and `strings_length` is derived on write.
 [`TroybinResolver`] turns raw hashes back into `section/name` for display. Editing targets v2; the
 v1 body carries no value typing and is treated as read-only (`get` yields `None`, `set` errors).
+
+`.inibin` and `.cfgbin` are the same format under different extensions, so the crate also exposes it
+under that name: [`Inibin`] is [`Troybin`], [`Inibin::from_slice`] reads one, and [`InibinFlags`]
+names the fourteen bucket bits plus the version-1 body so buckets can be enumerated by value type
+rather than raw bit. The fixed-point bits stay raw `u8` on the model — [`fixed_point_to_f64`] and
+[`fixed_point_from_f64`] are a derived display view, never the stored form.
 */
 
 mod dict;
 mod error;
+mod inibin;
 mod read;
 mod resolve;
 mod troybin;
 mod write;
 
 pub use error::{Error, Result};
+pub use inibin::{
+    FIXED_POINT_SCALE, Inibin, InibinFlags, fixed_point_from_f64, fixed_point_to_f64,
+};
 pub use resolve::{ResolvedName, TroybinResolver};
 pub use troybin::{
     Bucket, BucketValues, ScalarValue, Troybin, TroybinBody, TroybinV1, TroybinV2, V1Entry,
