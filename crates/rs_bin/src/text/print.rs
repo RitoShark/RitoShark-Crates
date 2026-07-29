@@ -15,6 +15,15 @@ pub fn to_text(bin: &Bin, mapper: Option<&HashMapper>) -> String {
         "#PROP_text"
     };
     let _ = writeln!(out, "{header}");
+    // Emit the redundant `type` section that classic ritobin writes. The header
+    // line already encodes PROP vs PTCH and the parser accepts text without it,
+    // but downstream tools (Jade among them) require the explicit section and
+    // fail to load a bin that omits it.
+    let _ = writeln!(
+        out,
+        "type: string = \"{}\"",
+        if bin.is_patch { "PTCH" } else { "PROP" }
+    );
     let _ = writeln!(out, "version: u32 = {}", bin.version);
 
     if !bin.linked.is_empty() {
