@@ -6,7 +6,9 @@ writer reproduces bytes exactly by backfilling the on-disk size fields, preservi
 version, linked-file order, entry and field order, the `LIST`/`LIST2` distinction, pointer versus
 embed, option presence, the trailing `PTCH` patches section, and every raw hash, so binary
 round-trips are lossless. The `text` module both prints and parses the editable ritobin text form,
-so `bin → text → bin` reconstructs the original document exactly.
+so `bin -> text -> bin` reconstructs the original document exactly, and `value_to_text` /
+`value_from_text` do the same for a SINGLE `BinValue` so an editor can show one node (one VFX
+emitter, say) as editable text.
 */
 
 mod bin;
@@ -18,4 +20,5 @@ pub mod text;
 
 pub use bin::{Bin, BinEntry, BinPatch, BinType, BinValue};
 pub use error::{Error, Result};
-pub use text::{from_text, to_text};
+pub use text::{from_text, to_text, value_from_text, value_from_text_as};
+pub use text::value_to_text;

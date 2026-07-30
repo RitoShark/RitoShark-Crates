@@ -467,3 +467,196 @@ fn text_parser_handles_many_and_long_strings() {
     let reparsed = rs_bin::from_text(&text, None).expect("parse string-heavy text");
     assert_eq!(reparsed, bin, "string-heavy text round-trip must be exact");
 }
+
+/// A representative nested emitter value: an embed holding a pointer holding a `list[pointer]` of
+/// structs that each hold a `list[f32]`, plus flag/string/u8/vec3 leaves. This is the shape the
+/// per-node text view is built for (see the `value_to_text` docs), so it is the shape the
+/// value-level round-trip has to survive.
+fn sample_emitter() -> BinValue {
+    use rs_hash::fnv1a;
+
+    let probability_table = BinValue::Pointer {
+        class: fnv1a("VfxProbabilityTableData"),
+        fields: IndexMap::from([(
+            fnv1a("keyTimes"),
+            BinValue::List {
+                is_list2: false,
+                item: BinType::F32,
+                items: vec![BinValue::F32(0.0), BinValue::F32(1.0)],
+            },
+        )]),
+    };
+    let dynamics = BinValue::Pointer {
+        class: fnv1a("VfxAnimatedVector3fVariableData"),
+        fields: IndexMap::from([(
+            fnv1a("probabilityTables"),
+            BinValue::List {
+                is_list2: false,
+                item: BinType::Pointer,
+                items: vec![probability_table],
+            },
+        )]),
+    };
+    let birth_velocity = BinValue::Embed {
+        class: fnv1a("ValueVector3"),
+        fields: IndexMap::from([
+            (fnv1a("constantValue"), BinValue::Vec3([10.0, 0.0, 10.0])),
+            (fnv1a("dynamics"), dynamics),
+        ]),
+    };
+    let rate = BinValue::Embed {
+        class: fnv1a("ValueFloat"),
+        fields: IndexMap::from([(fnv1a("constantValue"), BinValue::F32(1.0))]),
+    };
+
+    BinValue::Pointer {
+        class: fnv1a("VfxEmitterDefinitionData"),
+        fields: IndexMap::from([
+            (fnv1a("rate"), rate),
+            (fnv1a("isSingleParticle"), BinValue::Flag(true)),
+            (
+                fnv1a("emitterName"),
+                BinValue::String("Fresnel".to_string()),
+            ),
+            (fnv1a("importance"), BinValue::U8(3)),
+            (fnv1a("birthVelocity"), birth_velocity),
+        ]),
+    }
+}
+
+/// A mapper resolving every name `sample_emitter` uses, so the printed text is the readable form the
+/// editor actually shows rather than a wall of hex.
+fn emitter_mapper() -> rs_hash::HashMapper {
+    use rs_hash::fnv1a;
+    let mut mapper = rs_hash::HashMapper::new();
+    for name in [
+        "VfxEmitterDefinitionData",
+        "VfxAnimatedVector3fVariableData",
+        "VfxProbabilityTableData",
+        "ValueFloat",
+        "ValueVector3",
+        "rate",
+        "constantValue",
+        "isSingleParticle",
+        "emitterName",
+        "importance",
+        "birthVelocity",
+        "dynamics",
+        "probabilityTables",
+        "keyTimes",
+    ] {
+        mapper.insert(fnv1a(name) as u64, name);
+    }
+    mapper
+}
+
+#[test]
+fn value_text_round_trips_a_nested_emitter() {
+    let value = sample_emitter();
+    let mapper = emitter_mapper();
+    let text = rs_bin::value_to_text(&value, Some(&mapper));
+
+    // The root prints its class header with no type tag and no leading indent, exactly as the
+    // per-node view's mockup shows.
+    assert!(
+        text.starts_with("VfxEmitterDefinitionData {\n"),
+        "root must print its class name header:\n{text}"
+    );
+    // Nested fields keep the whole-file formatting: `name: type = value`, four-space indents.
+    assert!(
+        text.contains("    rate: embed = ValueFloat {\n        constantValue: f32 = 1\n    }"),
+        "nested embed must match the whole-file formatting:\n{text}"
+    );
+    assert!(
+        text.contains("        dynamics: pointer = VfxAnimatedVector3fVariableData {"),
+        "nested pointer must match the whole-file formatting:\n{text}"
+    );
+    assert!(
+        text.contains("keyTimes: list[f32] = {"),
+        "nested f32 list must carry its element tag:\n{text}"
+    );
+
+    // The actual round-trip. Untagged, so inference must land on pointer.
+    let back = rs_bin::value_from_text(&text, Some(&mapper)).expect("value text must re-parse");
+    assert_eq!(back, value, "value -> text -> value must reconstruct exactly");
+
+    // And with the root type stated explicitly, which is the path the editor takes.
+    let back_as = rs_bin::value_from_text_as(&text, BinType::Pointer, Some(&mapper))
+        .expect("value text must re-parse with an expected type");
+    assert_eq!(back_as, value);
+
+    // Printing is stable: text -> value -> text is a fixed point.
+    assert_eq!(
+        rs_bin::value_to_text(&back, Some(&mapper)),
+        text,
+        "value text printing must be idempotent"
+    );
+
+    // Unresolved hashes fall back to `0x%08x` and still round-trip, since the parser hashes
+    // barewords and reads hex directly.
+    let hex_text = rs_bin::value_to_text(&value, None);
+    assert!(hex_text.starts_with("0x"), "unmapped class must print as hex:\n{hex_text}");
+    assert_eq!(
+        rs_bin::value_from_text(&hex_text, None).expect("hex value text must re-parse"),
+        value
+    );
+}
+
+#[test]
+fn value_from_text_reads_scalars_and_explicit_annotations() {
+    // Scalar roots infer from the first token.
+    assert_eq!(
+        rs_bin::value_from_text("\"Fresnel\"", None).unwrap(),
+        BinValue::String("Fresnel".to_string())
+    );
+    assert_eq!(
+        rs_bin::value_from_text("true", None).unwrap(),
+        BinValue::Bool(true)
+    );
+    assert_eq!(
+        rs_bin::value_from_text("1.5", None).unwrap(),
+        BinValue::F32(1.5)
+    );
+    assert_eq!(
+        rs_bin::value_from_text("7", None).unwrap(),
+        BinValue::I32(7)
+    );
+    assert_eq!(
+        rs_bin::value_from_text("null", None).unwrap(),
+        BinValue::Pointer { class: 0, fields: IndexMap::new() }
+    );
+
+    // The expected type wins over inference for a narrow scalar a bare literal cannot signal.
+    assert_eq!(
+        rs_bin::value_from_text_as("3", BinType::U8, None).unwrap(),
+        BinValue::U8(3)
+    );
+    // An embed node stays an embed instead of being inferred as a pointer.
+    let embed = rs_bin::value_from_text_as("ValueFloat { constantValue: f32 = 1 }", BinType::Embed, None).unwrap();
+    assert!(matches!(embed, BinValue::Embed { .. }), "expected type must pick embed over pointer");
+
+    // A leading annotation supplies the container element tags inference cannot recover.
+    assert_eq!(
+        rs_bin::value_from_text("list[f32] = { 0\n1 }", None).unwrap(),
+        BinValue::List { is_list2: false, item: BinType::F32, items: vec![BinValue::F32(0.0), BinValue::F32(1.0)] }
+    );
+    assert_eq!(
+        rs_bin::value_from_text("vec3 = { 1, 2, 3 }", None).unwrap(),
+        BinValue::Vec3([1.0, 2.0, 3.0])
+    );
+}
+
+#[test]
+fn value_from_text_rejects_ambiguous_and_malformed_input() {
+    // A brace-only root is undecidable; guessing would rewrite the node's type.
+    assert!(rs_bin::value_from_text("{ 1, 2, 3 }", None).is_err());
+    // Containers need their element tags even when the expected type is known.
+    assert!(rs_bin::value_from_text_as("{ 1 }", BinType::List, None).is_err());
+    // A declared tag contradicting the expected one is a conflict, not a silent reinterpretation.
+    assert!(rs_bin::value_from_text_as("f32 = 1.5", BinType::U8, None).is_err());
+    // Trailing junk must not be silently dropped: a truncated paste would apply as a valid node.
+    assert!(rs_bin::value_from_text("Foo { a: f32 = 1 } leftover", None).is_err());
+    // Unbalanced braces (text mid-edit) fail rather than applying a partial subtree.
+    assert!(rs_bin::value_from_text("Foo { a: f32 = 1", None).is_err());
+    assert!(rs_bin::value_from_text("", None).is_err());
+}

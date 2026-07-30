@@ -16,6 +16,58 @@ pub fn from_text(text: &str, _mapper: Option<&HashMapper>) -> Result<Bin> {
     p.parse_bin()
 }
 
+/** Parses a SINGLE value expression, as produced by [`crate::text::value_to_text`], back into a
+[`BinValue`]. This is the per-node inverse used by an editor that edits one subtree as raw text.
+
+The grammar is the SAME grammar `from_text` uses: the whole body is read by the same `read_value` /
+`read_struct` / `read_field_block` routines, so anything `value_to_text` emits parses here, and
+`value_from_text(value_to_text(v)) == v` for every value whose root type survives the trip (see
+below). An optional leading `type = ` annotation is accepted, so `pointer = Foo { ... }` and
+`list[f32] = { 0 1 }` both work.
+
+ROOT TYPE INFERENCE. A standalone value has no owning `name: type = ` line, so with no annotation
+the root type is inferred from the first token:
+
+- `Name { ... }` / `0xHEX { ... }` -> `pointer`. A bare class header is ambiguous between pointer and
+  embed (both print identically), and POINTER is chosen because that is what emitter and other
+  object lists hold. A caller that knows better should use [`value_from_text_as`], which is the
+  path an editor replacing a typed node must take so an `embed` node does not silently become a
+  `pointer` and fail the receiving type check.
+- `"..."` -> `string`, `true`/`false` -> `bool`, `null` -> a null `pointer`, a numeric literal ->
+  `f32` if it has a `.`/exponent else `i32` (or `u32`/`i64`/`u64` as magnitude requires).
+- `{ ... }` -> rejected. A brace-only root could be a list, a map, an option, a vec, an rgba or an
+  mtx44 with no way to tell them apart, and guessing would silently corrupt the node. Annotate it
+  (`list[f32] = { ... }`) or call [`value_from_text_as`].
+
+`mapper` is accepted for symmetry with the printer but not consulted, for the same reason
+`from_text` ignores it: names hash deterministically, so the integer source of truth is
+reconstructed without resolution. */
+pub fn value_from_text(text: &str, _mapper: Option<&HashMapper>) -> Result<BinValue> {
+    let mut p = Parser::new(text);
+    p.parse_standalone_value(None)
+}
+
+/** [`value_from_text`] with the root type known up front, e.g. from the node being replaced.
+
+`expected` is used only when the text carries no `type = ` annotation of its own; an explicit
+annotation always wins, and a mismatch between the two is an error rather than a silent
+reinterpretation. Pass the exact tag of the node being overwritten (`BinType::Pointer` for an
+emitter in a `list[pointer]`, `BinType::Embed` for one in a `list[embed]`, and so on) so a
+pointer/embed pair, which print identically, cannot swap places on the way back in.
+
+For a container root (`list`, `list2`, `map`, `option`) the element tags cannot be recovered from an
+unannotated body either, so `expected` alone is not enough: annotate the text (which is what
+`value_to_text` output nested inside a field always carries) or replace the container from the
+widget path instead. */
+pub fn value_from_text_as(
+    text: &str,
+    expected: BinType,
+    _mapper: Option<&HashMapper>,
+) -> Result<BinValue> {
+    let mut p = Parser::new(text);
+    p.parse_standalone_value(Some(expected))
+}
+
 struct Parser<'a> {
     src: &'a [u8],
     pos: usize,
@@ -254,6 +306,166 @@ impl<'a> Parser<'a> {
                 })
             }
             other => Ok(TypeSpec::Simple(other)),
+        }
+    }
+
+    /// Reads one standalone value expression and requires the input to be fully consumed.
+    ///
+    /// Trailing junk is an ERROR, not ignored: this backs a per-node text editor, and quietly
+    /// dropping whatever follows the value would let a half-finished paste apply as a smaller,
+    /// valid-looking node. `expected` is the caller's root type when the text has no annotation of
+    /// its own (see [`super::value_from_text_as`]).
+    fn parse_standalone_value(&mut self, expected: Option<BinType>) -> Result<BinValue> {
+        self.skip_newlines();
+        if self.eof() {
+            return self.err("expected a value, got empty text");
+        }
+        let spec = self.read_standalone_spec(expected)?;
+        let value = self.read_value(spec)?;
+        self.skip_newlines();
+        if !self.eof() {
+            return self.err("unexpected trailing text after the value");
+        }
+        Ok(value)
+    }
+
+    /// Works out the root's [`TypeSpec`]: an explicit leading `type = ` annotation if present,
+    /// else the caller's `expected`, else inference from the first token.
+    fn read_standalone_spec(&mut self, expected: Option<BinType>) -> Result<TypeSpec> {
+        // An annotation is `type = ...` / `list[f32] = ...`. Probe for it by speculatively reading a
+        // type name and requiring the `=` (or a `[` for a container) to follow. Anything else means
+        // the text starts with the value itself, so rewind and infer.
+        let backup = self.pos;
+        if let Some(spec) = self.try_read_annotation()? {
+            if let (Some(expected), TypeSpec::Simple(got) | TypeSpec::Container { outer: got, .. }) =
+                (expected, spec)
+            {
+                // A declared tag that contradicts the node being replaced is a real conflict: the
+                // caller would reject the value anyway, and saying so here names the actual problem
+                // instead of surfacing a downstream "type mismatch".
+                if got != expected {
+                    return self.err(format!(
+                        "declared type '{}' does not match the expected type '{}'",
+                        type_display(got),
+                        type_display(expected)
+                    ));
+                }
+            }
+            return Ok(spec);
+        }
+        self.pos = backup;
+
+        if let Some(ty) = expected {
+            if ty.is_container() {
+                return self.err(format!(
+                    "a '{}' value needs its element types spelled out, e.g. '{} = {{ ... }}'",
+                    type_display(ty),
+                    type_display(ty)
+                ));
+            }
+            return Ok(TypeSpec::Simple(ty));
+        }
+        self.infer_root_type().map(TypeSpec::Simple)
+    }
+
+    /// Reads a leading `type = ` / `list[item] = ` annotation, or `None` (position unspecified) when
+    /// the text does not start with one.
+    fn try_read_annotation(&mut self) -> Result<Option<TypeSpec>> {
+        let word = self.read_word();
+        let Some(ty) = type_from_name(word) else {
+            return Ok(None);
+        };
+        if ty.is_container() {
+            // `list`/`map`/`option` must be followed by their bracketed element tags. Reuse the same
+            // reader the field path uses by rewinding to the type name and letting `read_value_type`
+            // consume `: type[...]`; it wants a leading ':' which a standalone annotation lacks, so
+            // the bracket part is read directly here instead.
+            let spec = self.read_container_tags(ty)?;
+            if !self.read_symbol(b'=') {
+                return self.err("expected '=' after the container type annotation");
+            }
+            return Ok(Some(spec));
+        }
+        if !self.read_symbol(b'=') {
+            // Not an annotation: a bareword that happens to name a type (a class literally called
+            // `hash`, say) followed by its body. Let the caller rewind and infer.
+            return Ok(None);
+        }
+        Ok(Some(TypeSpec::Simple(ty)))
+    }
+
+    /// Reads the `[item]` / `[key,value]` element tags of a container type. Shares every validation
+    /// rule with `read_value_type` so the two grammars cannot drift apart.
+    fn read_container_tags(&mut self, ty: BinType) -> Result<TypeSpec> {
+        match ty {
+            BinType::List | BinType::List2 | BinType::Option => {
+                self.expect_symbol(b'[')?;
+                let item = self.read_typename()?;
+                if item.is_container() {
+                    return self.err("container element may not be a container");
+                }
+                self.expect_symbol(b']')?;
+                Ok(TypeSpec::Container {
+                    outer: ty,
+                    key: None,
+                    item,
+                })
+            }
+            BinType::Map => {
+                self.expect_symbol(b'[')?;
+                let key = self.read_typename()?;
+                if !key.is_primitive() {
+                    return self.err("map key must be primitive");
+                }
+                self.expect_symbol(b',')?;
+                let item = self.read_typename()?;
+                if item.is_container() {
+                    return self.err("map value may not be a container");
+                }
+                self.expect_symbol(b']')?;
+                Ok(TypeSpec::Container {
+                    outer: ty,
+                    key: Some(key),
+                    item,
+                })
+            }
+            other => Ok(TypeSpec::Simple(other)),
+        }
+    }
+
+    /// Guesses the root type of an unannotated standalone value from its first token. Never consumes
+    /// input: it only peeks, so the real reader still sees the whole value.
+    fn infer_root_type(&mut self) -> Result<BinType> {
+        self.skip_newlines();
+        match self.peek() {
+            Some(b'"' | b'\'') => Ok(BinType::String),
+            // Brace-only roots are genuinely undecidable (list / map / option / vec2..4 / rgba /
+            // mtx44 all open with '{'), and guessing wrong would rewrite the node's type. Refuse.
+            Some(b'{') => self.err(
+                "cannot tell what a '{ ... }' value is; prefix it with its type, e.g. 'list[f32] = { ... }'",
+            ),
+            Some(_) => {
+                let backup = self.pos;
+                let word = self.read_word();
+                self.pos = backup;
+                if word.is_empty() {
+                    return self.err("expected a value");
+                }
+                match word {
+                    "true" | "false" => return Ok(BinType::Bool),
+                    // A lone `null` is only ever a null pointer in the text form.
+                    "null" => return Ok(BinType::Pointer),
+                    _ => {}
+                }
+                if let Some(ty) = infer_number_type(word) {
+                    return Ok(ty);
+                }
+                // A bareword or `0xHEX` followed by a body is a struct header. Pointer over embed:
+                // they print identically and pointer is the shape object lists (emitters included)
+                // hold. Callers that know the node's real tag use `value_from_text_as`.
+                Ok(BinType::Pointer)
+            }
+            None => self.err("expected a value"),
         }
     }
 
@@ -812,6 +1024,72 @@ impl ParseNum for f32 {
     fn parse_num(s: &str) -> core::result::Result<Self, ()> {
         let s = s.strip_prefix('+').unwrap_or(s);
         s.parse::<f32>().map_err(|_| ())
+    }
+}
+
+/// Picks the narrowest sensible numeric type for an unannotated standalone number literal, or `None`
+/// when the word is not a number at all.
+///
+/// Only reachable from [`Parser::infer_root_type`], i.e. when a caller supplied no expected type.
+/// The rule is: anything with a `.` or an exponent is `f32`; an integer is `i32`, widening to `u32`
+/// then `i64` then `u64` as its magnitude requires. Sub-32-bit tags (`u8`, `i16`, ...) are never
+/// guessed because a bare `3` gives no signal at all, so a caller replacing a `u8` node must pass
+/// the expected type (or annotate the text) rather than rely on inference.
+fn infer_number_type(word: &str) -> Option<BinType> {
+    let body = word.strip_prefix('+').or_else(|| word.strip_prefix('-')).unwrap_or(word);
+    if body.is_empty() || !body.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    if word.contains('.') || word.contains('e') || word.contains('E') {
+        return word.parse::<f32>().ok().map(|_| BinType::F32);
+    }
+    if word.parse::<i32>().is_ok() {
+        return Some(BinType::I32);
+    }
+    if word.parse::<u32>().is_ok() {
+        return Some(BinType::U32);
+    }
+    if word.parse::<i64>().is_ok() {
+        return Some(BinType::I64);
+    }
+    if word.parse::<u64>().is_ok() {
+        return Some(BinType::U64);
+    }
+    // Digits that fit no integer width: treat as a float rather than failing outright.
+    word.parse::<f32>().ok().map(|_| BinType::F32)
+}
+
+/// The text-form spelling of a type tag, for error messages. Mirrors `print::type_name`, kept here
+/// so the parser does not depend on the printer module.
+fn type_display(ty: BinType) -> &'static str {
+    match ty {
+        BinType::None => "none",
+        BinType::Bool => "bool",
+        BinType::I8 => "i8",
+        BinType::U8 => "u8",
+        BinType::I16 => "i16",
+        BinType::U16 => "u16",
+        BinType::I32 => "i32",
+        BinType::U32 => "u32",
+        BinType::I64 => "i64",
+        BinType::U64 => "u64",
+        BinType::F32 => "f32",
+        BinType::Vec2 => "vec2",
+        BinType::Vec3 => "vec3",
+        BinType::Vec4 => "vec4",
+        BinType::Mtx44 => "mtx44",
+        BinType::Rgba => "rgba",
+        BinType::String => "string",
+        BinType::Hash => "hash",
+        BinType::File => "file",
+        BinType::List => "list",
+        BinType::List2 => "list2",
+        BinType::Pointer => "pointer",
+        BinType::Embed => "embed",
+        BinType::Link => "link",
+        BinType::Option => "option",
+        BinType::Map => "map",
+        BinType::Flag => "flag",
     }
 }
 

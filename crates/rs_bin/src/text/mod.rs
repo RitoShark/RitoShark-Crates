@@ -5,10 +5,18 @@ name is unknown. `from_text` is the matching recursive-descent parser: it reads 
 `name: type = value` sections, and every value type recursively, accepting hashes as `0xHEX` or as
 barewords/strings it hashes itself, so `to_text` followed by `from_text` reconstructs the original
 [`Bin`] exactly.
+
+`value_to_text` / `value_from_text` are the same pair scoped to ONE [`crate::BinValue`], for editors
+that show a single node (one VFX emitter, say) as editable ritobin text rather than widget rows. They
+share the whole-file printer and grammar, so a node printed standalone is formatted exactly as it
+would be inside a document and parses back through the same readers. A struct root prints its class
+header (`VfxEmitterDefinitionData { ... }`) and carries no type tag of its own, so
+`value_from_text_as` exists for the caller that already knows the replaced node's type and must not
+let a pointer/embed pair, which print identically, swap places.
 */
 
 mod parse;
 mod print;
 
-pub use parse::from_text;
-pub use print::to_text;
+pub use parse::{from_text, value_from_text, value_from_text_as};
+pub use print::{to_text, value_to_text};

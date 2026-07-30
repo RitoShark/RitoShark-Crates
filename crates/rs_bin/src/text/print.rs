@@ -72,6 +72,38 @@ pub fn to_text(bin: &Bin, mapper: Option<&HashMapper>) -> String {
     out
 }
 
+/** Renders ONE `BinValue` as standalone ritobin text, using the exact same nested formatting the
+whole-file [`to_text`] path produces for that value.
+
+This is the per-node view used by an editor that shows a single subtree (one VFX emitter, say) as
+editable text instead of widget rows. It reuses `push_value` / `push_struct` verbatim, so a value
+printed here is byte-identical to the same value printed inside a full `#PROP_text` document at
+depth 0 (no leading indentation on the first line, and no trailing newline).
+
+SHAPE: a struct root prints its class-name header, matching ritobin's nested form:
+
+```text
+VfxEmitterDefinitionData {
+    rate: embed = ValueFloat {
+        constantValue: f32 = 1
+    }
+}
+```
+
+The root's own TYPE TAG (`pointer` / `embed` / `list[f32]` / ...) is deliberately NOT printed. In a
+full document the tag lives on the `name: type = ` line of the OWNING field, which does not exist
+for a standalone node, and the mockup this view is built against shows the bare class header. That
+makes a bare `Name { ... }` root ambiguous between pointer and embed on the way back in, which is
+why [`crate::text::value_from_text_as`] exists: the caller already knows the type of the node being
+replaced and passes it as the expected root type. [`crate::text::value_from_text`] is the
+tag-inferring convenience path for when the caller has no such expectation; it reads an untagged
+struct root as a POINTER, because that is the shape emitter lists hold. */
+pub fn value_to_text(value: &BinValue, mapper: Option<&HashMapper>) -> String {
+    let mut out = String::new();
+    push_value(&mut out, value, 0, mapper);
+    out
+}
+
 fn push_fields(
     out: &mut String,
     fields: &IndexMap<u32, BinValue>,
