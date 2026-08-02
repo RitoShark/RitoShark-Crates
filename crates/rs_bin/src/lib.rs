@@ -10,6 +10,7 @@ so `bin → text → bin` reconstructs the original document exactly.
 */
 
 mod bin;
+mod blend;
 mod error;
 mod read;
 mod write;
@@ -17,5 +18,6 @@ mod write;
 pub mod text;
 
 pub use bin::{Bin, BinEntry, BinPatch, BinType, BinValue};
+pub use blend::{BLEND_DATA_TABLE, BLEND_KEY_FIELDS, BlendKey, is_blend_key_field};
 pub use error::{Error, Result};
-pub use text::{from_text, to_text};
+pub use text::{TextOptions, from_text, to_text, to_text_with};

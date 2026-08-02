@@ -11,4 +11,4 @@ mod parse;
 mod print;
 
 pub use parse::from_text;
-pub use print::to_text;
+pub use print::{TextOptions, to_text, to_text_with};

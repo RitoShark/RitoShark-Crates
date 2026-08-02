@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 use rs_hash::{HashMapper, fnv1a, xxh64};
 
 use crate::bin::{Bin, BinEntry, BinPatch, BinType, BinValue};
+use crate::blend::BlendKey;
 use crate::error::{Error, Result};
 
 /** Parses the `#PROP_text` form back into a [`Bin`]. The grammar mirrors ritobin's text reader: a
@@ -483,7 +484,11 @@ impl<'a> Parser<'a> {
                     let mut entries = Vec::new();
                     let mut end = self.read_nested_begin()?;
                     while !end {
-                        let k = self.read_simple_value(key)?;
+                        let k = if key == BinType::U64 {
+                            self.read_u64_key()?
+                        } else {
+                            self.read_simple_value(key)?
+                        };
                         self.expect_symbol(b'=')?;
                         let v = self.read_simple_value(item)?;
                         entries.push((k, v));
@@ -727,6 +732,73 @@ impl<'a> Parser<'a> {
         Ok(xxh64(w))
     }
 
+    /** Reads a `u64` map key, accepting either a plain number or a readable transition key whose two
+    clip halves are joined by `->` (what the printer emits) or by `To` (what ReadWriteBlendData
+    emits). A plain `u64` literal can hold neither spelling, so the readable form is unambiguous and
+    is accepted without a mode flag. */
+    fn read_u64_key(&mut self) -> Result<BinValue> {
+        self.skip_inline();
+        if matches!(self.peek(), Some(b'"' | b'\'')) {
+            return self.read_blend_key();
+        }
+        let backup = self.pos;
+        let _ = self.read_word();
+        let readable = self.read_blend_separator();
+        self.pos = backup;
+        if readable {
+            return self.read_blend_key();
+        }
+        Ok(BinValue::U64(self.read_number()?))
+    }
+
+    fn read_blend_key(&mut self) -> Result<BinValue> {
+        let from = self.read_blend_half()?;
+        if !self.read_blend_separator() {
+            return self.err("expected '->' or 'To' between the two clips of a transition key");
+        }
+        let to = self.read_blend_half()?;
+        Ok(BinValue::U64(BlendKey { from, to }.to_u64()))
+    }
+
+    fn read_blend_separator(&mut self) -> bool {
+        self.skip_inline();
+        if self.peek() == Some(b'-') && self.src.get(self.pos + 1) == Some(&b'>') {
+            self.pos += 2;
+            return true;
+        }
+        let backup = self.pos;
+        if self.read_word().eq_ignore_ascii_case("to") {
+            return true;
+        }
+        self.pos = backup;
+        false
+    }
+
+    /** Reads one clip half of a transition key: `0xHEX`, a bareword, or a quoted name that is
+    hashed. A quoted `"Hashed:0xABCDEF01"` is the spelling ReadWriteBlendData uses for a clip it
+    could not resolve, so it decodes to that literal hash; hashing it as a name would silently
+    produce a different, wrong transition. */
+    fn read_blend_half(&mut self) -> Result<u32> {
+        self.skip_inline();
+        if matches!(self.peek(), Some(b'"' | b'\'')) {
+            let s = self.read_string()?;
+            return Ok(match hashed_prefix(&s) {
+                Some(h) => h,
+                None => fnv1a(&s),
+            });
+        }
+        let backup = self.pos;
+        if let Some(h) = self.try_read_hex32()? {
+            return Ok(h);
+        }
+        self.pos = backup;
+        let w = self.read_word();
+        if w.is_empty() {
+            return self.err("expected a clip name or hash in a transition key");
+        }
+        Ok(fnv1a(w))
+    }
+
     fn try_read_hex32(&mut self) -> Result<Option<u32>> {
         let word = self.read_word();
         if word.len() >= 2 && &word[..2].to_ascii_lowercase() == "0x" {
@@ -779,6 +851,15 @@ impl<'a> Parser<'a> {
         }
         self.err("expected separator or '}'")
     }
+}
+
+/// Decodes the `Hashed:0xABCDEF01` spelling of an unresolved clip into its literal hash.
+fn hashed_prefix(s: &str) -> Option<u32> {
+    let rest = s
+        .get(..9)
+        .filter(|p| p.eq_ignore_ascii_case("hashed:0x"))
+        .and(s.get(9..))?;
+    u32::from_str_radix(rest, 16).ok()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

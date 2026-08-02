@@ -4,10 +4,31 @@ use indexmap::IndexMap;
 use rs_hash::HashMapper;
 
 use crate::bin::{Bin, BinType, BinValue};
+use crate::blend::{BlendKey, is_blend_key_field};
+
+/// Rendering options. The default reproduces [`to_text`] exactly.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TextOptions {
+    /// Render the packed `u64` keys of a `mBlendDataTable` as `"from" -> "to"`. The resulting text
+    /// is readable but no longer canonical ritobin, so this is off by default.
+    pub blend_keys: bool,
+}
+
+struct Ctx<'a> {
+    mapper: Option<&'a HashMapper>,
+    opts: &'a TextOptions,
+}
 
 /// Renders `bin` as `#PROP_text`. Field, class, entry, hash, and link names are resolved through
 /// `mapper` when present; unresolved hashes fall back to `0x%08x` (or `0x%016x` for file hashes).
 pub fn to_text(bin: &Bin, mapper: Option<&HashMapper>) -> String {
+    to_text_with(bin, mapper, &TextOptions::default())
+}
+
+/// [`to_text`] with rendering options.
+pub fn to_text_with(bin: &Bin, mapper: Option<&HashMapper>, opts: &TextOptions) -> String {
+    let ctx = Ctx { mapper, opts };
+    let ctx = &ctx;
     let mut out = String::new();
     let header = if bin.is_patch {
         "#PTCH_text"
@@ -39,11 +60,11 @@ pub fn to_text(bin: &Bin, mapper: Option<&HashMapper>) -> String {
     let _ = writeln!(out, "entries: map[hash,embed] = {{");
     for entry in &bin.entries {
         out.push_str("    ");
-        push_hash32(&mut out, entry.path_hash, mapper);
+        push_hash32(&mut out, entry.path_hash, ctx.mapper);
         out.push_str(" = ");
-        push_name(&mut out, entry.class_hash, mapper);
+        push_name(&mut out, entry.class_hash, ctx.mapper);
         out.push_str(" {\n");
-        push_fields(&mut out, &entry.fields, 2, mapper);
+        push_fields(&mut out, &entry.fields, 2, ctx);
         out.push_str("    }\n");
     }
     out.push_str("}\n");
@@ -52,7 +73,7 @@ pub fn to_text(bin: &Bin, mapper: Option<&HashMapper>) -> String {
         let _ = writeln!(out, "patches: map[hash,embed] = {{");
         for patch in &bin.patches {
             out.push_str("    ");
-            push_hash32(&mut out, patch.key_hash, mapper);
+            push_hash32(&mut out, patch.key_hash, ctx.mapper);
             out.push_str(" = patch {\n");
             indent(&mut out, 2);
             out.push_str("path: string = ");
@@ -62,7 +83,7 @@ pub fn to_text(bin: &Bin, mapper: Option<&HashMapper>) -> String {
             out.push_str("value: ");
             push_type(&mut out, &patch.value);
             out.push_str(" = ");
-            push_value(&mut out, &patch.value, 2, mapper);
+            push_value(&mut out, &patch.value, 2, ctx, false);
             out.push('\n');
             out.push_str("    }\n");
         }
@@ -72,19 +93,15 @@ pub fn to_text(bin: &Bin, mapper: Option<&HashMapper>) -> String {
     out
 }
 
-fn push_fields(
-    out: &mut String,
-    fields: &IndexMap<u32, BinValue>,
-    depth: usize,
-    mapper: Option<&HashMapper>,
-) {
+fn push_fields(out: &mut String, fields: &IndexMap<u32, BinValue>, depth: usize, ctx: &Ctx) {
     for (name, value) in fields {
         indent(out, depth);
-        push_name(out, *name, mapper);
+        push_name(out, *name, ctx.mapper);
         out.push_str(": ");
         push_type(out, value);
         out.push_str(" = ");
-        push_value(out, value, depth, mapper);
+        let blend = ctx.opts.blend_keys && is_blend_key_field(*name);
+        push_value(out, value, depth, ctx, blend);
         out.push('\n');
     }
 }
@@ -115,7 +132,10 @@ fn push_type(out: &mut String, value: &BinValue) {
     }
 }
 
-fn push_value(out: &mut String, value: &BinValue, depth: usize, mapper: Option<&HashMapper>) {
+/** Renders one value. `blend` is set only for a value held directly by a field in
+`BLEND_KEY_FIELDS`, which turns the packed `u64` keys of its map into the readable `"from" -> "to"`
+form; it is never propagated into nested values, so the rewrite stays confined to that one map. */
+fn push_value(out: &mut String, value: &BinValue, depth: usize, ctx: &Ctx, blend: bool) {
     match value {
         BinValue::None => out.push_str("null"),
         BinValue::Bool(v) => out.push_str(if *v { "true" } else { "false" }),
@@ -170,9 +190,9 @@ fn push_value(out: &mut String, value: &BinValue, depth: usize, mapper: Option<&
             let _ = write!(out, "{{ {}, {}, {}, {} }}", a[0], a[1], a[2], a[3]);
         }
         BinValue::String(s) => push_string(out, s),
-        BinValue::Hash(v) => push_hash32(out, *v, mapper),
-        BinValue::Link(v) => push_hash32(out, *v, mapper),
-        BinValue::File(v) => push_hash64(out, *v, mapper),
+        BinValue::Hash(v) => push_hash32(out, *v, ctx.mapper),
+        BinValue::Link(v) => push_hash32(out, *v, ctx.mapper),
+        BinValue::File(v) => push_hash64(out, *v, ctx.mapper),
         BinValue::List { items, .. } => {
             if items.is_empty() {
                 out.push_str("{}");
@@ -180,23 +200,27 @@ fn push_value(out: &mut String, value: &BinValue, depth: usize, mapper: Option<&
                 out.push_str("{\n");
                 for v in items {
                     indent(out, depth + 1);
-                    push_value(out, v, depth + 1, mapper);
+                    push_value(out, v, depth + 1, ctx, false);
                     out.push('\n');
                 }
                 indent(out, depth);
                 out.push('}');
             }
         }
-        BinValue::Map { entries, .. } => {
+        BinValue::Map { key, entries, .. } => {
             if entries.is_empty() {
                 out.push_str("{}");
             } else {
+                let blend_keys = blend && *key == BinType::U64;
                 out.push_str("{\n");
                 for (k, v) in entries {
                     indent(out, depth + 1);
-                    push_value(out, k, depth + 1, mapper);
+                    match k {
+                        BinValue::U64(raw) if blend_keys => push_blend_key(out, *raw, ctx.mapper),
+                        _ => push_value(out, k, depth + 1, ctx, false),
+                    }
                     out.push_str(" = ");
-                    push_value(out, v, depth + 1, mapper);
+                    push_value(out, v, depth + 1, ctx, false);
                     out.push('\n');
                 }
                 indent(out, depth);
@@ -208,7 +232,7 @@ fn push_value(out: &mut String, value: &BinValue, depth: usize, mapper: Option<&
             Some(v) => {
                 out.push_str("{\n");
                 indent(out, depth + 1);
-                push_value(out, v, depth + 1, mapper);
+                push_value(out, v, depth + 1, ctx, false);
                 out.push('\n');
                 indent(out, depth);
                 out.push('}');
@@ -219,10 +243,18 @@ fn push_value(out: &mut String, value: &BinValue, depth: usize, mapper: Option<&
                 out.push_str("null");
                 return;
             }
-            push_struct(out, *class, fields, depth, mapper);
+            push_struct(out, *class, fields, depth, ctx);
         }
-        BinValue::Embed { class, fields } => push_struct(out, *class, fields, depth, mapper),
+        BinValue::Embed { class, fields } => push_struct(out, *class, fields, depth, ctx),
     }
+}
+
+/// Renders a packed transition key as its two clip halves, each through the ordinary hash spelling.
+fn push_blend_key(out: &mut String, key: u64, mapper: Option<&HashMapper>) {
+    let key = BlendKey::from_u64(key);
+    push_hash32(out, key.from, mapper);
+    out.push_str(" -> ");
+    push_hash32(out, key.to, mapper);
 }
 
 fn push_struct(
@@ -230,14 +262,14 @@ fn push_struct(
     class: u32,
     fields: &IndexMap<u32, BinValue>,
     depth: usize,
-    mapper: Option<&HashMapper>,
+    ctx: &Ctx,
 ) {
-    push_name(out, class, mapper);
+    push_name(out, class, ctx.mapper);
     if fields.is_empty() {
         out.push_str(" {}");
     } else {
         out.push_str(" {\n");
-        push_fields(out, fields, depth + 1, mapper);
+        push_fields(out, fields, depth + 1, ctx);
         indent(out, depth);
         out.push('}');
     }
