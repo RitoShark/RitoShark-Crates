@@ -50,6 +50,9 @@ enum Command {
         recursive: bool,
         #[arg(short = 'k', long)]
         keep_hashed: bool,
+        /// Render mBlendDataTable keys as readable `"from" -> "to"` transitions.
+        #[arg(long)]
+        blend_keys: bool,
         #[arg(long)]
         hashes: Option<PathBuf>,
     },
@@ -80,6 +83,9 @@ enum BinCmd {
         recursive: bool,
         #[arg(short = 'k', long)]
         keep_hashed: bool,
+        /// Render mBlendDataTable keys as readable `"from" -> "to"` transitions.
+        #[arg(long)]
+        blend_keys: bool,
         #[arg(long)]
         hashes: Option<PathBuf>,
     },
@@ -181,12 +187,14 @@ fn run(cli: Cli) -> Result<()> {
             output,
             recursive,
             keep_hashed,
+            blend_keys,
             hashes,
         } => commands::transform::run(
             &input,
             output.as_deref(),
             recursive,
             keep_hashed,
+            blend_keys,
             hashes.as_deref(),
         ),
         Command::Bin(BinCmd::Convert {
@@ -194,12 +202,14 @@ fn run(cli: Cli) -> Result<()> {
             output,
             recursive,
             keep_hashed,
+            blend_keys,
             hashes,
         }) => commands::bin::convert(
             &input,
             output.as_deref(),
             recursive,
             keep_hashed,
+            blend_keys,
             hashes.as_deref(),
         ),
         Command::Bin(BinCmd::Diff {
