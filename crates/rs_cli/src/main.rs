@@ -174,6 +174,14 @@ enum AudioCmd {
         #[arg(short, long)]
         output: PathBuf,
     },
+    /// Decode embedded audio to .ogg / .wav.
+    Decode {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Summarise a .bnk / .wpk / .wem.
+    Info { input: PathBuf },
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -253,6 +261,10 @@ fn run(cli: Cli) -> Result<()> {
         Command::Audio(AudioCmd::Extract { input, output }) => {
             commands::audio::extract(&input, &output)
         }
+        Command::Audio(AudioCmd::Decode { input, output }) => {
+            commands::audio::decode(&input, &output)
+        }
+        Command::Audio(AudioCmd::Info { input }) => commands::audio::info(&input),
     }
 }
 
