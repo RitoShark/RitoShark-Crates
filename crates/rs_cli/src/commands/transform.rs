@@ -49,6 +49,7 @@ pub fn convert_one(
     input: &Path,
     output: &Path,
     keep_hashed: bool,
+    blend_keys: bool,
     mapper: &HashMapper,
 ) -> Result<PathBuf> {
     use ritoshark::prelude::*;
@@ -58,7 +59,8 @@ pub fn convert_one(
     if in_ext == "bin" && TEXT_EXTS.contains(&out_ext.as_str()) {
         let bin = ritoshark::bin::Bin::from_path(input)?;
         let m = if keep_hashed { None } else { Some(mapper) };
-        let text = ritoshark::bin::to_text(&bin, m);
+        let opts = ritoshark::bin::TextOptions { blend_keys };
+        let text = ritoshark::bin::to_text_with(&bin, m, &opts);
         std::fs::write(output, text)?;
     } else if TEXT_EXTS.contains(&in_ext.as_str()) && out_ext == "bin" {
         let text = std::fs::read_to_string(input)?;
@@ -104,6 +106,7 @@ pub fn run(
     output: Option<&Path>,
     recursive: bool,
     keep_hashed: bool,
+    blend_keys: bool,
     hashes_flag: Option<&Path>,
 ) -> Result<()> {
     let mapper = hashes::load(hashes_flag);
@@ -123,7 +126,7 @@ pub fn run(
                 Ok(o) => o,
                 Err(_) => continue,
             };
-            if let Err(e) = convert_one(p, &out, keep_hashed, &mapper) {
+            if let Err(e) = convert_one(p, &out, keep_hashed, blend_keys, &mapper) {
                 eprintln!("error: {}: {e}", p.display());
                 failed = true;
             }
@@ -137,7 +140,7 @@ pub fn run(
             Some(o) => o.to_path_buf(),
             None => default_output(input)?,
         };
-        convert_one(input, &out, keep_hashed, &mapper)?;
+        convert_one(input, &out, keep_hashed, blend_keys, &mapper)?;
         Ok(())
     }
 }

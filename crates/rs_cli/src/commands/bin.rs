@@ -16,9 +16,17 @@ pub fn convert(
     output: Option<&Path>,
     recursive: bool,
     keep_hashed: bool,
+    blend_keys: bool,
     hashes_flag: Option<&Path>,
 ) -> Result<()> {
-    transform::run(input, output, recursive, keep_hashed, hashes_flag)
+    transform::run(
+        input,
+        output,
+        recursive,
+        keep_hashed,
+        blend_keys,
+        hashes_flag,
+    )
 }
 
 fn to_prop_text(path: &Path, mapper: &rs_hash::HashMapper) -> Result<String> {

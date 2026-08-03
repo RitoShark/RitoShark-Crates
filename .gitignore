@@ -16,6 +16,11 @@ Thumbs.db
 *.wad.client
 *.bin
 
+# Vendored crate resources that happen to use the .bin extension but are not game data.
+# rs_audio cannot decode Wwise Vorbis without the aoTuV codebook library, which the format
+# references by index instead of embedding.
+!crates/*/resources/*.bin
+
 # Test fixtures are opt-in per crate via tests/fixtures/.gitkeep
 # (large real game files are kept out of the repo)
 **/tests/fixtures/**

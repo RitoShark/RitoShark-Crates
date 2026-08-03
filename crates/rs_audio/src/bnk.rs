@@ -3,9 +3,12 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use rs_io::{Parse, ReaderExt, Serialize, WriterExt};
 
 use crate::error::{Error, Result};
+use crate::hirc::HircSection;
 
 const DIDX: [u8; 4] = *b"DIDX";
 const DATA: [u8; 4] = *b"DATA";
+const BKHD: [u8; 4] = *b"BKHD";
+const HIRC: [u8; 4] = *b"HIRC";
 
 /** One raw BNK chunk: its four-byte tag and the verbatim body. Unknown sections survive untouched
 so the container round-trips byte for byte. */
@@ -30,6 +33,36 @@ impl Bnk {
 
     fn section(&self, tag: [u8; 4]) -> Option<&BnkSection> {
         self.sections.iter().find(|s| s.tag == tag)
+    }
+
+    /** The bank header version. League ships 134 and 145; several parameter blocks in the object
+    hierarchy change size between revisions, so anything decoding HIRC needs this.
+
+    Read-only: the header body is preserved verbatim, and this is a view over it rather than a
+    field that could be written back out of step with the bytes. */
+    pub fn version(&self) -> Option<u32> {
+        let body = &self.section(BKHD)?.data;
+        body.get(..4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+
+    /// The bank's own id, as the engine refers to it.
+    pub fn bank_id(&self) -> Option<u32> {
+        let body = &self.section(BKHD)?.data;
+        body.get(4..8)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+
+    /** Parses the object hierarchy, if this bank has one.
+
+    `Ok(None)` means the bank simply has no HIRC section — common, since League splits audio and
+    events into separate banks. */
+    pub fn hirc(&self) -> Result<Option<HircSection>> {
+        let Some(section) = self.section(HIRC) else {
+            return Ok(None);
+        };
+        let version = self.version().unwrap_or(0);
+        HircSection::parse(&section.data, version).map(Some)
     }
 
     /** The embedded `.wem` blobs as `(id, bytes)`, resolved by slicing DATA with the offsets and

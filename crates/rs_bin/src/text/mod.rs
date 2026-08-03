@@ -18,5 +18,8 @@ let a pointer/embed pair, which print identically, swap places.
 mod parse;
 mod print;
 
+// MERGE: both sides added API and neither supersedes the other - the single-NODE print/parse
+// (value_to_text / value_from_text / value_from_text_as, for editing one subtree as text) and the
+// whole-file rendering OPTIONS (TextOptions / to_text_with). Re-export both.
 pub use parse::{from_text, value_from_text, value_from_text_as};
-pub use print::{to_text, value_to_text};
+pub use print::{TextOptions, to_text, to_text_with, value_to_text};

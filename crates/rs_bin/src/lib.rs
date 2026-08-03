@@ -12,6 +12,7 @@ emitter, say) as editable text.
 */
 
 mod bin;
+mod blend;
 mod error;
 mod read;
 mod write;
@@ -19,6 +20,10 @@ mod write;
 pub mod text;
 
 pub use bin::{Bin, BinEntry, BinPatch, BinType, BinValue};
+pub use blend::{BLEND_DATA_TABLE, BLEND_KEY_FIELDS, BlendKey, is_blend_key_field};
 pub use error::{Error, Result};
-pub use text::{from_text, to_text, value_from_text, value_from_text_as};
-pub use text::value_to_text;
+// MERGE: union of both sides - see the note in `text/mod.rs`.
+pub use text::{
+    TextOptions, from_text, to_text, to_text_with, value_from_text, value_from_text_as,
+    value_to_text,
+};

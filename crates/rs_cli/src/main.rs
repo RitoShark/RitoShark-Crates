@@ -50,6 +50,9 @@ enum Command {
         recursive: bool,
         #[arg(short = 'k', long)]
         keep_hashed: bool,
+        /// Render mBlendDataTable keys as readable `"from" -> "to"` transitions.
+        #[arg(long)]
+        blend_keys: bool,
         #[arg(long)]
         hashes: Option<PathBuf>,
     },
@@ -80,6 +83,9 @@ enum BinCmd {
         recursive: bool,
         #[arg(short = 'k', long)]
         keep_hashed: bool,
+        /// Render mBlendDataTable keys as readable `"from" -> "to"` transitions.
+        #[arg(long)]
+        blend_keys: bool,
         #[arg(long)]
         hashes: Option<PathBuf>,
     },
@@ -168,6 +174,35 @@ enum AudioCmd {
         #[arg(short, long)]
         output: PathBuf,
     },
+    /// Decode embedded audio to .ogg / .wav.
+    Decode {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Summarise a .bnk / .wpk / .wem.
+    Info { input: PathBuf },
+    /// Replace one sound with a 16-bit PCM .wav, encoded as Wwise Vorbis.
+    Replace {
+        input: PathBuf,
+        #[arg(long)]
+        id: u32,
+        #[arg(long)]
+        wav: PathBuf,
+        /// Vorbis quality, -0.2 (worst) to 1.0 (best).
+        #[arg(long, default_value_t = 0.4)]
+        quality: f32,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Replace one sound with silence, keeping its entry and parameters.
+    Silence {
+        input: PathBuf,
+        #[arg(long)]
+        id: u32,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -181,12 +216,14 @@ fn run(cli: Cli) -> Result<()> {
             output,
             recursive,
             keep_hashed,
+            blend_keys,
             hashes,
         } => commands::transform::run(
             &input,
             output.as_deref(),
             recursive,
             keep_hashed,
+            blend_keys,
             hashes.as_deref(),
         ),
         Command::Bin(BinCmd::Convert {
@@ -194,12 +231,14 @@ fn run(cli: Cli) -> Result<()> {
             output,
             recursive,
             keep_hashed,
+            blend_keys,
             hashes,
         }) => commands::bin::convert(
             &input,
             output.as_deref(),
             recursive,
             keep_hashed,
+            blend_keys,
             hashes.as_deref(),
         ),
         Command::Bin(BinCmd::Diff {
@@ -242,6 +281,20 @@ fn run(cli: Cli) -> Result<()> {
         Command::Rst(RstCmd::List { input, json }) => commands::rst::list(&input, json),
         Command::Audio(AudioCmd::Extract { input, output }) => {
             commands::audio::extract(&input, &output)
+        }
+        Command::Audio(AudioCmd::Decode { input, output }) => {
+            commands::audio::decode(&input, &output)
+        }
+        Command::Audio(AudioCmd::Info { input }) => commands::audio::info(&input),
+        Command::Audio(AudioCmd::Replace {
+            input,
+            id,
+            wav,
+            quality,
+            output,
+        }) => commands::audio::replace(&input, id, &wav, quality, &output),
+        Command::Audio(AudioCmd::Silence { input, id, output }) => {
+            commands::audio::silence(&input, id, &output)
         }
     }
 }

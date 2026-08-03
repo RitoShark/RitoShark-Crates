@@ -39,10 +39,10 @@ fn wpk_round_trips_multiple_wems() {
     assert_eq!(parsed.to_bytes().unwrap(), bytes);
 }
 
-/** Exercises the awkward real-file layout the canonical writer would not produce on its own:
-dead (zero) offset-table slots interleaved with live ones, and per-blob alignment padding. We
-build the raw bytes by hand, parse them, assert the model captured the quirks, and assert the
-re-serialized bytes are identical to the hand-built input. */
+/** Hand-builds a package in Riot's real shape — dead (zero) offset-table slots interleaved with
+live ones, and every region padded up to an eight-byte boundary — then parses it and asserts the
+re-serialized bytes are identical. The alignment is not stored per entry; it falls out of the one
+rule the writer applies, so this proves the rule reproduces the on-disk layout. */
 #[test]
 fn wpk_round_trips_dead_slots_and_alignment() {
     fn u32b(v: u32) -> [u8; 4] {
@@ -51,29 +51,25 @@ fn wpk_round_trips_dead_slots_and_alignment() {
     fn name16(s: &str) -> Vec<u8> {
         s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect()
     }
+    fn align8(v: usize) -> usize {
+        v.next_multiple_of(8)
+    }
 
     let names = ["1.wem", "22.wem"];
     let datas: [&[u8]; 2] = [&[0xAA, 0xBB], &[0xCC, 0xDD, 0xEE]];
-    let aligns = [4u32, 8u32];
 
     let total_slots = 4u32; // 2 live + 2 dead
-    let header_len = 12 + total_slots as usize * 4;
 
-    let entry_sizes: Vec<usize> = names
-        .iter()
-        .map(|n| 12 + n.encode_utf16().count() * 2)
-        .collect();
     let mut entry_offsets = Vec::new();
-    let mut cursor = header_len;
-    for s in &entry_sizes {
+    let mut cursor = align8(12 + total_slots as usize * 4);
+    for n in &names {
         entry_offsets.push(cursor as u32);
-        cursor += s;
+        cursor = align8(cursor + 12 + n.encode_utf16().count() * 2);
     }
     let mut data_offsets = Vec::new();
-    for (i, d) in datas.iter().enumerate() {
-        cursor += aligns[i] as usize;
+    for d in &datas {
         data_offsets.push(cursor as u32);
-        cursor += d.len();
+        cursor = align8(cursor + d.len());
     }
 
     let mut bytes = Vec::new();
@@ -86,22 +82,22 @@ fn wpk_round_trips_dead_slots_and_alignment() {
     bytes.extend_from_slice(&u32b(entry_offsets[1]));
     bytes.extend_from_slice(&u32b(0));
     for (i, n) in names.iter().enumerate() {
+        bytes.resize(entry_offsets[i] as usize, 0);
         bytes.extend_from_slice(&u32b(data_offsets[i]));
         bytes.extend_from_slice(&u32b(datas[i].len() as u32));
         bytes.extend_from_slice(&u32b(n.encode_utf16().count() as u32));
         bytes.extend_from_slice(&name16(n));
     }
     for (i, d) in datas.iter().enumerate() {
-        bytes.extend(std::iter::repeat_n(0u8, aligns[i] as usize));
+        bytes.resize(data_offsets[i] as usize, 0);
         bytes.extend_from_slice(d);
     }
 
     let parsed = Wpk::from_bytes(&bytes).unwrap();
     assert_eq!(parsed.entries.len(), 2);
     assert_eq!(parsed.dead_slots, vec![1, 3]);
-    assert_eq!(parsed.entries[0].align, 4);
-    assert_eq!(parsed.entries[1].align, 8);
     assert_eq!(parsed.entries[0].name, "1.wem");
+    assert_eq!(parsed.entries[1].data, datas[1]);
 
     let written = parsed.to_bytes().unwrap();
     assert_eq!(
