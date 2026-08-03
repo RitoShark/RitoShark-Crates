@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+description = "Wwise audio in Rust: read and edit .bnk soundbanks and .wpk packages, convert .wem to .ogg losslessly, and resolve Wwise events to the sounds they play."
+keywords = ["wwise", "wem", "bnk", "vorbis", "soundbank"]
+categories = ["multimedia::audio", "encoding", "game-development", "parser-implementations"]
+readme = "README.md"
 
 [dependencies]
 thiserror = { workspace = true }
