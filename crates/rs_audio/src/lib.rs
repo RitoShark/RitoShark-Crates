@@ -16,10 +16,15 @@ re-encoding, so the result is bit-exact rather than a transcode.
 mod bnk;
 mod edit;
 mod error;
+mod hirc;
 mod wem;
 mod wpk;
 
 pub use bnk::{Bnk, BnkSection};
 pub use error::{Error, Result};
+pub use hirc::{
+    Action, Container, Event, HircBody, HircKind, HircObject, HircSection, MusicSwitch, MusicTrack,
+    Sound, SwitchContainer,
+};
 pub use wem::{AudioFormat, DecodedAudio, PcmAudio, Wem, WemCodec, WemFormat, encode_pcm, silence};
 pub use wpk::{WemEntry, Wpk};
