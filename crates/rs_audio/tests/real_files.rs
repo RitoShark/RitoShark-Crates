@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rs_audio::Bnk;
+use rs_audio::{Bnk, Wpk};
 use rs_io::{Parse, Serialize};
 
 fn sample(name: &str) -> Option<PathBuf> {
@@ -76,4 +76,129 @@ fn olaf_vo_audio_round_trips() {
 #[test]
 fn olaf_vo_events_round_trips() {
     check_round_trip("olaf_base_vo_events.bnk");
+}
+
+/* Banks pulled from the live game across both header revisions in circulation. Version 134 is
+older shipped content and 145 is current; the init bank is the only one carrying STID/STMG/ENVS/
+PLAT, so it is the one file that proves unknown sections survive a round-trip untouched. */
+
+#[test]
+fn bank_v145_audio_round_trips() {
+    check_round_trip("bank_v145_audio.bnk");
+}
+
+#[test]
+fn bank_v134_audio_round_trips() {
+    check_round_trip("bank_v134_audio.bnk");
+}
+
+#[test]
+fn bank_v145_events_round_trips() {
+    check_round_trip("bank_v145_events.bnk");
+}
+
+#[test]
+fn bank_v134_events_round_trips() {
+    check_round_trip("bank_v134_events.bnk");
+}
+
+#[test]
+fn bank_v145_bare_round_trips() {
+    check_round_trip("bank_v145_bare.bnk");
+}
+
+#[test]
+fn bank_v134_bare_round_trips() {
+    check_round_trip("bank_v134_bare.bnk");
+}
+
+#[test]
+fn bank_v145_init_round_trips() {
+    let Some(path) = sample("bank_v145_init.bnk") else {
+        eprintln!("skipping: bank_v145_init.bnk missing");
+        return;
+    };
+    check_round_trip("bank_v145_init.bnk");
+
+    let bnk = Bnk::from_path(&path).unwrap();
+    let section_tags = tags(&bnk);
+    for expected in ["BKHD", "INIT", "STMG", "ENVS", "PLAT"] {
+        assert!(
+            section_tags.iter().any(|t| t == expected),
+            "init bank should carry {expected}, got {section_tags:?}"
+        );
+    }
+}
+
+/* Real `.wpk` packages. Until these landed the WPK writer was validated by synthetic data only,
+and it was wrong: Riot pads the offset table, every entry record and every audio blob up to an
+eight-byte boundary, which the previous per-entry alignment model mis-attributed. */
+
+fn check_wpk_round_trip(name: &str) {
+    let Some(path) = sample(name) else {
+        eprintln!("skipping {name}: sample file missing");
+        return;
+    };
+
+    let original = std::fs::read(&path).expect("read sample bytes");
+    let wpk = Wpk::from_path(&path).expect("parse wpk");
+
+    let written = wpk.to_bytes().expect("serialize wpk");
+    assert_eq!(
+        written.len(),
+        original.len(),
+        "{name}: re-serialized length differs ({} entries, {} dead slots)",
+        wpk.entries.len(),
+        wpk.dead_slots.len()
+    );
+    assert!(
+        written == original,
+        "{name}: round-trip not byte-exact at offset {:?}",
+        written.iter().zip(&original).position(|(a, b)| a != b)
+    );
+
+    for (id, entry_name, bytes) in wpk.wems() {
+        assert!(
+            !bytes.is_empty(),
+            "{name}: entry {entry_name} (id {id:?}) has an empty body"
+        );
+    }
+
+    eprintln!(
+        "{name}: entries={} dead_slots={} round_trip=OK",
+        wpk.entries.len(),
+        wpk.dead_slots.len()
+    );
+}
+
+#[test]
+fn real_wpk_37_entries_round_trips() {
+    check_wpk_round_trip("audio_package_37.wpk");
+}
+
+#[test]
+fn real_wpk_4_entries_round_trips() {
+    check_wpk_round_trip("audio_package_4.wpk");
+}
+
+#[test]
+fn real_wpk_entries_are_wem_riff_payloads() {
+    let Some(path) = sample("audio_package_4.wpk") else {
+        eprintln!("skipping: audio_package_4.wpk missing");
+        return;
+    };
+    let wpk = Wpk::from_path(&path).unwrap();
+    assert!(!wpk.entries.is_empty());
+
+    for (id, name, bytes) in wpk.wems() {
+        assert!(
+            id.is_some(),
+            "League names package entries '<id>.wem'; got {name:?}"
+        );
+        assert_eq!(
+            &bytes[..4],
+            b"RIFF",
+            "{name}: package payload should be a RIFF wem"
+        );
+    }
 }

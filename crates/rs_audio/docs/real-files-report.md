@@ -1,40 +1,70 @@
 # rs_audio — real-files report
 
-Validation of `rs_audio` against the real League `.bnk` samples in `sample-files/`.
-Tests live in `crates/rs_audio/tests/real_files.rs` (skip-if-missing). All four samples
-are BKHD version 145 (0x91).
+Validation of `rs_audio` against real League `.bnk` and `.wpk` samples in `sample-files/`.
+Tests live in `crates/rs_audio/tests/real_files.rs` and skip gracefully when a file is absent.
+
+## Codec census — what League actually ships
+
+Measured against a live install by extracting WADs with `rs_cli wad extract` and classifying
+every embedded payload. Sample: Aatrox, Ahri, Yunara, Zaahen (base and `en_US`), Map11, Common,
+Global, Companions — **1,398 banks and packages, 13,420 embedded wems**.
+
+| Codec id | fmt chunk | Count | Share |
+|---|---|---|---|
+| `0xFFFF` Wwise Vorbis | 66 bytes | 13,420 | 100% |
+
+No Opus, no PCM, no ADPCM anywhere in the game. Channel counts are 1 or 2 only. Sample rates
+are **not** uniformly 44.1 kHz — 44100 dominates, but 48000, 36000, 32000, 24000, 16000, 12000,
+8000 and 6000 all occur. Nothing may assume a rate.
+
+Bank header revisions in circulation: **145** (1,113 banks) and **134** (201 banks).
 
 ## Per-file results
 
-| File | Size | Section tags | Round-trip | wems |
-|---|---|---|---|---|
-| `aatrox_base_sfx_audio.bnk` | 3,017,860 B | `BKHD`, `DIDX`, `DATA` | byte-exact OK | 170 |
-| `aatrox_base_sfx_events.bnk` | 30,821 B | `BKHD`, `HIRC` | byte-exact OK | 0 |
-| `olaf_base_vo_audio.bnk` | 48 B | `BKHD` | byte-exact OK | 0 |
-| `olaf_base_vo_events.bnk` | 4,692 B | `BKHD`, `HIRC` | byte-exact OK | 0 |
+| File | Size | Section tags | Round-trip |
+|---|---|---|---|
+| `aatrox_base_sfx_audio.bnk` | 3,017,860 B | `BKHD`, `DIDX`, `DATA` | byte-exact (170 wems) |
+| `aatrox_base_sfx_events.bnk` | 30,821 B | `BKHD`, `HIRC` | byte-exact |
+| `olaf_base_vo_audio.bnk` | 48 B | `BKHD` | byte-exact |
+| `olaf_base_vo_events.bnk` | 4,692 B | `BKHD`, `HIRC` | byte-exact |
+| `bank_v145_audio.bnk` | 23,211 B | `BKHD`, `DIDX`, `DATA` | byte-exact |
+| `bank_v134_audio.bnk` | 108,066 B | `BKHD`, `DIDX`, `DATA` | byte-exact |
+| `bank_v145_events.bnk` | 577 B | `BKHD`, `HIRC` | byte-exact |
+| `bank_v134_events.bnk` | 1,983 B | `BKHD`, `HIRC` | byte-exact |
+| `bank_v145_bare.bnk` | 48 B | `BKHD` | byte-exact |
+| `bank_v134_bare.bnk` | 32 B | `BKHD` | byte-exact |
+| `bank_v145_init.bnk` | 80,170 B | `BKHD`, `INIT`, `STMG`, `HIRC`, `ENVS`, `PLAT` | byte-exact |
+| `audio_package_37.wpk` | 25,922,933 B | 37 entries | byte-exact |
+| `audio_package_4.wpk` | 544,983 B | 4 entries | byte-exact |
 
-All four containers serialize back **byte-for-byte identical** to the input. The HIRC
-section in the two `_events` banks is kept verbatim as an opaque body, which is exactly
-what preserves the round-trip without needing to decode the Wwise object graph.
+The init bank matters disproportionately: `INIT`/`STMG`/`ENVS`/`PLAT` appear nowhere else, so it
+is the file that proves unknown sections survive verbatim rather than being dropped.
 
-### Embedded wem sanity (aatrox_base_sfx_audio.bnk)
+`olaf_base_vo_audio.bnk` is 48 bytes and holds only `BKHD` — no `DIDX`/`DATA`, so zero embedded
+wems despite the `_audio` name. The `_audio` / `_events` filename split is a convention, not a
+structural guarantee; code must key off the sections actually present, which `wems()` does.
 
-- 170 embedded wems via `DIDX`/`DATA`.
-- wem body sizes range 3,560 – 179,841 bytes; sum 3,014,515 B, which fits inside the
-  3,015,748 B `DATA` section. Every `wems()` entry has a non-empty, in-range body.
+## The WPK alignment bug — found and fixed
 
-### Notes on the other "audio" bank
+Earlier versions of this report listed "no real `.wpk` sample" as the one unproven gap. It was
+not merely unproven; **the model was wrong**, and synthetic tests could not have caught it.
 
-`olaf_base_vo_audio.bnk` is 48 bytes and contains only a `BKHD` chunk (8-byte chunk header
-+ 40-byte body) — **no `DIDX`/`DATA`, so 0 embedded wems** despite the `_audio` name. The
-audio for that bank evidently lives elsewhere (likely a companion `.wpk`). This confirms the
-`_audio` / `_events` filename split is a convention, not a structural guarantee; code must
-key off the actual sections present, which `wems()` does.
+Riot pads three regions up to an **eight-byte boundary**: the offset table, each entry record,
+and each audio blob. The previous model stored a per-entry `align: u32` capturing padding before
+each *blob*, measured against a cursor that assumed zero padding in the header and record block.
+The record-block padding was therefore misattributed, and records were written to the wrong
+offsets — 28/66/104/142 where the real file has 32/72/112/152. Total file length still matched,
+because the first blob's `align` absorbed the difference. A length assertion would have passed.
+
+The fix removes machinery rather than adding it. `WemEntry::align` is **deleted**; layout is
+derived from the single alignment rule in `Wpk::layout()`, which both the writer and the reader's
+bounds checks consume so they cannot drift apart. Validated against **29 real packages** drawn
+from eight champions' `en_US` WADs — all 29 re-serialize byte for byte.
+
+`dead_slots` stays. Offset-table slots of `0` are real, and reproducing their positions is what
+keeps the table the right length.
 
 ## Cross-check vs the Python reference (`bnk.py`)
-
-Ran the reference SoundBank reader against the same files (loaded directly to bypass an
-unrelated optional-dependency import in the package init):
 
 | File | reference tags | reference wems | agreement |
 |---|---|---|---|
@@ -43,64 +73,29 @@ unrelated optional-dependency import in the package init):
 | `aatrox_base_sfx_events.bnk` | — | — | reference **crashes** parsing HIRC |
 | `olaf_base_vo_events.bnk` | — | — | reference **crashes** parsing HIRC |
 
-- Section list and wem count agree exactly on both banks the reference can read.
-- The reference's deep HIRC object decoder throws (`unpack requires a buffer of N bytes`)
-  on the version-145 `_events` banks — its hierarchy parser predates this BKHD version.
-  `rs_audio`'s container-level, verbatim-HIRC approach reads and round-trips them losslessly,
-  so we are strictly more robust here. This is the central design validation: not decoding
-  HIRC is what keeps us correct and lossless across versions.
-- Section framing matches the reference: `4-byte tag + u32 size + body`, walked until EOF.
-  DIDX entries are `(id, offset, size)` u32 triples; DATA offsets are relative to the start
-  of the DATA body — identical to what `wems()` slices.
+Section list and wem count agree exactly on both banks the reference can read. Its deep HIRC
+decoder throws (`unpack requires a buffer of N bytes`) on version-145 banks — its hierarchy
+parser predates this revision. Keeping HIRC as opaque bytes at the container level reads and
+round-trips those banks losslessly, so we are strictly more robust here.
 
-## Gap analysis vs pyritofile
+Section framing matches the reference: `4-byte tag + u32 size + body`, walked to EOF. DIDX
+entries are `(id, offset, size)` u32 triples; DATA offsets are relative to the start of the DATA
+body — identical to what `wems()` slices.
 
-Comparing `rs_audio` against `pyritofile`'s `wpk.py` / `bnk.py` (the primary reference) surfaced
-the following:
+The Python reference also drops WPK dead slots during read, which is lossy; we preserve them.
 
-| Area | pyritofile | rs_audio before | Gap |
-|---|---|---|---|
-| WPK dead (offset 0) slots | dropped during read (lossy) | not handled | round-trip would shrink the offset table |
-| WPK blob alignment / gaps | not modelled (writer packs tight) | not modelled | real inter-blob padding lost |
-| WPK wem id | parses `int` from `"<id>.wem"` | kept only raw name string | id accessor absent |
-| WPK `wems()` API | id / offset / size per entry | no `wems()` on `Wpk` at all | API parity gap |
-| BNK truncated section size | would raise on short read | `read_bytes` could pre-alloc up to 4 GiB before failing | OOM / abort risk on malformed `size` |
-| WPK out-of-range offset/size | trusts the file | seeked + `read_bytes` unbounded | same allocation / EOF risk |
+## Robustness
 
-The BNK section framing itself (tag + `u32` size + body, walked to EOF; DIDX `(id,offset,size)`
-triples; DATA offsets relative to the DATA body) already matched the reference exactly, which the
-four real samples confirm byte-for-byte.
-
-## What I implemented
-
-- **WPK losslessness model.** `Wpk` gained `dead_slots: Vec<u32>` (positions of zero offset-table
-  slots) and `WemEntry` gained `align: u32` (padding before each blob, measured against the
-  canonical packing cursor). The reader captures both; the writer reproduces the full-length
-  offset table with zeros in place and re-emits the alignment padding, so a real layout
-  re-serializes byte-exact even where naive canonical packing would diverge. Added a synthetic
-  test (`wpk_round_trips_dead_slots_and_alignment`) that hand-builds bytes with interleaved dead
-  slots **and** per-blob padding and asserts byte-exact round-trip, plus an all-dead-slots case.
-- **`wems()` API parity + id accessor.** `Wpk::wems() -> Vec<(Option<u32>, &str, &[u8])>` mirrors
-  the reference (id parsed from `"<id>.wem"`, `None` for non-conforming names), and
-  `WemEntry::new` / `WemEntry::id()` / `Wpk::push` round out the construction surface.
-- **Robustness / no-panic.** Both `from_reader`s now read the stream length up front and bound
-  every declared `size`/offset against it before allocating or slicing; a new `Error::Truncated`
-  variant covers past-EOF cases. Fixed the latent **OOM/abort risk**: a malformed near-`u32::MAX`
-  BNK section size (or WPK data size / slot count) previously reached `vec![0u8; n]` and would
-  attempt a multi-gigabyte allocation before the read failed — now it `Err`s on the bound check.
-  No outright panic was reachable in the old code, but the giant-allocation path was a latent
-  crash; it is closed. Added fuzz-style unit tests: truncated section, DIDX size not a multiple
-  of 12, DIDX offset past DATA, zero-length DATA, partial/empty input, bad version, table/data
-  offset past EOF, and giant slot count — each asserts a clean `Err` or empty result.
+No panics in library code; malformed input returns `Err`. Both readers bound every declared size
+and offset against the actual input length before allocating or slicing, so truncated sections, a
+DIDX size not a multiple of 12, offsets past EOF, a near-`u32::MAX` section or slot count, and
+zero-length DATA all yield a clean `Err` or an empty result. The giant-allocation path — where a
+malformed size reached `vec![0u8; n]` and attempted a multi-gigabyte allocation before the read
+failed — is closed by the bound checks.
 
 ## Remaining gaps
 
-1. **No real `.wpk` sample (the one unproven gap).** WPK round-trip is validated by synthetic
-   data only. The model can express dead slots and blob alignment, but a real Riot `.wpk` could
-   in principle use a layout we have not anticipated (e.g. padding *inside* the entry-record
-   block, or a non-zero version). If a real sample surfaces, drop it in `sample-files/`, extend
-   `tests/real_files.rs`, and confirm — fixing any residual mismatch then.
-2. **cargo-fuzz target.** The fuzz-style coverage here is unit tests, not a `cargo-fuzz` harness.
-   A proper `fuzz_targets/{bnk,wpk}_reader.rs` (CLAUDE.md §11) remains a foundation-level add.
-3. **Typed BKHD accessors.** Exposing BKHD version / bank id read-only (body kept verbatim) is
-   still a nice-to-have for downstream version branching.
+1. **cargo-fuzz targets.** Coverage here is unit tests, not a `cargo-fuzz` harness. Proper
+   `fuzz_targets/{bnk,wpk}_reader.rs` (CLAUDE.md §11) remains a foundation-level add.
+2. **WPK version 1 only.** Every observed package is version 1; the reader rejects anything else
+   rather than guessing at a layout it has never seen.
