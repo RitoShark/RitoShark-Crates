@@ -338,8 +338,10 @@ impl<'a> Parser<'a> {
         // the text starts with the value itself, so rewind and infer.
         let backup = self.pos;
         if let Some(spec) = self.try_read_annotation()? {
-            if let (Some(expected), TypeSpec::Simple(got) | TypeSpec::Container { outer: got, .. }) =
-                (expected, spec)
+            if let (
+                Some(expected),
+                TypeSpec::Simple(got) | TypeSpec::Container { outer: got, .. },
+            ) = (expected, spec)
             {
                 // A declared tag that contradicts the node being replaced is a real conflict: the
                 // caller would reject the value anyway, and saying so here names the actual problem
@@ -1117,7 +1119,10 @@ impl ParseNum for f32 {
 /// guessed because a bare `3` gives no signal at all, so a caller replacing a `u8` node must pass
 /// the expected type (or annotate the text) rather than rely on inference.
 fn infer_number_type(word: &str) -> Option<BinType> {
-    let body = word.strip_prefix('+').or_else(|| word.strip_prefix('-')).unwrap_or(word);
+    let body = word
+        .strip_prefix('+')
+        .or_else(|| word.strip_prefix('-'))
+        .unwrap_or(word);
     if body.is_empty() || !body.starts_with(|c: char| c.is_ascii_digit()) {
         return None;
     }

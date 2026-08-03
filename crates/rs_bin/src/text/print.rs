@@ -93,7 +93,6 @@ pub fn to_text_with(bin: &Bin, mapper: Option<&HashMapper>, opts: &TextOptions) 
     out
 }
 
-
 /** Renders ONE `BinValue` as standalone ritobin text, using the exact same nested formatting the
 whole-file [`to_text`] path produces for that value.
 
@@ -125,7 +124,10 @@ pub fn value_to_text(value: &BinValue, mapper: Option<&HashMapper>) -> String {
     // `mapper`, so the single-node path builds a default context - default options reproduce
     // `to_text` exactly, which is the byte-identical guarantee this function documents above.
     let opts = TextOptions::default();
-    let ctx = Ctx { mapper, opts: &opts };
+    let ctx = Ctx {
+        mapper,
+        opts: &opts,
+    };
     let mut out = String::new();
     // `blend: false` - the flag marks a value that lives under a `mBlendDataTable` key, whose
     // packed u64 the incoming side can render as `"from" -> "to"`. A standalone node has no such

@@ -578,7 +578,10 @@ fn value_text_round_trips_a_nested_emitter() {
 
     // The actual round-trip. Untagged, so inference must land on pointer.
     let back = rs_bin::value_from_text(&text, Some(&mapper)).expect("value text must re-parse");
-    assert_eq!(back, value, "value -> text -> value must reconstruct exactly");
+    assert_eq!(
+        back, value,
+        "value -> text -> value must reconstruct exactly"
+    );
 
     // And with the root type stated explicitly, which is the path the editor takes.
     let back_as = rs_bin::value_from_text_as(&text, BinType::Pointer, Some(&mapper))
@@ -595,7 +598,10 @@ fn value_text_round_trips_a_nested_emitter() {
     // Unresolved hashes fall back to `0x%08x` and still round-trip, since the parser hashes
     // barewords and reads hex directly.
     let hex_text = rs_bin::value_to_text(&value, None);
-    assert!(hex_text.starts_with("0x"), "unmapped class must print as hex:\n{hex_text}");
+    assert!(
+        hex_text.starts_with("0x"),
+        "unmapped class must print as hex:\n{hex_text}"
+    );
     assert_eq!(
         rs_bin::value_from_text(&hex_text, None).expect("hex value text must re-parse"),
         value
@@ -623,7 +629,10 @@ fn value_from_text_reads_scalars_and_explicit_annotations() {
     );
     assert_eq!(
         rs_bin::value_from_text("null", None).unwrap(),
-        BinValue::Pointer { class: 0, fields: IndexMap::new() }
+        BinValue::Pointer {
+            class: 0,
+            fields: IndexMap::new()
+        }
     );
 
     // The expected type wins over inference for a narrow scalar a bare literal cannot signal.
@@ -632,13 +641,25 @@ fn value_from_text_reads_scalars_and_explicit_annotations() {
         BinValue::U8(3)
     );
     // An embed node stays an embed instead of being inferred as a pointer.
-    let embed = rs_bin::value_from_text_as("ValueFloat { constantValue: f32 = 1 }", BinType::Embed, None).unwrap();
-    assert!(matches!(embed, BinValue::Embed { .. }), "expected type must pick embed over pointer");
+    let embed = rs_bin::value_from_text_as(
+        "ValueFloat { constantValue: f32 = 1 }",
+        BinType::Embed,
+        None,
+    )
+    .unwrap();
+    assert!(
+        matches!(embed, BinValue::Embed { .. }),
+        "expected type must pick embed over pointer"
+    );
 
     // A leading annotation supplies the container element tags inference cannot recover.
     assert_eq!(
         rs_bin::value_from_text("list[f32] = { 0\n1 }", None).unwrap(),
-        BinValue::List { is_list2: false, item: BinType::F32, items: vec![BinValue::F32(0.0), BinValue::F32(1.0)] }
+        BinValue::List {
+            is_list2: false,
+            item: BinType::F32,
+            items: vec![BinValue::F32(0.0), BinValue::F32(1.0)]
+        }
     );
     assert_eq!(
         rs_bin::value_from_text("vec3 = { 1, 2, 3 }", None).unwrap(),
