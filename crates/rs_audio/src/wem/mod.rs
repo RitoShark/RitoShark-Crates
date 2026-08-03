@@ -1,6 +1,9 @@
 mod bitio;
 mod codebook;
+mod encode;
 mod vorbis;
+
+pub use encode::{PcmAudio, encode_pcm, silence};
 
 use crate::error::{Error, Result};
 
@@ -223,6 +226,55 @@ impl<'a> Wem<'a> {
             "Vorbis wem has neither a vorb chunk nor an extended fmt",
         ))?;
         vorbis::to_ogg(self, vorb)
+    }
+
+    /** Decodes all the way to interleaved 16-bit samples.
+
+    This is the form sample-level work needs — trimming, gain, waveform display — and the input
+    side of [`encode_pcm`]. Vorbis is decoded through the rebuilt Ogg stream; PCM is reinterpreted
+    in place. */
+    pub fn to_pcm(&self) -> Result<PcmAudio> {
+        match self.format.codec {
+            WemCodec::Vorbis => {
+                let ogg = self.to_ogg()?;
+                let mut reader =
+                    lewton::inside_ogg::OggStreamReader::new(std::io::Cursor::new(ogg))
+                        .map_err(|_| Error::Wem("rebuilt ogg stream has an unreadable header"))?;
+
+                let sample_rate = reader.ident_hdr.audio_sample_rate;
+                let channels = u16::from(reader.ident_hdr.audio_channels);
+
+                let mut samples = Vec::new();
+                while let Some(packet) = reader
+                    .read_dec_packet_itl()
+                    .map_err(|_| Error::Wem("rebuilt ogg stream has an undecodable packet"))?
+                {
+                    samples.extend_from_slice(&packet);
+                }
+
+                Ok(PcmAudio {
+                    sample_rate,
+                    channels,
+                    samples,
+                })
+            }
+            WemCodec::Pcm => {
+                if self.format.bits_per_sample != 16 {
+                    return Err(Error::Unsupported("PCM wem is not 16-bit"));
+                }
+                let payload = self.payload()?;
+                let samples = payload
+                    .chunks_exact(2)
+                    .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+                    .collect();
+                Ok(PcmAudio {
+                    sample_rate: self.format.sample_rate,
+                    channels: self.format.channels,
+                    samples,
+                })
+            }
+            WemCodec::Other(id) => Err(Error::UnsupportedCodec(id)),
+        }
     }
 
     /// Wraps PCM sample data in a standard 44-byte WAV header.

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rs_audio::{Bnk, Wpk};
+use rs_audio::{Bnk, Wem, Wpk};
 use rs_io::{Parse, Serialize};
 
 fn sample(name: &str) -> Option<PathBuf> {
@@ -128,6 +128,71 @@ fn bank_v145_init_round_trips() {
             "init bank should carry {expected}, got {section_tags:?}"
         );
     }
+}
+
+/** Editing a real bank must touch only the audio it was asked to touch.
+
+The failure this guards against is not hypothetical: rebuilding a bank from scratch on every edit
+resets the header version, zeroes the bank id and discards the object hierarchy, which leaves a
+file the engine cannot load even though the audio inside it is fine. */
+#[test]
+fn silencing_one_sound_in_a_real_bank_preserves_everything_else() {
+    let Some(path) = sample("bank_v145_audio.bnk") else {
+        eprintln!("skipping: bank_v145_audio.bnk missing");
+        return;
+    };
+
+    let original = Bnk::from_path(&path).expect("parse bank");
+    let ids = original.wem_ids();
+    assert!(
+        ids.len() >= 2,
+        "need at least two sounds to prove isolation"
+    );
+    let (target, untouched) = (ids[0], ids[1]);
+    let untouched_before = original.wem(untouched).unwrap().to_vec();
+
+    let mut edited = original.clone();
+    edited.silence_wem(target).expect("silence");
+
+    let reparsed = Bnk::from_bytes(&edited.to_bytes().unwrap()).expect("edited bank must parse");
+
+    let section = |bnk: &Bnk, tag: &[u8; 4]| {
+        bnk.sections
+            .iter()
+            .find(|s| s.tag == *tag)
+            .map(|s| s.data.clone())
+    };
+
+    assert_eq!(
+        section(&reparsed, b"BKHD"),
+        section(&original, b"BKHD"),
+        "the bank header — version and bank id — must be byte-identical"
+    );
+    assert_eq!(
+        reparsed.sections.iter().map(|s| s.tag).collect::<Vec<_>>(),
+        original.sections.iter().map(|s| s.tag).collect::<Vec<_>>(),
+        "no section may be added, dropped or reordered"
+    );
+    for tag in [b"HIRC", b"STMG", b"STID", b"INIT", b"ENVS", b"PLAT"] {
+        assert_eq!(
+            section(&reparsed, tag),
+            section(&original, tag),
+            "{} must pass through untouched",
+            String::from_utf8_lossy(tag)
+        );
+    }
+
+    assert_eq!(reparsed.wem_ids(), ids, "wem ids and order must be stable");
+    assert_eq!(
+        reparsed.wem(untouched).unwrap(),
+        untouched_before.as_slice(),
+        "an unrelated sound must be byte-identical"
+    );
+
+    let silenced = Wem::new(reparsed.wem(target).unwrap())
+        .and_then(|w| w.to_pcm())
+        .expect("silenced entry must still be a decodable wem");
+    assert!(silenced.samples.iter().all(|&s| s == 0), "must be silent");
 }
 
 /* Real `.wpk` packages. Until these landed the WPK writer was validated by synthetic data only,

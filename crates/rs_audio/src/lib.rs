@@ -14,11 +14,12 @@ re-encoding, so the result is bit-exact rather than a transcode.
 */
 
 mod bnk;
+mod edit;
 mod error;
 mod wem;
 mod wpk;
 
 pub use bnk::{Bnk, BnkSection};
 pub use error::{Error, Result};
-pub use wem::{AudioFormat, DecodedAudio, Wem, WemCodec, WemFormat};
+pub use wem::{AudioFormat, DecodedAudio, PcmAudio, Wem, WemCodec, WemFormat, encode_pcm, silence};
 pub use wpk::{WemEntry, Wpk};

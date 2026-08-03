@@ -15,6 +15,8 @@ pub enum Error {
     Wem(&'static str),
     #[error("unsupported wem codec 0x{0:04X}")]
     UnsupportedCodec(u16),
+    #[error("no embedded wem with id {0}")]
+    NoSuchWem(u32),
     #[error("codebook {0} is not in the library")]
     UnknownCodebook(u32),
 }

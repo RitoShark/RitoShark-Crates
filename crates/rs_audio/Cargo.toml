@@ -9,7 +9,7 @@ repository.workspace = true
 [dependencies]
 thiserror = { workspace = true }
 rs_io = { workspace = true }
+lewton = { workspace = true }
 
 [dev-dependencies]
-lewton = { workspace = true }
 ww2ogg = { workspace = true }
