@@ -117,10 +117,7 @@ impl StaticMesh {
             return None;
         }
         let f = |o: usize| f32::from_le_bytes([tail[o], tail[o + 1], tail[o + 2], tail[o + 3]]);
-        Some((
-            Vec3::new(f(0), f(4), f(8)),
-            Vec3::new(f(12), f(16), f(20)),
-        ))
+        Some((Vec3::new(f(0), f(4), f(8)), Vec3::new(f(12), f(16), f(20))))
     }
 
     /// Vertex positions translated so the mesh is centred on its own local origin

@@ -180,7 +180,11 @@ fn scb_tail_accessors_and_degenerate_bounds() {
         }
     }
 
-    const VERTS: [[f32; 3]; 3] = [[100.0, 200.0, 10.0], [120.0, 220.0, 30.0], [80.0, 240.0, 20.0]];
+    const VERTS: [[f32; 3]; 3] = [
+        [100.0, 200.0, 10.0],
+        [120.0, 220.0, 30.0],
+        [80.0, 240.0, 20.0],
+    ];
     const CENTRAL: [f32; 3] = [100.0, 220.0, 20.0];
     const PIVOT: [f32; 3] = [1.0, 2.0, 3.0];
 
@@ -230,7 +234,10 @@ fn scb_tail_accessors_and_degenerate_bounds() {
     let centred = mesh.centred_positions();
     let cx: f32 = centred.iter().map(|p| p.x).sum::<f32>() / 3.0;
     let cy: f32 = centred.iter().map(|p| p.y).sum::<f32>() / 3.0;
-    assert!(cx.abs() < 1e-3 && cy.abs() < 1e-3, "expected re-centred, got ({cx}, {cy})");
+    assert!(
+        cx.abs() < 1e-3 && cy.abs() < 1e-3,
+        "expected re-centred, got ({cx}, {cy})"
+    );
 
     // Degenerate header box recovered from the vertices.
     let bounds = mesh.effective_bounds();
