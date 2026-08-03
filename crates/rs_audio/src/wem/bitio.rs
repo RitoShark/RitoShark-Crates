@@ -84,6 +84,56 @@ impl<'a> BitReader<'a> {
     }
 }
 
+/** Anything bits can be written into, least-significant bit first.
+
+Codebook expansion is shared between decoding, which writes into Ogg pages, and encoding, which
+writes into a plain buffer to canonicalise a codebook for comparison. Both go through this. */
+pub(crate) trait BitSink {
+    fn write(&mut self, value: u32, count: u32);
+}
+
+/** A bare bit buffer with no framing, used to render a codebook to a canonical byte string.
+
+Two codebooks are the same when their canonical renderings match. Comparing them inside a live
+bitstream would not work, because the same codebook lands on a different bit offset depending on
+what precedes it. */
+#[derive(Default)]
+pub(crate) struct BitBuffer {
+    bytes: Vec<u8>,
+    partial: u8,
+    bits: u8,
+}
+
+impl BitBuffer {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Flushes any partial byte and returns the buffer, zero-padded to a byte boundary.
+    pub(crate) fn finish(mut self) -> Vec<u8> {
+        if self.bits > 0 {
+            self.bytes.push(self.partial);
+        }
+        self.bytes
+    }
+}
+
+impl BitSink for BitBuffer {
+    fn write(&mut self, value: u32, count: u32) {
+        for i in 0..count {
+            if value & (1 << i) != 0 {
+                self.partial |= 1 << self.bits;
+            }
+            self.bits += 1;
+            if self.bits == 8 {
+                self.bytes.push(self.partial);
+                self.partial = 0;
+                self.bits = 0;
+            }
+        }
+    }
+}
+
 const MAX_PAYLOAD: usize = 255 * 255;
 const HEADER_LEN: usize = 27;
 
@@ -217,6 +267,12 @@ impl OggWriter {
     pub(crate) fn finish(mut self) -> Vec<u8> {
         self.flush_page(false, false);
         self.output
+    }
+}
+
+impl BitSink for OggWriter {
+    fn write(&mut self, value: u32, count: u32) {
+        OggWriter::write(self, value, count);
     }
 }
 

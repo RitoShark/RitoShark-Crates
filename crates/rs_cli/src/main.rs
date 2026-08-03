@@ -182,6 +182,27 @@ enum AudioCmd {
     },
     /// Summarise a .bnk / .wpk / .wem.
     Info { input: PathBuf },
+    /// Replace one sound with a 16-bit PCM .wav, encoded as Wwise Vorbis.
+    Replace {
+        input: PathBuf,
+        #[arg(long)]
+        id: u32,
+        #[arg(long)]
+        wav: PathBuf,
+        /// Vorbis quality, -0.2 (worst) to 1.0 (best).
+        #[arg(long, default_value_t = 0.4)]
+        quality: f32,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Replace one sound with silence, keeping its entry and parameters.
+    Silence {
+        input: PathBuf,
+        #[arg(long)]
+        id: u32,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -265,6 +286,16 @@ fn run(cli: Cli) -> Result<()> {
             commands::audio::decode(&input, &output)
         }
         Command::Audio(AudioCmd::Info { input }) => commands::audio::info(&input),
+        Command::Audio(AudioCmd::Replace {
+            input,
+            id,
+            wav,
+            quality,
+            output,
+        }) => commands::audio::replace(&input, id, &wav, quality, &output),
+        Command::Audio(AudioCmd::Silence { input, id, output }) => {
+            commands::audio::silence(&input, id, &output)
+        }
     }
 }
 

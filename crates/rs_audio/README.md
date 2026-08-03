@@ -28,7 +28,8 @@ for (id, payload) in bank.wems() {
   codebooks and repages the audio packets. The compressed audio is copied bit for bit — this is a
   remux, not a transcode, so it cannot degrade quality.
 - **Decodes to PCM samples** for waveform display, trimming or any other sample-level work.
-- **Encodes PCM back to WEM**, so replacing a sound needs no Wwise installation.
+- **Encodes Wwise Vorbis**, so replacing a sound needs no Wwise installation and the result is
+  the same size class as the audio it replaces. PCM output is available too.
 - **Extracts and repacks `.bnk` and `.wpk`** byte-exactly, preserving unknown sections verbatim.
 - **Edits banks without destroying them** — the header, bank id and object hierarchy survive.
 - **Resolves Wwise events to the WEM ids they play**, which is what "mute this voice line"
@@ -106,16 +107,22 @@ only when you mean it.
 ### Replace a sound with your own audio
 
 ```rust
-use rs_audio::{Bnk, PcmAudio, encode_pcm};
+use rs_audio::{Bnk, PcmAudio, encode_vorbis_like};
 use rs_io::{Parse, Serialize};
 
-let audio = PcmAudio::new(44100, 1, my_samples);   // interleaved i16
-let wem = encode_pcm(&audio)?;
-
 let mut bank = Bnk::from_path("champion_vo_audio.bnk")?;
+let original = bank.wem(225608650).expect("sound exists").to_vec();
+
+let audio = PcmAudio::new(44100, 1, my_samples);            // interleaved i16
+let wem = encode_vorbis_like(&original, &audio, 0.4)?;      // quality -0.2 … 1.0
+
 bank.replace_wem(225608650, wem)?;
 bank.to_path("champion_vo_audio.bnk")?;
 ```
+
+`encode_vorbis_like` clones the header template of the sound being replaced, so every field whose
+meaning is not established carries a value the engine already accepts. Use `encode_vorbis` when
+there is no reference to clone, and `encode_pcm` when size does not matter and simplicity does.
 
 ### Find which sounds an event plays
 
@@ -145,6 +152,10 @@ The workspace binary `rs_cli` exposes the same functionality:
 rs_cli audio info     champion_sfx_events.bnk    # header, sections, codecs, events
 rs_cli audio extract  champion_sfx_audio.bnk -o out/   # raw .wem files
 rs_cli audio decode   champion_sfx_audio.bnk -o out/   # playable .ogg / .wav
+
+# editing — the bank keeps its header, id and object hierarchy
+rs_cli audio silence  bank.bnk --id 225608650 -o out.bnk
+rs_cli audio replace  bank.bnk --id 225608650 --wav new.wav --quality 0.4 -o out.bnk
 ```
 
 ```
@@ -305,10 +316,23 @@ Parse the `_events.bnk`, call `event_wem_map()` to find which WEM ids the event 
 `silence_wem(id)` on whichever bank or package holds those payloads. Silencing keeps the entry, so
 nothing in the hierarchy is left dangling.
 
-### Why is a replaced sound so much larger than the original?
+### Can it encode Wwise Vorbis, or only decode it?
 
-Encoding writes PCM, which is several times larger than the Vorbis the game ships. That is the
-trade for not requiring a Wwise installation. Wwise Vorbis encoding is planned; see below.
+It encodes. `encode_vorbis` and `encode_vorbis_like` produce real Wwise Vorbis: the audio is
+compressed with the bundled aoTuV encoder, each codebook is recognised and replaced by its index
+in the external library, the setup header is re-narrowed to Wwise's field widths, and the packets
+are re-framed the way Wwise frames them. A one-second 44.1 kHz mono sound lands around 3 KB rather
+than the 88 KB PCM would take.
+
+The check that this is right: an independent implementation — the `ww2ogg` crate, which this
+project does not control — decodes WEMs produced here and agrees with our own decoder sample for
+sample.
+
+### Why does muting a sound not use PCM?
+
+It used to. Muting now re-encodes silence in the *original's* codec, cloning its header template,
+so a Vorbis bank stays entirely Vorbis. That keeps the most common edit on the one codec the game
+demonstrably plays.
 
 ### Does it support Wwise Opus, ADPCM, XMA or AT9?
 
@@ -334,7 +358,7 @@ from 134–145 are untested, and the hierarchy parser degrades to opaque rather 
 | WEM → PCM samples | yes |
 | PCM → WEM | yes |
 | Event → WEM resolution | yes |
-| Wwise Vorbis **encoding** | not yet — planned |
+| Wwise Vorbis **encoding** | yes |
 | Wwise ADPCM encoding | no — see below |
 | Opus, XMA, AT9, HEVAG | no |
 | Sample-level editing: trim, gain, fade, resample | out of scope, by design |
@@ -344,16 +368,22 @@ from 134–145 are untested, and the hierarchy parser degrades to opaque rather 
 Sample-level editing and user-file import are deliberately left to applications; this crate is a
 format library, and PCM samples are the handoff boundary in both directions.
 
-**Two honest caveats:**
+**Honest caveats:**
 
-*PCM encoding is not yet verified in-game.* League ships no PCM WEM, so the layout follows the
-documented Wwise extended-format structure rather than a shipped example. PCM is a core sound-engine
-source rather than a codec plugin, so it should play — but "should" is not "does", and this is
-worth testing before relying on it.
+*Encoding is verified against an independent decoder, not against the game.* Every encoded WEM is
+decoded by the `ww2ogg` crate and matched sample-for-sample, which proves the bitstream and the
+container are right. Two header fields (`fmt + 0x2A` and `fmt + 0x30`) vary per file in shipped
+audio with no derivable relationship to the stream, and no decoder consults them. `encode_vorbis`
+uses measured defaults for those; `encode_vorbis_like` clones them from a real file and is the
+recommended path precisely because it sidesteps the question.
 
-*ADPCM encoding is not implemented.* Implementing it would mean guessing at Wwise's specific ADPCM
-variant with no reference file and no oracle to check against, since the game contains none. PCM
-works today; Wwise Vorbis encoding is the more valuable next step and is the one planned.
+*PCM encoding is not verified in-game.* League ships no PCM WEM, so its layout follows the
+documented Wwise structure rather than a shipped example. This matters less than it did — muting
+now uses the original's codec — but `encode_pcm` remains the one output path with no in-game
+precedent behind it.
+
+*ADPCM encoding is not implemented.* It would mean guessing at Wwise's ADPCM variant with no
+reference file and no oracle, since the game contains none. Vorbis covers the need.
 
 ---
 

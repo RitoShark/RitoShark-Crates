@@ -1,9 +1,11 @@
 mod bitio;
 mod codebook;
 mod encode;
+mod encode_vorbis;
 mod vorbis;
 
 pub use encode::{PcmAudio, encode_pcm, silence};
+pub use encode_vorbis::{VorbisTemplate, encode_vorbis, encode_vorbis_like};
 
 use crate::error::{Error, Result};
 

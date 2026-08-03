@@ -26,5 +26,8 @@ pub use hirc::{
     Action, Container, Event, HircBody, HircKind, HircObject, HircSection, MusicSwitch, MusicTrack,
     Sound, SwitchContainer,
 };
-pub use wem::{AudioFormat, DecodedAudio, PcmAudio, Wem, WemCodec, WemFormat, encode_pcm, silence};
+pub use wem::{
+    AudioFormat, DecodedAudio, PcmAudio, VorbisTemplate, Wem, WemCodec, WemFormat, encode_pcm,
+    encode_vorbis, encode_vorbis_like, silence,
+};
 pub use wpk::{WemEntry, Wpk};

@@ -1,6 +1,6 @@
 use crate::bnk::{Bnk, BnkSection};
 use crate::error::{Error, Result};
-use crate::wem::{PcmAudio, Wem, encode_pcm};
+use crate::wem::{PcmAudio, Wem, WemCodec, encode_pcm, encode_vorbis_like};
 use crate::wpk::{WemEntry, Wpk};
 
 const DIDX: [u8; 4] = *b"DIDX";
@@ -15,15 +15,24 @@ const DATA_ALIGN: usize = 16;
 enough to mute a sound while leaving a real, decodable stream in place. */
 const SILENCE_FRAMES: usize = 1024;
 
-/** Builds a replacement stream that is silent but keeps the original's rate and channel count, so
-whatever the engine expects to mix still lines up. */
+/** Builds a replacement stream that is silent but keeps the original's rate, channel count **and
+codec**, so whatever the engine expects to mix still lines up.
+
+Matching the codec matters: a Wwise Vorbis sound is muted with Wwise Vorbis, cloning the original's
+header template, so the bank keeps using the one codec the game demonstrably plays. PCM is only
+written when the original was already PCM. */
 fn silent_like(original: &[u8]) -> Result<Vec<u8>> {
     let format = *Wem::new(original)?.format();
-    encode_pcm(&PcmAudio::silence(
+    let quiet = PcmAudio::silence(
         format.sample_rate.max(1),
         format.channels.max(1),
         SILENCE_FRAMES,
-    ))
+    );
+
+    match format.codec {
+        WemCodec::Vorbis => encode_vorbis_like(original, &quiet, 0.1),
+        _ => encode_pcm(&quiet),
+    }
 }
 
 impl Bnk {

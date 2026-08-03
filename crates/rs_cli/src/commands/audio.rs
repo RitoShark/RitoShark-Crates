@@ -265,6 +265,150 @@ pub fn info(input: &Path) -> Result<()> {
     Ok(())
 }
 
+/** Reads a 16-bit PCM `.wav` into samples.
+
+Deliberately minimal and CLI-local: `rs_audio` is a Wwise format library and does not carry a
+general audio importer. Anything more exotic than 16-bit PCM should be converted first. */
+fn read_wav(path: &Path) -> Result<ritoshark::audio::PcmAudio> {
+    let bytes = std::fs::read(path)?;
+    if bytes.len() < 12 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err(CliError::msg("not a RIFF/WAVE file"));
+    }
+
+    let le16 = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+    let le32 =
+        |at: usize| u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]);
+
+    let (mut format, mut data) = (None, None);
+    let mut at = 12usize;
+    while at + 8 <= bytes.len() {
+        let tag = &bytes[at..at + 4];
+        let len = le32(at + 4) as usize;
+        let body = at + 8;
+        if body + len > bytes.len() {
+            break;
+        }
+        match tag {
+            b"fmt " => format = Some(body),
+            b"data" => data = Some((body, len)),
+            _ => {}
+        }
+        at = body + len + (len & 1);
+    }
+
+    let fmt = format.ok_or_else(|| CliError::msg("wav has no fmt chunk"))?;
+    let (data_at, data_len) = data.ok_or_else(|| CliError::msg("wav has no data chunk"))?;
+
+    let bits = le16(fmt + 14);
+    if bits != 16 {
+        return Err(CliError::msg(format!(
+            "only 16-bit PCM wav is supported, got {bits}-bit"
+        )));
+    }
+
+    let channels = le16(fmt + 2);
+    let sample_rate = le32(fmt + 4);
+    let samples = bytes[data_at..data_at + data_len]
+        .chunks_exact(2)
+        .map(|p| i16::from_le_bytes([p[0], p[1]]))
+        .collect();
+
+    Ok(ritoshark::audio::PcmAudio::new(
+        sample_rate,
+        channels,
+        samples,
+    ))
+}
+
+fn load_container(input: &Path) -> Result<Container> {
+    use ritoshark::prelude::*;
+    match ritoshark::file::detect_path(input)? {
+        ritoshark::file::FileKind::Bnk => {
+            Ok(Container::Bank(ritoshark::audio::Bnk::from_path(input)?))
+        }
+        ritoshark::file::FileKind::Wpk => {
+            Ok(Container::Package(ritoshark::audio::Wpk::from_path(input)?))
+        }
+        other => Err(CliError::msg(format!("not an audio container: {other:?}"))),
+    }
+}
+
+enum Container {
+    Bank(ritoshark::audio::Bnk),
+    Package(ritoshark::audio::Wpk),
+}
+
+impl Container {
+    fn payload(&self, id: u32) -> Option<&[u8]> {
+        match self {
+            Self::Bank(b) => b.wem(id),
+            Self::Package(p) => p.wem(id),
+        }
+    }
+
+    fn replace(&mut self, id: u32, bytes: Vec<u8>) -> Result<()> {
+        match self {
+            Self::Bank(b) => b.replace_wem(id, bytes)?,
+            Self::Package(p) => p.replace_wem(id, bytes)?,
+        }
+        Ok(())
+    }
+
+    fn silence(&mut self, id: u32) -> Result<()> {
+        match self {
+            Self::Bank(b) => b.silence_wem(id)?,
+            Self::Package(p) => p.silence_wem(id)?,
+        }
+        Ok(())
+    }
+
+    fn write(&self, out: &Path) -> Result<()> {
+        use ritoshark::prelude::*;
+        match self {
+            Self::Bank(b) => b.to_path(out)?,
+            Self::Package(p) => p.to_path(out)?,
+        }
+        Ok(())
+    }
+}
+
+/** Replaces one sound with audio from a `.wav`, encoded as Wwise Vorbis.
+
+The header template is cloned from the payload being replaced, so every field whose meaning is not
+established carries a value the engine already accepts. */
+pub fn replace(input: &Path, id: u32, wav: &Path, quality: f32, out: &Path) -> Result<()> {
+    let mut container = load_container(input)?;
+    let original = container
+        .payload(id)
+        .ok_or_else(|| CliError::msg(format!("no embedded wem with id {id}")))?
+        .to_vec();
+
+    let audio = read_wav(wav)?;
+    let encoded = ritoshark::audio::encode_vorbis_like(&original, &audio, quality)?;
+
+    eprintln!(
+        "audio replace: wem {id}: {} -> {} bytes ({} frames, {} Hz, {}ch, quality {quality})",
+        original.len(),
+        encoded.len(),
+        audio.frames(),
+        audio.sample_rate,
+        audio.channels
+    );
+
+    container.replace(id, encoded)?;
+    container.write(out)?;
+    Ok(())
+}
+
+/// Replaces one sound with silence at its original sample rate and channel count.
+pub fn silence(input: &Path, id: u32, out: &Path) -> Result<()> {
+    let mut container = load_container(input)?;
+    container.silence(id)?;
+    container.write(out)?;
+    eprintln!("audio silence: wem {id} muted");
+    Ok(())
+}
+
 fn report_wems<'a>(payloads: impl Iterator<Item = &'a [u8]>) {
     use ritoshark::audio::Wem;
     use std::collections::BTreeMap;

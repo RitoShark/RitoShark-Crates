@@ -1,4 +1,4 @@
-use super::bitio::{BitReader, OggWriter, ilog};
+use super::bitio::{BitReader, BitSink, ilog};
 use crate::error::{Error, Result};
 
 /** The aoTuV 6.03 codebook set every Wwise Vorbis stream in League references by index. Wwise
@@ -59,7 +59,7 @@ impl CodebookLibrary {
         })
     }
 
-    fn count(&self) -> usize {
+    pub(crate) fn count(&self) -> usize {
         self.offsets.len() - 1
     }
 
@@ -77,7 +77,7 @@ impl CodebookLibrary {
     /** Expands one packed codebook into the full Vorbis setup-header form. The packed layout
     omits the sync pattern and narrows several fields, so every value is re-read at its packed
     width and re-emitted at its spec width. */
-    pub(crate) fn rebuild(&self, id: usize, out: &mut OggWriter) -> Result<()> {
+    pub(crate) fn rebuild(&self, id: usize, out: &mut impl BitSink) -> Result<()> {
         let packed = self.codebook(id)?;
         let mut input = BitReader::new(packed, 0);
 
@@ -145,7 +145,7 @@ impl CodebookLibrary {
 
     /** Copies a codebook that is already in full spec form, used by the older header-triad
     layout where Wwise embedded the setup header verbatim. */
-    pub(crate) fn copy(input: &mut BitReader, out: &mut OggWriter) -> Result<()> {
+    pub(crate) fn copy(input: &mut BitReader, out: &mut impl BitSink) -> Result<()> {
         let sync = input.read(24)?;
         let dimensions = input.read(16)?;
         let entries = input.read(24)?;
@@ -207,7 +207,7 @@ impl CodebookLibrary {
     fn copy_lookup_values(
         &self,
         input: &mut BitReader,
-        out: &mut OggWriter,
+        out: &mut impl BitSink,
         entries: u32,
         dimensions: u32,
     ) -> Result<()> {
@@ -216,7 +216,7 @@ impl CodebookLibrary {
 
     fn copy_lookup_values_inner(
         input: &mut BitReader,
-        out: &mut OggWriter,
+        out: &mut impl BitSink,
         entries: u32,
         dimensions: u32,
     ) -> Result<()> {
