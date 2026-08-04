@@ -12,6 +12,11 @@ an unedited `read -> write` reproduces the original file byte-for-byte (uncompre
 compressed `r3d2canm` alike). Editing a parsed animation (after `make_editable`) or writing an
 in-memory animation emits uncompressed version 4, where full quaternions survive a round-trip
 without quantization loss. Legacy skeletons are reported as errors.
+
+On top of the decoded keyframes the crate poses a rig: [`AnimTrack::sample`] interpolates a track at
+an arbitrary time, and [`Pose`] binds an animation to a [`Skeleton`], composing the joint hierarchy
+into model-space and skinning matrices. Joints an animation does not drive keep their bind pose, so
+a clip that animates part of a rig poses the whole of it correctly.
 */
 
 mod animation;
@@ -19,6 +24,7 @@ mod animation_read;
 mod animation_write;
 mod compressed;
 mod error;
+mod pose;
 pub mod quantized;
 mod raw;
 mod skeleton;
@@ -27,4 +33,5 @@ mod skeleton_write;
 
 pub use animation::{AnimFrame, AnimTrack, Animation};
 pub use error::{Error, Result};
+pub use pose::{Pose, Transform};
 pub use skeleton::{Joint, Skeleton};

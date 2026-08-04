@@ -66,4 +66,14 @@ impl Skeleton {
     pub fn influences(&self) -> &[u16] {
         &self.influences
     }
+
+    /// The joint with this name hash, if the skeleton has one.
+    pub fn joint_by_hash(&self, hash: u32) -> Option<&Joint> {
+        self.joints.iter().find(|joint| joint.hash == hash)
+    }
+
+    /// Index of the joint with this name hash, if the skeleton has one.
+    pub fn joint_index_by_hash(&self, hash: u32) -> Option<usize> {
+        self.joints.iter().position(|joint| joint.hash == hash)
+    }
 }
