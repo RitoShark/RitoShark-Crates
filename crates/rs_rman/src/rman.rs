@@ -56,7 +56,9 @@ pub struct Bundle {
 pub struct FileEntry {
     pub id: u64,
     pub name: String,
-    pub size: u32,
+    /// Uncompressed size in bytes. 64-bit on disk: League already ships files above 3 GiB, so a
+    /// 32-bit read would silently wrap once one crosses 4 GiB.
+    pub size: u64,
     pub directory_id: Option<u64>,
     pub chunk_ids: Vec<u64>,
     pub link: Option<String>,
@@ -171,7 +173,7 @@ impl Rman {
                     }
                     None => f.name.clone(),
                 };
-                (path, f.size as u64)
+                (path, f.size)
             })
             .collect()
     }

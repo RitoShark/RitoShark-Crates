@@ -161,7 +161,7 @@ fn verify_file_chunks(name: &str, rman: &Rman) {
         }
 
         assert_eq!(
-            uncompressed_total, file.size as u64,
+            uncompressed_total, file.size,
             "{name}: file {:?} uncompressed chunk sizes do not sum to file size",
             file.name
         );

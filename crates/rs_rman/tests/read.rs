@@ -332,12 +332,12 @@ impl Body {
         let file_vtable_slot = b.reserve();
         b.u64(0xF001); // +4 id
         b.u64(2); // +12 directory id
-        b.u32(250); // +20 size
-        let file_name_slot = b.reserve(); // +24 name
-        b.u64(0b1000); // +28 flags mask (bit 3 -> flag id 3 "en_US")
-        let file_chunks_slot = b.reserve(); // +36 chunks
-        b.u32(2); // +40 permissions (u8 from first byte)
-        let file_field_array = b.vtable(&[4, 12, 20, 24, 28, 0, 0, 36, 0, 0, 0, 0, 40]);
+        b.u64(250); // +20 size
+        let file_name_slot = b.reserve(); // +28 name
+        b.u64(0b1000); // +32 flags mask (bit 3 -> flag id 3 "en_US")
+        let file_chunks_slot = b.reserve(); // +40 chunks
+        b.u32(2); // +44 permissions (u8 from first byte)
+        let file_field_array = b.vtable(&[4, 12, 20, 28, 32, 0, 0, 40, 0, 0, 0, 0, 44]);
         b.patch_vtable(file_vtable_slot, file_field_array);
 
         b.patch(file_name_slot, b.pos());
@@ -376,13 +376,13 @@ impl Body {
         b.patch(file_ptr, file_entry);
         let file_vtable_slot = b.reserve();
         b.u64(0xF002); // +4  field 0 id
-        b.u32(64); // +12 field 2 size
-        b.u32(0xABCD); // +16 field 5 (u32)
-        let file_name_slot = b.reserve(); // +20 field 3 name
-        let file_chunks_slot = b.reserve(); // +24 field 7 chunks
-        b.u16(2); // +28 field 11 (u16)
-        b.u32(1); // +30 field 12 permissions
-        let file_field_array = b.vtable(&[4, 0, 12, 20, 0, 16, 0, 24, 0, 0, 0, 28, 30]);
+        b.u64(64); // +12 field 2 size
+        b.u32(0xABCD); // +20 field 5 (u32)
+        let file_name_slot = b.reserve(); // +24 field 3 name
+        let file_chunks_slot = b.reserve(); // +28 field 7 chunks
+        b.u16(2); // +32 field 11 (u16)
+        b.u32(1); // +34 field 12 permissions
+        let file_field_array = b.vtable(&[4, 0, 12, 24, 0, 20, 0, 28, 0, 0, 0, 32, 34]);
         b.patch_vtable(file_vtable_slot, file_field_array);
         b.patch(file_name_slot, b.pos());
         b.string("loose.txt");

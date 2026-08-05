@@ -167,7 +167,7 @@ fn parse_file(cursor: Cursor<'_>) -> Result<FileEntry> {
     let fields = cursor.fields()?;
     let id = fields.get_u64(0)?.ok_or(Error::Malformed("file id"))?;
     let directory_id = fields.get_u64(1)?;
-    let size = fields.get_u32(2)?.ok_or(Error::Malformed("file size"))?;
+    let size = fields.get_u64(2)?.ok_or(Error::Malformed("file size"))?;
     let name = fields.get_str(3)?.ok_or(Error::Malformed("file name"))?;
     let flags_mask = fields.get_u64(4)?;
     let chunk_ids = match fields.offset_cursor(7)? {
