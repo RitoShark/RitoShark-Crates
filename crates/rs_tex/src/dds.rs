@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use ddsfile::{
-    AlphaMode, Caps2, D3D10ResourceDimension, D3DFormat, Dds, DxgiFormat, NewD3dParams,
+    AlphaMode, Caps2, D3D10ResourceDimension, D3DFormat, Dds, DxgiFormat, MiscFlag, NewD3dParams,
     NewDxgiParams,
 };
 use image::RgbaImage;
@@ -290,17 +290,38 @@ pub fn save_dds(img: &RgbaImage, path: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
+fn surface_count(dds: &Dds) -> u32 {
+    let layers = dds.get_num_array_layers().max(1);
+    let dx10_cube = dds
+        .header10
+        .as_ref()
+        .is_some_and(|h| h.misc_flag.contains(MiscFlag::TEXTURECUBE));
+    // A DX10 cubemap counts its six faces as ONE array slot, so the header's layer
+    // count is a sixth of the surfaces actually stored.
+    if dx10_cube { layers * 6 } else { layers }
+}
+
 /// Decode every surface of a DDS buffer to RGBA8: a 2D texture yields one image; a cubemap
 /// yields its six faces (+X, -X, +Y, -Y, +Z, -Z) and an array texture yields one image per
 /// layer. The full-resolution mip of each layer is decoded.
 pub fn read_dds_faces_bytes(bytes: &[u8]) -> Result<Vec<RgbaImage>> {
     let dds = Dds::read(bytes)?;
-    let layers = dds.get_num_array_layers().max(1);
-    let mut images = Vec::with_capacity(layers as usize);
-    for layer in 0..layers {
-        let data = dds
-            .get_data(layer)
-            .map_err(|e| Error::Decode(format!("dds layer {layer}: {e}")))?;
+    let faces = surface_count(&dds);
+    let stride = dds.data.len() / faces.max(1) as usize;
+
+    let mut images = Vec::with_capacity(faces as usize);
+    for face in 0..faces {
+        let data = match dds.get_data(face) {
+            Ok(data) => data,
+            // The DX10 face indices above the array count are not addressable through the
+            // header; the payload still holds them back to back at an even stride.
+            Err(_) => {
+                let start = stride * face as usize;
+                dds.data
+                    .get(start..start + stride)
+                    .ok_or_else(|| Error::Decode(format!("dds face {face} out of bounds")))?
+            }
+        };
         images.push(decode_dds_surface(&dds, data)?);
     }
     Ok(images)
@@ -312,10 +333,25 @@ pub fn read_dds_faces(path: impl AsRef<Path>) -> Result<Vec<RgbaImage>> {
     read_dds_faces_bytes(&bytes)
 }
 
-/// True when the DDS buffer describes a cubemap (six-face) surface.
+/** True when the DDS buffer describes a cubemap (six-face) surface.
+
+A legacy file marks itself in `caps2`; one written through the DX10 extension marks itself in
+the extended header's `TEXTURECUBE` misc flag instead and may leave `caps2` empty, so both have
+to be checked or a DX10 cubemap reads as an ordinary 2D texture. */
 pub fn dds_is_cubemap(bytes: &[u8]) -> Result<bool> {
     let dds = Dds::read(bytes)?;
-    Ok(dds.header.caps2.contains(Caps2::CUBEMAP))
+    let dx10_cube = dds
+        .header10
+        .as_ref()
+        .is_some_and(|h| h.misc_flag.contains(MiscFlag::TEXTURECUBE));
+    Ok(dds.header.caps2.contains(Caps2::CUBEMAP) || dx10_cube)
+}
+
+/// The number of surfaces a DDS buffer holds: 6 for a cubemap, one per layer for an array
+/// texture, 1 for an ordinary 2D texture. Anything above 1 cannot be represented by a single
+/// image, so callers that edit pixels in place must refuse it.
+pub fn dds_surface_count(bytes: &[u8]) -> Result<u32> {
+    Ok(surface_count(&Dds::read(bytes)?))
 }
 
 /// Decode a DDS byte buffer straight to an RGBA8 image, including formats with no `.tex`
@@ -387,6 +423,36 @@ mod tests {
     fn formats_with_no_legacy_pixel_format_keep_the_extension() {
         let bytes = write_dds_bytes_bc(&sample(), TexFormat::Bc7).expect("write");
         assert_eq!(fourcc(&bytes), *b"DX10");
+    }
+
+    #[test]
+    fn a_dx10_cubemap_is_detected_without_caps2() {
+        let mut dds = Dds::new_dxgi(ddsfile::NewDxgiParams {
+            height: 4,
+            width: 4,
+            depth: None,
+            format: DxgiFormat::BC1_UNorm,
+            mipmap_levels: None,
+            array_layers: Some(6),
+            caps2: None,
+            is_cubemap: true,
+            resource_dimension: D3D10ResourceDimension::Texture2D,
+            alpha_mode: AlphaMode::Straight,
+        })
+        .expect("build");
+        dds.header.caps2 = Caps2::empty();
+
+        let mut bytes = Vec::new();
+        dds.write(&mut bytes).expect("write");
+        assert!(dds_is_cubemap(&bytes).expect("classify"));
+        assert_eq!(dds_surface_count(&bytes).expect("count"), 6);
+    }
+
+    #[test]
+    fn a_plain_2d_texture_is_one_surface_and_not_a_cubemap() {
+        let bytes = write_dds_bytes_bc(&sample(), TexFormat::Bc1).expect("write");
+        assert!(!dds_is_cubemap(&bytes).expect("classify"));
+        assert_eq!(dds_surface_count(&bytes).expect("count"), 1);
     }
 
     #[test]

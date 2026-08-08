@@ -21,8 +21,8 @@ mod texture;
 mod write;
 
 pub use dds::{
-    dds_is_cubemap, read_dds, read_dds_bytes, read_dds_faces, read_dds_faces_bytes, save_dds,
-    save_dds_bc, write_dds_bytes, write_dds_bytes_bc,
+    dds_is_cubemap, dds_surface_count, read_dds, read_dds_bytes, read_dds_faces,
+    read_dds_faces_bytes, save_dds, save_dds_bc, write_dds_bytes, write_dds_bytes_bc,
 };
 pub use error::{Error, Result};
 pub use read::TEX_MAGIC;
