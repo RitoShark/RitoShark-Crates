@@ -693,8 +693,15 @@ fn trailing_bytes_survive_roundtrip() {
     // No trailing: parse -> serialize is byte-exact and trailing is empty.
     let clean = sample_prop();
     let bin = Bin::from_bytes(&clean).expect("parse clean");
-    assert!(bin.trailing.is_empty(), "clean bin must have no trailing bytes");
-    assert_eq!(bin.to_bytes().expect("serialize"), clean, "clean round-trip must be byte-exact");
+    assert!(
+        bin.trailing.is_empty(),
+        "clean bin must have no trailing bytes"
+    );
+    assert_eq!(
+        bin.to_bytes().expect("serialize"),
+        clean,
+        "clean round-trip must be byte-exact"
+    );
 
     // With trailing: append an arbitrary side table, confirm it is captured + re-emitted.
     let mut with_extra = sample_prop();
@@ -706,8 +713,15 @@ fn trailing_bytes_survive_roundtrip() {
 
     // Entries/patches parse identically to the clean bin (trailing is ignored by the body).
     let clean_bin = Bin::from_bytes(&clean).expect("parse clean");
-    assert_eq!(bin.entries, clean_bin.entries, "trailing changed the parsed entries");
+    assert_eq!(
+        bin.entries, clean_bin.entries,
+        "trailing changed the parsed entries"
+    );
 
     // Round-trip preserves the whole file, trailing included.
-    assert_eq!(bin.to_bytes().expect("serialize"), with_extra, "trailing not re-emitted");
+    assert_eq!(
+        bin.to_bytes().expect("serialize"),
+        with_extra,
+        "trailing not re-emitted"
+    );
 }
