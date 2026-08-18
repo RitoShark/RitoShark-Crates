@@ -725,3 +725,35 @@ fn trailing_bytes_survive_roundtrip() {
         "trailing not re-emitted"
     );
 }
+
+/// The hash->path side table lives in `Bin.trailing`, so a bin carrying one still
+/// parses to the same entries, still round-trips byte-exactly, and hands the map
+/// back after a read -> write cycle.
+#[test]
+fn trailer_side_table_survives_a_bin_roundtrip() {
+    let mut trailer = rs_bin::Trailer::new();
+    trailer
+        .names
+        .insert(0xdeadbeef, "MyRepathedEmitter".to_string());
+    trailer.files.insert(
+        0x0011223344556677,
+        "ASSETS/Modders/Me/Custom.dds".to_string(),
+    );
+
+    let clean = sample_prop();
+    let mut bin = Bin::from_bytes(&clean).expect("parse clean");
+    bin.trailing = rs_bin::append_trailer(&bin.trailing, &trailer);
+
+    let bytes = bin.to_bytes().expect("serialize");
+    assert_eq!(&bytes[..clean.len()], &clean[..], "body must be untouched");
+
+    let reparsed = Bin::from_bytes(&bytes).expect("parse trailered");
+    assert_eq!(reparsed.entries, bin.entries);
+    assert_eq!(rs_bin::read_trailer(&reparsed.trailing), trailer);
+    assert_eq!(reparsed.to_bytes().expect("serialize"), bytes);
+
+    // Dropping the table restores the original file byte for byte.
+    let mut stripped = reparsed;
+    stripped.trailing = rs_bin::append_trailer(&stripped.trailing, &rs_bin::Trailer::new());
+    assert_eq!(stripped.to_bytes().expect("serialize"), clean);
+}

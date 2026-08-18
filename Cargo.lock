@@ -1203,6 +1203,7 @@ dependencies = [
  "rs_hash",
  "rs_io",
  "rs_math",
+ "serde_json",
  "thiserror",
 ]
 

@@ -8,13 +8,15 @@ embed, option presence, the trailing `PTCH` patches section, and every raw hash,
 round-trips are lossless. The `text` module both prints and parses the editable ritobin text form,
 so `bin -> text -> bin` reconstructs the original document exactly, and `value_to_text` /
 `value_from_text` do the same for a SINGLE `BinValue` so an editor can show one node (one VFX
-emitter, say) as editable text.
+emitter, say) as editable text. `Bin::trailing` carries whatever a tool appended after the declared
+body, and `Trailer` is the hash-to-path side table we store there.
 */
 
 mod bin;
 mod blend;
 mod error;
 mod read;
+mod trailer;
 mod write;
 
 pub mod text;
@@ -22,6 +24,7 @@ pub mod text;
 pub use bin::{Bin, BinEntry, BinPatch, BinType, BinValue};
 pub use blend::{BLEND_DATA_TABLE, BLEND_KEY_FIELDS, BlendKey, is_blend_key_field};
 pub use error::{Error, Result};
+pub use trailer::{Trailer, append_trailer, read_trailer, strip_trailer};
 // MERGE: union of both sides - see the note in `text/mod.rs`.
 pub use text::{
     TextOptions, from_text, to_text, to_text_with, value_from_text, value_from_text_as,
