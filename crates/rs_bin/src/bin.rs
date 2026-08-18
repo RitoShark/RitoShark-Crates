@@ -209,6 +209,12 @@ pub struct Bin {
     pub linked: Vec<String>,
     pub entries: Vec<BinEntry>,
     pub patches: Vec<BinPatch>,
+    /// Raw bytes present AFTER the declared bin body (entries + patches). The
+    /// format has no length header for the whole file, so tools can append
+    /// arbitrary trailing data (e.g. a hash->path side table) that the game and
+    /// this parser both ignore. Captured on read and re-emitted verbatim on write
+    /// so a round-trip never silently drops it. Empty for a normal bin.
+    pub trailing: Vec<u8>,
 }
 
 impl Bin {
@@ -220,6 +226,7 @@ impl Bin {
             linked: Vec::new(),
             entries: Vec::new(),
             patches: Vec::new(),
+            trailing: Vec::new(),
         }
     }
 }

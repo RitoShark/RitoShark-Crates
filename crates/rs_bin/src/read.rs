@@ -77,6 +77,13 @@ impl Parse for Bin {
             }
         }
 
+        // Capture any bytes after the declared body (entries + patches). The bin
+        // format has no whole-file length, so tools may append arbitrary trailing
+        // data (e.g. a hash->path side table) that the game and this parser ignore.
+        // Preserving it here means a read -> write round-trip never drops it.
+        let mut trailing = Vec::new();
+        reader.read_to_end(&mut trailing)?;
+
         Ok(Bin {
             is_patch,
             patch_header,
@@ -84,6 +91,7 @@ impl Parse for Bin {
             linked,
             entries,
             patches,
+            trailing,
         })
     }
 }
