@@ -56,6 +56,13 @@ impl Serialize for Bin {
             }
         }
 
+        // Re-emit any trailing bytes captured on read (e.g. an appended hash->path
+        // side table). Verbatim, after the declared body, so a round-trip preserves
+        // it. Empty for a normal bin.
+        if !self.trailing.is_empty() {
+            writer.write_bytes(&self.trailing)?;
+        }
+
         Ok(())
     }
 }

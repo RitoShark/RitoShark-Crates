@@ -1017,6 +1017,7 @@ fn py_to_bin(py: Python<'_>, doc: &Bound<'_, PyDict>) -> PyResult<Bin> {
         linked,
         entries,
         patches,
+        trailing: Vec::new(),
     })
 }
 
