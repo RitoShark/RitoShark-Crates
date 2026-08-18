@@ -152,6 +152,7 @@ fn null_pointer_round_trips() {
             fields,
         }],
         patches: Vec::new(),
+        trailing: Vec::new(),
     };
     let bytes = bin.to_bytes().expect("serialize");
     let reparsed = Bin::from_bytes(&bytes).expect("parse");
@@ -220,6 +221,7 @@ fn text_printer_barewords_names_but_quotes_keys_and_hash_values() {
             fields,
         }],
         patches: Vec::new(),
+        trailing: Vec::new(),
     };
 
     let text = rs_bin::to_text(&bin, Some(&mapper));
@@ -340,6 +342,7 @@ fn mtx44_text_round_trips() {
             fields,
         }],
         patches: Vec::new(),
+        trailing: Vec::new(),
     };
 
     let text = rs_bin::to_text(&bin, None);
@@ -680,4 +683,31 @@ fn value_from_text_rejects_ambiguous_and_malformed_input() {
     // Unbalanced braces (text mid-edit) fail rather than applying a partial subtree.
     assert!(rs_bin::value_from_text("Foo { a: f32 = 1", None).is_err());
     assert!(rs_bin::value_from_text("", None).is_err());
+}
+
+/// Bytes appended after the declared body (entries + patches) are captured into
+/// `Bin.trailing` on read and re-emitted verbatim on write, so a round-trip never
+/// drops them. A normal bin (no trailing) stays byte-identical.
+#[test]
+fn trailing_bytes_survive_roundtrip() {
+    // No trailing: parse -> serialize is byte-exact and trailing is empty.
+    let clean = sample_prop();
+    let bin = Bin::from_bytes(&clean).expect("parse clean");
+    assert!(bin.trailing.is_empty(), "clean bin must have no trailing bytes");
+    assert_eq!(bin.to_bytes().expect("serialize"), clean, "clean round-trip must be byte-exact");
+
+    // With trailing: append an arbitrary side table, confirm it is captured + re-emitted.
+    let mut with_extra = sample_prop();
+    let extra = b"CELMAP\x00\x00trailing-side-table-bytes";
+    with_extra.extend_from_slice(extra);
+
+    let bin = Bin::from_bytes(&with_extra).expect("parse trailered");
+    assert_eq!(bin.trailing, extra, "trailing bytes not captured");
+
+    // Entries/patches parse identically to the clean bin (trailing is ignored by the body).
+    let clean_bin = Bin::from_bytes(&clean).expect("parse clean");
+    assert_eq!(bin.entries, clean_bin.entries, "trailing changed the parsed entries");
+
+    // Round-trip preserves the whole file, trailing included.
+    assert_eq!(bin.to_bytes().expect("serialize"), with_extra, "trailing not re-emitted");
 }
