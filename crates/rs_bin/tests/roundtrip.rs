@@ -113,6 +113,123 @@ fn parsed_structure_matches_expectations() {
     );
 }
 
+/// A hand-built PROP buffer exercising hash (17), file (18), link (0x84), option[file] and
+/// list[file] — the value kinds Riot's string→file migration turns asset-path fields into.
+fn sample_prop_hashes() -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(b"PROP");
+    b.extend_from_slice(&3u32.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes()); // linked count
+    b.extend_from_slice(&1u32.to_le_bytes()); // entry count
+    b.extend_from_slice(&0x4444_4444u32.to_le_bytes()); // class
+
+    b.extend_from_slice(&82u32.to_le_bytes()); // entry length
+    b.extend_from_slice(&0x0C0C_0C0Cu32.to_le_bytes()); // path hash
+    b.extend_from_slice(&5u16.to_le_bytes()); // field count
+    // hash
+    b.extend_from_slice(&0x0000_00A1u32.to_le_bytes());
+    b.push(BinType::Hash.to_u8());
+    b.extend_from_slice(&0x1234_5678u32.to_le_bytes());
+    // file
+    b.extend_from_slice(&0x0000_00A2u32.to_le_bytes());
+    b.push(BinType::File.to_u8());
+    b.extend_from_slice(&0xB7A4_3488_6D1C_E5E6u64.to_le_bytes());
+    // link
+    b.extend_from_slice(&0x0000_00A3u32.to_le_bytes());
+    b.push(BinType::Link.to_u8());
+    b.extend_from_slice(&0x9ABC_DEF0u32.to_le_bytes());
+    // option[file] = { 0xD07A... }
+    b.extend_from_slice(&0x0000_00A4u32.to_le_bytes());
+    b.push(BinType::Option.to_u8());
+    b.push(BinType::File.to_u8());
+    b.push(1u8);
+    b.extend_from_slice(&0xD07A_0E94_36E6_0FB5u64.to_le_bytes());
+    // list[file] = { 2 items }
+    b.extend_from_slice(&0x0000_00A5u32.to_le_bytes());
+    b.push(BinType::List.to_u8());
+    b.push(BinType::File.to_u8());
+    b.extend_from_slice(&20u32.to_le_bytes());
+    b.extend_from_slice(&2u32.to_le_bytes());
+    b.extend_from_slice(&0x1111_2222_3333_4444u64.to_le_bytes());
+    b.extend_from_slice(&0x5555_6666_7777_8888u64.to_le_bytes());
+
+    b
+}
+
+#[test]
+fn hash_file_link_binary_round_trip() {
+    let bytes = sample_prop_hashes();
+    let bin = Bin::from_bytes(&bytes).expect("parse");
+    let e = &bin.entries[0];
+    assert_eq!(e.fields.get(&0xA1), Some(&BinValue::Hash(0x1234_5678)));
+    assert_eq!(
+        e.fields.get(&0xA2),
+        Some(&BinValue::File(0xB7A4_3488_6D1C_E5E6))
+    );
+    assert_eq!(e.fields.get(&0xA3), Some(&BinValue::Link(0x9ABC_DEF0)));
+    match e.fields.get(&0xA4) {
+        Some(BinValue::Option { item, value }) => {
+            assert_eq!(*item, BinType::File);
+            assert_eq!(
+                value.as_deref(),
+                Some(&BinValue::File(0xD07A_0E94_36E6_0FB5))
+            );
+        }
+        other => panic!("expected option[file], got {other:?}"),
+    }
+    match e.fields.get(&0xA5) {
+        Some(BinValue::List { item, items, .. }) => {
+            assert_eq!(*item, BinType::File);
+            assert_eq!(
+                items,
+                &vec![
+                    BinValue::File(0x1111_2222_3333_4444),
+                    BinValue::File(0x5555_6666_7777_8888)
+                ]
+            );
+        }
+        other => panic!("expected list[file], got {other:?}"),
+    }
+    assert_eq!(bin.to_bytes().expect("serialize"), bytes);
+}
+
+#[test]
+fn hash_file_link_text_round_trip() {
+    let bin = Bin::from_bytes(&sample_prop_hashes()).expect("parse");
+    let text = rs_bin::to_text(&bin, None);
+    assert!(text.contains("0x000000a2: file = 0xb7a434886d1ce5e6"));
+    assert!(text.contains("option[file]"));
+    assert!(text.contains("list[file]"));
+    let reparsed = rs_bin::from_text(&text, None).expect("parse text");
+    assert_eq!(reparsed, bin);
+    assert_eq!(
+        reparsed.to_bytes().expect("serialize"),
+        sample_prop_hashes()
+    );
+}
+
+#[test]
+fn text_parser_hashes_file_strings_with_xxh64() {
+    let text = "\
+#PROP_text
+version: u32 = 3
+entries: map[hash,embed] = {
+    0x0a0a0a0a = SomeClass {
+        loadscreen: file = \"ASSETS/Characters/Aatrox/Skins/Base/AatroxLoadscreen.tex\"
+    }
+}
+";
+    let bin = rs_bin::from_text(text, None).expect("parse");
+    assert_eq!(
+        bin.entries[0].fields.get(&rs_hash::fnv1a("loadscreen")),
+        Some(&BinValue::File(0xB7A4_3488_6D1C_E5E6))
+    );
+    assert_eq!(
+        rs_hash::xxh64("ASSETS/Characters/Aatrox/Skins/Base/AatroxLoadscreen.tex"),
+        0xB7A4_3488_6D1C_E5E6
+    );
+}
+
 #[test]
 fn patch_header_round_trips() {
     let mut bytes = Vec::new();
