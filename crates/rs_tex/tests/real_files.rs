@@ -239,36 +239,25 @@ fn compressed_dds_writes_and_reads_back() {
     for (x, y, px) in img.enumerate_pixels_mut() {
         *px = image::Rgba([(x * 8) as u8, (y * 8) as u8, 96, 255]);
     }
-    // Each BC format must write a compressed DDS our own reader can decode back to dimensions,
-    // with the decoded result close to the source (BC is lossy). BC5 is two-channel, so only its
-    // R/G survive; compare just those for it.
-    for (fmt, thresh, rg_only) in [
-        (TexFormat::Bc1, 12.0, false),
-        (TexFormat::Bc3, 12.0, false),
-        (TexFormat::Bc7, 8.0, false),
-        (TexFormat::Bc5, 12.0, true),
-    ] {
+    // BC5 and BC7 have no legacy DDS pixel format, so they must be refused outright rather than
+    // written through the DX10 extension the client cannot read.
+    for fmt in [TexFormat::Bc5, TexFormat::Bc7] {
+        assert!(
+            write_dds_bytes_bc(&img, fmt).is_err(),
+            "{fmt:?}: dds needs the DX10 extension the game cannot read"
+        );
+    }
+    // The legacy formats must write a compressed DDS our own reader decodes back to the same
+    // dimensions, close to the source (BC is lossy).
+    for fmt in [TexFormat::Bc1, TexFormat::Bc3] {
         let dds_bytes = write_dds_bytes_bc(&img, fmt)
             .unwrap_or_else(|e| panic!("{fmt:?}: compressed dds write: {e}"));
         let back = read_dds_bytes(&dds_bytes)
             .unwrap_or_else(|e| panic!("{fmt:?}: compressed dds read: {e}"));
         assert_eq!(back.dimensions(), img.dimensions(), "{fmt:?}: dims");
 
-        let diff = if rg_only {
-            let (ar, br) = (img.as_raw(), back.as_raw());
-            let mut total = 0u64;
-            let mut count = 0u64;
-            for (i, (a, b)) in ar.iter().zip(br).enumerate() {
-                if i % 4 < 2 {
-                    total += a.abs_diff(*b) as u64;
-                    count += 1;
-                }
-            }
-            total as f64 / count as f64
-        } else {
-            mean_abs_diff(&img, &back)
-        };
-        assert!(diff < thresh, "{fmt:?}: compressed dds drift {diff:.3}");
+        let diff = mean_abs_diff(&img, &back);
+        assert!(diff < 12.0, "{fmt:?}: compressed dds drift {diff:.3}");
         eprintln!("{fmt:?}: compressed DDS round-trip mean-abs-diff={diff:.3} OK");
     }
 }
