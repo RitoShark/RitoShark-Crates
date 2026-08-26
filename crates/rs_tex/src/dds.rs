@@ -1,9 +1,6 @@
 use std::path::Path;
 
-use ddsfile::{
-    AlphaMode, Caps2, D3D10ResourceDimension, D3DFormat, Dds, DxgiFormat, MiscFlag, NewD3dParams,
-    NewDxgiParams,
-};
+use ddsfile::{Caps2, D3DFormat, Dds, DxgiFormat, MiscFlag, NewD3dParams};
 use image::RgbaImage;
 
 use crate::decode::decode_block_format;
@@ -117,7 +114,7 @@ fn u32_bgra_to_image(width: u32, height: u32, pixels: &[u32]) -> Result<RgbaImag
 impl Texture {
     /// Parse a DDS buffer into a [`Texture`], mapping its pixel format onto [`TexFormat`] and
     /// carrying the main image data as the single full-resolution mip. Formats with no League
-    /// `.tex` equivalent (for example BC7) are rejected; decode those with [`read_dds_bytes`].
+    /// `.tex` equivalent (BC2, BC5) are rejected; decode those with [`read_dds_bytes`].
     pub fn from_dds_bytes(bytes: &[u8]) -> Result<Texture> {
         let dds = Dds::read(bytes)?;
         let width = dds.get_width();
@@ -151,9 +148,10 @@ impl Texture {
     }
 
     /// Serialize this texture's full-resolution mip into a block-compressed `.dds` byte buffer of
-    /// the given `format` (BC1/BC3/BC5/BC7). The payload is decoded to RGBA8 and re-compressed into
-    /// the requested format, producing a single-surface, single-mip compressed DDS that any DDS
-    /// reader accepts. For lossless re-export prefer matching the texture's own format.
+    /// the given `format`, which must be BC1 or BC3 — the only block formats with a legacy DDS
+    /// pixel format. The payload is decoded to RGBA8 and re-compressed, producing a
+    /// single-surface, single-mip DDS the game's loader accepts. BC5 and BC7 are rejected: they
+    /// exist only under the DX10 extension, which crashes the client, so they belong in a `.tex`.
     pub fn to_dds_bytes_bc(&self, format: TexFormat) -> Result<Vec<u8>> {
         let img = self.decode_rgba()?;
         rgba_to_dds_bc(&img, format)?.to_bytes()
@@ -172,28 +170,16 @@ impl Texture {
 A DDS written through the DX10 extension carries the `DX10` FourCC and a 20-byte header the
 D3D9-era loaders in shipping games do not parse — they read the pixel data 20 bytes short and
 fail on the unknown FourCC. BC1/BC3 predate the extension and have legacy FourCCs, so they are
-written the old way; BC5 and BC7 exist only in the extended table. */
-fn bc_d3d_format(format: TexFormat) -> Option<D3DFormat> {
+written the old way; BC5 and BC7 exist only in the extended table, so they have no DDS form the
+game can load at all and belong in a `.tex` instead. */
+fn bc_d3d_format(format: TexFormat) -> Result<D3DFormat> {
     match format {
-        TexFormat::Bc1 | TexFormat::Bc1Alt => Some(D3DFormat::DXT1),
-        TexFormat::Bc3 => Some(D3DFormat::DXT5),
-        _ => None,
+        TexFormat::Bc1 | TexFormat::Bc1Alt => Ok(D3DFormat::DXT1),
+        TexFormat::Bc3 => Ok(D3DFormat::DXT5),
+        other => Err(Error::UnsupportedFormat(format!(
+            "{other:?} dds needs the DX10 extension the game cannot read; write it as .tex, or pick BC1/BC3"
+        ))),
     }
-}
-
-/// Map a block-compressed [`TexFormat`] onto its DXGI equivalent for the DDS writer.
-fn bc_dxgi_format(format: TexFormat) -> Result<DxgiFormat> {
-    Ok(match format {
-        TexFormat::Bc1 | TexFormat::Bc1Alt => DxgiFormat::BC1_UNorm,
-        TexFormat::Bc3 => DxgiFormat::BC3_UNorm,
-        TexFormat::Bc5 => DxgiFormat::BC5_UNorm,
-        TexFormat::Bc7 => DxgiFormat::BC7_UNorm,
-        other => {
-            return Err(Error::UnsupportedFormat(format!(
-                "compressed dds is only supported for BC1/BC3/BC5/BC7, not {other:?}"
-            )));
-        }
-    })
 }
 
 fn fill_surface(dds: &mut Dds, payload: &[u8]) {
@@ -205,35 +191,23 @@ fn fill_surface(dds: &mut Dds, payload: &[u8]) {
 
 /// Build a single-surface block-compressed DDS from an RGBA8 image and a BC [`TexFormat`].
 fn rgba_to_dds_bc(img: &RgbaImage, format: TexFormat) -> Result<Dds> {
+    let d3d = bc_d3d_format(format)?;
     let blocks = crate::encode::compress_surface(format, img.as_raw(), img.width(), img.height())?;
 
-    let mut dds = match bc_d3d_format(format) {
-        Some(d3d) => Dds::new_d3d(NewD3dParams {
-            height: img.height(),
-            width: img.width(),
-            depth: None,
-            format: d3d,
-            mipmap_levels: None,
-            caps2: None,
-        })?,
-        None => Dds::new_dxgi(NewDxgiParams {
-            height: img.height(),
-            width: img.width(),
-            depth: None,
-            format: bc_dxgi_format(format)?,
-            mipmap_levels: None,
-            array_layers: None,
-            caps2: None,
-            is_cubemap: false,
-            resource_dimension: D3D10ResourceDimension::Texture2D,
-            alpha_mode: AlphaMode::Straight,
-        })?,
-    };
+    let mut dds = Dds::new_d3d(NewD3dParams {
+        height: img.height(),
+        width: img.width(),
+        depth: None,
+        format: d3d,
+        mipmap_levels: None,
+        caps2: None,
+    })?;
     fill_surface(&mut dds, &blocks);
     Ok(dds)
 }
 
-/// Serialize an [`RgbaImage`] to a block-compressed `.dds` byte buffer of the given BC `format`.
+/// Serialize an [`RgbaImage`] to a block-compressed `.dds` byte buffer of the given BC `format`,
+/// which must be BC1 or BC3 (see [`Texture::to_dds_bytes_bc`]).
 pub fn write_dds_bytes_bc(img: &RgbaImage, format: TexFormat) -> Result<Vec<u8>> {
     rgba_to_dds_bc(img, format)?.to_bytes()
 }
@@ -373,6 +347,8 @@ pub fn read_dds(path: impl AsRef<Path>) -> Result<RgbaImage> {
 
 #[cfg(test)]
 mod tests {
+    use ddsfile::{AlphaMode, D3D10ResourceDimension};
+
     use super::*;
 
     const FOURCC_OFFSET: usize = 84;
@@ -420,9 +396,44 @@ mod tests {
     }
 
     #[test]
-    fn formats_with_no_legacy_pixel_format_keep_the_extension() {
-        let bytes = write_dds_bytes_bc(&sample(), TexFormat::Bc7).expect("write");
+    fn formats_with_no_legacy_pixel_format_are_rejected() {
+        for format in [TexFormat::Bc5, TexFormat::Bc7] {
+            assert!(
+                write_dds_bytes_bc(&sample(), format).is_err(),
+                "{format:?} must not produce a dds"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dx10_bc7_dds_still_decodes() {
+        let img = sample();
+        let blocks = crate::encode::compress_surface(
+            TexFormat::Bc7,
+            img.as_raw(),
+            img.width(),
+            img.height(),
+        )
+        .expect("compress");
+        let mut dds = Dds::new_dxgi(ddsfile::NewDxgiParams {
+            height: img.height(),
+            width: img.width(),
+            depth: None,
+            format: DxgiFormat::BC7_UNorm,
+            mipmap_levels: None,
+            array_layers: None,
+            caps2: None,
+            is_cubemap: false,
+            resource_dimension: D3D10ResourceDimension::Texture2D,
+            alpha_mode: AlphaMode::Straight,
+        })
+        .expect("build");
+        fill_surface(&mut dds, &blocks);
+
+        let mut bytes = Vec::new();
+        dds.write(&mut bytes).expect("write");
         assert_eq!(fourcc(&bytes), *b"DX10");
+        assert_eq!(read_dds_bytes(&bytes).expect("read").dimensions(), (8, 8));
     }
 
     #[test]
@@ -457,7 +468,7 @@ mod tests {
 
     #[test]
     fn every_written_shape_reads_back() {
-        for format in [TexFormat::Bc1, TexFormat::Bc3, TexFormat::Bc7] {
+        for format in [TexFormat::Bc1, TexFormat::Bc3] {
             let bytes = write_dds_bytes_bc(&sample(), format).expect("write");
             let back = read_dds_bytes(&bytes).unwrap_or_else(|e| panic!("{format:?}: {e}"));
             assert_eq!(back.dimensions(), (8, 8), "{format:?}");
