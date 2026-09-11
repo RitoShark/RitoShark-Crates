@@ -23,6 +23,9 @@ pub struct HircSection {
     pub objects: Vec<HircObject>,
 }
 
+/// Wwise's action-type byte for Play. 1 is Stop, 2 Pause, 3 Resume, 4 Play.
+const ACTION_PLAY: u8 = 4;
+
 impl HircSection {
     /** Parses a HIRC section body. `version` is the bank's BKHD version, which decides the size
     of several parameter blocks. */
@@ -110,6 +113,13 @@ impl HircSection {
     a sound naming a `.wem` or a container routing to more objects. Walking that whole reachable
     set is what turns "mute this voice line" into a concrete list of payloads to replace.
 
+    Only PLAY actions are followed. An event carries more than one kind: Akali skin92's
+    `Play_sfx_AkaliSkin92_Recall3D_leadin1` has one Play and three Stops, each pointing at a
+    different container. Following all of them returned the cues the event SILENCES alongside the
+    one it starts, in no defined order, so a caller taking the first id played whatever the event
+    was cutting off - a skin's recall came out sounding like the base champion's. An event whose
+    actions are all non-Play plays nothing, and correctly yields an empty list.
+
     Ids are returned in discovery order, deduplicated. Objects are visited at most once, so a
     hierarchy containing a cycle terminates rather than recursing forever. */
     pub fn wems_for_event(&self, event_id: u32) -> Vec<u32> {
@@ -129,6 +139,7 @@ impl HircSection {
                 body: HircBody::Action(action),
                 ..
             }) = index.get(action_id).copied()
+                && action.action_type == ACTION_PLAY
                 && action.target_id != 0
             {
                 roots.push(action.target_id);
@@ -168,5 +179,57 @@ impl HircSection {
         self.events()
             .map(|event| (event.id, self.wems_for_event(event.id)))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // `super::*` already re-exports Action/Container/Event/Sound/HircBody/HircKind/HircObject.
+    use super::*;
+
+    fn obj(kind: HircKind, id: u32, body: HircBody) -> HircObject {
+        HircObject { kind, id, body }
+    }
+
+    /* The exact shape of Akali skin92's `Play_sfx_AkaliSkin92_Recall3D_leadin1`: one Play
+       action into a random container holding the new cue, plus a Stop action aimed at a
+       different container holding the cue being cut off. Following both returned the
+       stopped sound too, and a caller taking the first id played the wrong one. */
+    fn recall_shaped_section() -> HircSection {
+        HircSection {
+            objects: vec![
+                obj(HircKind::Event, 1, HircBody::Event(Event { id: 1, action_ids: vec![10, 11] })),
+                obj(HircKind::Action, 10, HircBody::Action(Action {
+                    id: 10, scope: 0, action_type: 4, target_id: 20,
+                    switch_group_id: 0, switch_state_id: 0, state_group_id: 0, target_state_id: 0,
+                })),
+                obj(HircKind::Action, 11, HircBody::Action(Action {
+                    id: 11, scope: 0, action_type: 1, target_id: 21,
+                    switch_group_id: 0, switch_state_id: 0, state_group_id: 0, target_state_id: 0,
+                })),
+                obj(HircKind::RandomSequenceContainer, 20,
+                    HircBody::RandomSequenceContainer(Container { id: 20, parent_id: 0, children: vec![30] })),
+                obj(HircKind::RandomSequenceContainer, 21,
+                    HircBody::RandomSequenceContainer(Container { id: 21, parent_id: 0, children: vec![31] })),
+                obj(HircKind::Sound, 30, HircBody::Sound(Sound { id: 30, source_id: 716848736, streamed: false })),
+                obj(HircKind::Sound, 31, HircBody::Sound(Sound { id: 31, source_id: 368824398, streamed: false })),
+            ],
+        }
+    }
+
+    #[test]
+    fn only_play_actions_contribute_wems() {
+        assert_eq!(recall_shaped_section().wems_for_event(1), vec![716848736]);
+    }
+
+    #[test]
+    fn an_event_with_no_play_action_plays_nothing() {
+        let mut section = recall_shaped_section();
+        for object in &mut section.objects {
+            if let HircBody::Action(action) = &mut object.body {
+                action.action_type = 1; // every action a Stop
+            }
+        }
+        assert!(section.wems_for_event(1).is_empty());
     }
 }
