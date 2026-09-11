@@ -192,27 +192,84 @@ mod tests {
     }
 
     /* The exact shape of Akali skin92's `Play_sfx_AkaliSkin92_Recall3D_leadin1`: one Play
-       action into a random container holding the new cue, plus a Stop action aimed at a
-       different container holding the cue being cut off. Following both returned the
-       stopped sound too, and a caller taking the first id played the wrong one. */
+    action into a random container holding the new cue, plus a Stop action aimed at a
+    different container holding the cue being cut off. Following both returned the
+    stopped sound too, and a caller taking the first id played the wrong one. */
     fn recall_shaped_section() -> HircSection {
         HircSection {
             objects: vec![
-                obj(HircKind::Event, 1, HircBody::Event(Event { id: 1, action_ids: vec![10, 11] })),
-                obj(HircKind::Action, 10, HircBody::Action(Action {
-                    id: 10, scope: 0, action_type: 4, target_id: 20,
-                    switch_group_id: 0, switch_state_id: 0, state_group_id: 0, target_state_id: 0,
-                })),
-                obj(HircKind::Action, 11, HircBody::Action(Action {
-                    id: 11, scope: 0, action_type: 1, target_id: 21,
-                    switch_group_id: 0, switch_state_id: 0, state_group_id: 0, target_state_id: 0,
-                })),
-                obj(HircKind::RandomSequenceContainer, 20,
-                    HircBody::RandomSequenceContainer(Container { id: 20, parent_id: 0, children: vec![30] })),
-                obj(HircKind::RandomSequenceContainer, 21,
-                    HircBody::RandomSequenceContainer(Container { id: 21, parent_id: 0, children: vec![31] })),
-                obj(HircKind::Sound, 30, HircBody::Sound(Sound { id: 30, source_id: 716848736, streamed: false })),
-                obj(HircKind::Sound, 31, HircBody::Sound(Sound { id: 31, source_id: 368824398, streamed: false })),
+                obj(
+                    HircKind::Event,
+                    1,
+                    HircBody::Event(Event {
+                        id: 1,
+                        action_ids: vec![10, 11],
+                    }),
+                ),
+                obj(
+                    HircKind::Action,
+                    10,
+                    HircBody::Action(Action {
+                        id: 10,
+                        scope: 0,
+                        action_type: 4,
+                        target_id: 20,
+                        switch_group_id: 0,
+                        switch_state_id: 0,
+                        state_group_id: 0,
+                        target_state_id: 0,
+                    }),
+                ),
+                obj(
+                    HircKind::Action,
+                    11,
+                    HircBody::Action(Action {
+                        id: 11,
+                        scope: 0,
+                        action_type: 1,
+                        target_id: 21,
+                        switch_group_id: 0,
+                        switch_state_id: 0,
+                        state_group_id: 0,
+                        target_state_id: 0,
+                    }),
+                ),
+                obj(
+                    HircKind::RandomSequenceContainer,
+                    20,
+                    HircBody::RandomSequenceContainer(Container {
+                        id: 20,
+                        parent_id: 0,
+                        children: vec![30],
+                    }),
+                ),
+                obj(
+                    HircKind::RandomSequenceContainer,
+                    21,
+                    HircBody::RandomSequenceContainer(Container {
+                        id: 21,
+                        parent_id: 0,
+                        children: vec![31],
+                    }),
+                ),
+                obj(
+                    HircKind::Sound,
+                    30,
+                    HircBody::Sound(Sound {
+                        id: 30,
+                        source_id: 716848736,
+                        streamed: false,
+                    }),
+                ),
+                obj(
+                    HircKind::Sound,
+                    31,
+                    HircBody::Sound(Sound {
+                        id: 31,
+                        source_id: 368824398,
+                        streamed: false,
+                    }),
+                ),
             ],
         }
     }
