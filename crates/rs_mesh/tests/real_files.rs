@@ -164,6 +164,48 @@ fn skn_real_files_roundtrip() {
     }
 }
 
+#[test]
+fn skn_prefix_block_and_relative_indices_real_file() {
+    let Some(dir) = sample_dir() else {
+        eprintln!("Sample-Files directory missing; skipping");
+        return;
+    };
+    let path = dir.join("janna_skin67.skn");
+    if !path.is_file() {
+        eprintln!("missing janna_skin67.skn; skipping");
+        return;
+    }
+    let bytes = std::fs::read(&path).unwrap();
+    let mesh = SkinnedMesh::from_bytes(&bytes).unwrap();
+
+    assert_eq!(
+        mesh.flags,
+        SkinnedMesh::FLAG_PREFIX_BLOCK | SkinnedMesh::FLAG_RELATIVE_INDICES
+    );
+    assert_eq!(mesh.prefix_block.len(), 160);
+    assert_eq!(mesh.trailing, [0; 12]);
+
+    let indices = mesh.absolute_indices();
+    for r in mesh.ranges() {
+        let vertices = r.vertex_start..r.vertex_start + r.vertex_count;
+        let start = r.index_start as usize;
+        let slice = &indices[start..start + r.index_count as usize];
+        assert!(
+            slice.iter().all(|i| vertices.contains(i)),
+            "range '{}' indexes outside its own vertices",
+            r.name
+        );
+    }
+    assert!(
+        mesh.vertices()
+            .iter()
+            .all(|v| (v.blend_weights.iter().sum::<f32>() - 1.0).abs() < 0.01),
+        "vertex buffer is misaligned"
+    );
+
+    assert_eq!(mesh.to_bytes().unwrap(), bytes);
+}
+
 /// The `.scb` TAIL: per-corner VCP colors + the local-origin/pivot pair, and the two consumer
 /// helpers that depend on them (`centred_positions`, `effective_bounds`).
 ///

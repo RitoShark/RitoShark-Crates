@@ -113,6 +113,8 @@ pub struct SkinnedMesh {
     pub ranges: Vec<SkinnedMeshRange>,
     pub indices: Vec<u16>,
     pub vertices: Vec<SkinnedMeshVertex>,
+    /// The `u16`-length-prefixed block present when [`SkinnedMesh::FLAG_PREFIX_BLOCK`] is set.
+    pub prefix_block: Vec<u8>,
     /// Opaque bytes that follow the vertex buffer. Real major-4 files written by the game append a
     /// 12-byte zero "end tab" here; keeping the raw bytes lets `from_reader` -> `to_writer` stay
     /// byte-exact regardless of the (unspecified) meaning of that tail.
@@ -120,6 +122,34 @@ pub struct SkinnedMesh {
 }
 
 impl SkinnedMesh {
+    /// A `u16`-length-prefixed block sits between the header and the index buffer.
+    pub const FLAG_PREFIX_BLOCK: u32 = 1;
+    /// Each range's indices count from that range's `vertex_start`.
+    pub const FLAG_RELATIVE_INDICES: u32 = 2;
+
+    pub fn has_relative_indices(&self) -> bool {
+        self.flags & Self::FLAG_RELATIVE_INDICES != 0
+    }
+
+    /** The index buffer resolved to positions in the shared vertex buffer. `indices` holds the
+    on-disk values, which are range-relative under [`SkinnedMesh::FLAG_RELATIVE_INDICES`]; such a
+    mesh may carry more than 65536 vertices, hence `u32`. */
+    pub fn absolute_indices(&self) -> Vec<u32> {
+        let mut out: Vec<u32> = self.indices.iter().map(|&i| u32::from(i)).collect();
+        if self.has_relative_indices() {
+            for range in &self.ranges {
+                let start = (range.index_start as usize).min(out.len());
+                let end = start
+                    .saturating_add(range.index_count as usize)
+                    .min(out.len());
+                for index in &mut out[start..end] {
+                    *index = index.saturating_add(range.vertex_start);
+                }
+            }
+        }
+        out
+    }
+
     pub fn ranges(&self) -> &[SkinnedMeshRange] {
         &self.ranges
     }

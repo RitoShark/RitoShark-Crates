@@ -42,6 +42,13 @@ impl Serialize for SkinnedMesh {
             }
         }
 
+        if self.flags & SkinnedMesh::FLAG_PREFIX_BLOCK != 0 {
+            let len = u16::try_from(self.prefix_block.len())
+                .map_err(|_| Error::Unsupported("skn prefix block is longer than 65535 bytes"))?;
+            w.write_u16(len)?;
+            w.write_bytes(&self.prefix_block)?;
+        }
+
         for &index in &self.indices {
             w.write_u16(index)?;
         }

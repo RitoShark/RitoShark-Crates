@@ -105,6 +105,48 @@ fn roundtrip_skn(major: u16, vtype: u32) {
 }
 
 #[test]
+fn skn_prefix_block_and_relative_indices_roundtrip() {
+    let mut buf = Vec::new();
+    buf.write_u32(0x0011_2233).unwrap();
+    buf.write_u16(4).unwrap();
+    buf.write_u16(1).unwrap();
+    buf.write_u32(2).unwrap();
+    for (name, vertex_start, index_start) in [("A", 0u32, 0u32), ("B", 3, 3)] {
+        write_padded(&mut buf, name, 64);
+        buf.write_u32(vertex_start).unwrap();
+        buf.write_u32(3).unwrap();
+        buf.write_u32(index_start).unwrap();
+        buf.write_u32(3).unwrap();
+    }
+    buf.write_u32(SkinnedMesh::FLAG_PREFIX_BLOCK | SkinnedMesh::FLAG_RELATIVE_INDICES)
+        .unwrap();
+    buf.write_u32(6).unwrap();
+    buf.write_u32(6).unwrap();
+    buf.write_u32(52).unwrap();
+    buf.write_u32(0).unwrap();
+    for c in [-1.0f32, -1.0, -1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.732] {
+        buf.write_f32(c).unwrap();
+    }
+    buf.write_u16(4).unwrap();
+    buf.extend_from_slice(&[9, 8, 7, 6]);
+    for i in [0u16, 1, 2, 2, 1, 0] {
+        buf.write_u16(i).unwrap();
+    }
+    for k in 0..6 {
+        let f = k as f32;
+        basic_vertex(&mut buf, [f, f, f], [0.0, 1.0, 0.0], [0.0, 0.0]);
+    }
+    buf.extend_from_slice(&[0; 12]);
+
+    let mesh = SkinnedMesh::from_bytes(&buf).expect("parse");
+    assert_eq!(mesh.prefix_block, [9, 8, 7, 6]);
+    assert_eq!(mesh.indices(), &[0, 1, 2, 2, 1, 0]);
+    assert_eq!(mesh.absolute_indices(), [0, 1, 2, 5, 4, 3]);
+    assert_eq!(mesh.trailing, [0; 12]);
+    assert_eq!(mesh.to_bytes().expect("write"), buf);
+}
+
+#[test]
 fn skn_v1_basic_roundtrip() {
     roundtrip_skn(1, 0);
 }

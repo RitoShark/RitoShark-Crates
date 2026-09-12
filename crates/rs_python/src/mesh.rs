@@ -182,6 +182,7 @@ impl Skn {
             ranges,
             indices: indices.iter().map(|&i| i as u16).collect(),
             vertices,
+            prefix_block: Vec::new(),
             trailing: vec![0u8; 12],
         };
         Ok(Self { inner })
@@ -238,7 +239,7 @@ impl Skn {
 
     #[getter]
     fn indices<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &pack_u32(self.inner.indices.iter().map(|&i| i as u32)))
+        PyBytes::new(py, &pack_u32(self.inner.absolute_indices().into_iter()))
     }
 
     #[getter]

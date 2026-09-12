@@ -77,6 +77,12 @@ impl Parse for SkinnedMesh {
             }
         }
 
+        let mut prefix_block = Vec::new();
+        if flags & SkinnedMesh::FLAG_PREFIX_BLOCK != 0 {
+            let len = reader.read_u16()? as usize;
+            prefix_block = reader.read_bytes(len)?;
+        }
+
         if index_count % 3 != 0 {
             return Err(Error::BadIndexCount(index_count));
         }
@@ -106,6 +112,7 @@ impl Parse for SkinnedMesh {
             ranges,
             indices,
             vertices,
+            prefix_block,
             trailing,
         })
     }
