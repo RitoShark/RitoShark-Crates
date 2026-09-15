@@ -319,9 +319,15 @@ impl<'a> Evaluator<'a> {
         scale_keys: [usize; 4],
     ) {
         let mut hot = JointHot::new();
+        // Advance the cursor ONLY for a frame index that resolves to a real frame. A joint with no
+        // key for a channel is seeded with the sentinel 0xFFFF; taking `cursor.max(0xFFFF)` before
+        // the bounds check jumped the shared cursor past the end of the stream, after which
+        // `advance_cursor` (`while cursor < frames.len()`) stopped updating EVERY joint's window for
+        // the rest of the clip - so joints extrapolated their seed window into the thousands and the
+        // mesh tore apart. The bounds check must gate the cursor update, not just the key write.
         for (i, &frame_idx) in rotation_keys.iter().enumerate() {
-            self.cursor = self.cursor.max(frame_idx);
             if let Some(frame) = self.anim.frames.get(frame_idx) {
+                self.cursor = self.cursor.max(frame_idx);
                 hot.rotation[i] = QuatKey {
                     time: frame.time,
                     value: decompress_quat(&frame.value),
@@ -329,8 +335,8 @@ impl<'a> Evaluator<'a> {
             }
         }
         for (i, &frame_idx) in translation_keys.iter().enumerate() {
-            self.cursor = self.cursor.max(frame_idx);
             if let Some(frame) = self.anim.frames.get(frame_idx) {
+                self.cursor = self.cursor.max(frame_idx);
                 hot.translation[i] = VecKey {
                     time: frame.time,
                     value: decompress_vec3(
@@ -342,8 +348,8 @@ impl<'a> Evaluator<'a> {
             }
         }
         for (i, &frame_idx) in scale_keys.iter().enumerate() {
-            self.cursor = self.cursor.max(frame_idx);
             if let Some(frame) = self.anim.frames.get(frame_idx) {
+                self.cursor = self.cursor.max(frame_idx);
                 hot.scale[i] = VecKey {
                     time: frame.time,
                     value: decompress_vec3(self.anim.scale_min, self.anim.scale_max, &frame.value),
@@ -430,6 +436,15 @@ fn align_shortest_path(rotation: &mut [QuatKey; 4]) {
 }
 
 fn sample_quat(time: u16, parametrized: bool, keys: &[QuatKey; 4]) -> Quat {
+    // A window with no span (a constant channel, or a joint that authored no key so all four slots
+    // hold the placeholder at time 0) has no curve to interpolate. The parametrized weights divide
+    // by that span guarded only by SLERP_EPSILON, so `amount` blows up and the Catmull-Rom
+    // coefficients grow to ~1e18 and cancel to garbage - the uncompressed branch already returns the
+    // resting key here, so the parametrized branch must too. Rotations hid this behind renormalize;
+    // translation and scale did not, and a scale-less joint decoded to scale 0 (mesh collapse).
+    if keys[2].time == keys[1].time {
+        return keys[1].value;
+    }
     let (amount, ease_in, ease_out) = if parametrized {
         keyframe_weights(time, keys[0].time, keys[1].time, keys[2].time, keys[3].time)
     } else {
@@ -454,6 +469,11 @@ fn sample_quat(time: u16, parametrized: bool, keys: &[QuatKey; 4]) -> Quat {
 }
 
 fn sample_vec3(time: u16, parametrized: bool, keys: &[VecKey; 4]) -> Vec3 {
+    // See sample_quat: a zero-span window has no curve, so return the resting key rather than
+    // interpolate across a degenerate interval.
+    if keys[2].time == keys[1].time {
+        return keys[1].value;
+    }
     let (amount, ease_in, ease_out) = if parametrized {
         keyframe_weights(time, keys[0].time, keys[1].time, keys[2].time, keys[3].time)
     } else {
@@ -562,5 +582,54 @@ mod tests {
             value: Vec3::splat(7.0),
         }; 4];
         assert_eq!(sample_vec3(0, false, &keys), Vec3::splat(7.0));
+    }
+
+    /// A constant (zero-span) channel sampled through the PARAMETRIZED path must hold its value
+    /// rather than divide by a zero span. Regression for scale-less joints decoding to scale 0 and
+    /// translation channels extrapolating into the millions.
+    #[test]
+    fn constant_parametrized_channels_remain_constant() {
+        let q = [QuatKey {
+            time: 0,
+            value: Quat::IDENTITY,
+        }; 4];
+        let v = [VecKey {
+            time: 0,
+            value: Vec3::new(1.0, 2.0, 3.0),
+        }; 4];
+        for t in [0u16, 1, 655, 32767, 65535] {
+            assert_eq!(sample_quat(t, true, &q), Quat::IDENTITY);
+            assert_eq!(sample_vec3(t, true, &v), v[0].value);
+        }
+    }
+
+    /// A joint with no key for a channel is seeded with the 0xFFFF sentinel. That must not advance
+    /// the shared cursor past the end of the frame stream (which froze every joint's window and made
+    /// the whole rig extrapolate). Regression for the range-of-joints mesh tear.
+    #[test]
+    fn missing_channel_sentinel_does_not_jump_cursor_past_stream() {
+        let anim = Compressed {
+            parametrized: true,
+            fps: 30.0,
+            duration: 1.0,
+            joint_count: 1,
+            frame_count: 1,
+            jump_cache_count: 0,
+            translation_min: Vec3::ZERO,
+            translation_max: Vec3::ONE,
+            scale_min: Vec3::ONE,
+            scale_max: Vec3::ONE,
+            joints: vec![1],
+            frames: vec![Frame {
+                time: 0,
+                joint_id_raw: 0,
+                value: [0; 6],
+            }],
+            jump_caches: vec![],
+        };
+        let mut evaluator = Evaluator::new(&anim);
+        evaluator.init_joint_hot(0, [0; 4], [0xFFFF; 4], [0xFFFF; 4]);
+        assert_eq!(evaluator.cursor, 0);
+        assert_eq!(evaluator.hot[0].sample(100, true).2, Vec3::ONE);
     }
 }
