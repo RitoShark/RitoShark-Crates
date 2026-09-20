@@ -44,6 +44,8 @@ num_enum = "0.7"
 rayon = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "webp"] }
 clap = { version = "4", features = ["derive"] }
+heed = { version = "0.22", default-features = false }
+ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
 pyo3 = { version = "0.23", features = ["abi3-py39", "extension-module"] }
 insta = "1"
 criterion = "0.5"

@@ -1,4 +1,6 @@
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: `lmdb_hashes` needs one audited `unsafe` block to memory-map the hash
+// dictionary, and `forbid` cannot be lifted by an inner `allow`. Every other module is unaffected.
+#![deny(unsafe_code)]
 /*!
 The `rs_cli` command-line front end: a thin binary over the RitoShark crates. It detects a
 file's format, reads per-format info, transforms between formats, and runs format-specific
@@ -8,7 +10,9 @@ umbrella crate and reports failures via miette. It never invokes any external pr
 
 mod commands;
 mod error;
+mod hash_fetch;
 mod hashes;
+mod lmdb_hashes;
 mod output;
 mod pathsafe;
 
@@ -71,6 +75,19 @@ enum Command {
     /// Operate on `.wpk`/`.bnk` audio containers.
     #[command(subcommand)]
     Audio(AudioCmd),
+    /// Manage the hash dictionary used to resolve names.
+    #[command(subcommand)]
+    Hashes(HashesCmd),
+}
+
+#[derive(Subcommand)]
+enum HashesCmd {
+    /// Show where the dictionary is and how many names it holds.
+    Status,
+    /// Download the dictionary if it is missing.
+    Install,
+    /// Re-download the dictionary even if one is already installed.
+    Update,
 }
 
 #[derive(Subcommand)]
@@ -296,6 +313,9 @@ fn run(cli: Cli) -> Result<()> {
         Command::Audio(AudioCmd::Silence { input, id, output }) => {
             commands::audio::silence(&input, id, &output)
         }
+        Command::Hashes(HashesCmd::Status) => commands::hashes::status(),
+        Command::Hashes(HashesCmd::Install) => commands::hashes::install(false),
+        Command::Hashes(HashesCmd::Update) => commands::hashes::install(true),
     }
 }
 

@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod bin;
+pub mod hashes;
 pub mod read;
 pub mod rst;
 pub mod tex;
