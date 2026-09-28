@@ -24,26 +24,28 @@ impl Palettes {
         }
     }
 
-    fn vec(&mut self, v: Vec3) -> u16 {
+    fn vec(&mut self, v: Vec3) -> Result<u16> {
         let key = [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()];
         if let Some(&i) = self.vec_index.get(&key) {
-            return i;
+            return Ok(i);
         }
-        let i = self.vecs.len() as u16;
+        let i = u16::try_from(self.vecs.len())
+            .map_err(|_| Error::Unsupported("anm vector palette exceeds 65536 entries"))?;
         self.vecs.push(v);
         self.vec_index.insert(key, i);
-        i
+        Ok(i)
     }
 
-    fn quat(&mut self, q: Quat) -> u16 {
+    fn quat(&mut self, q: Quat) -> Result<u16> {
         let key = [q.x.to_bits(), q.y.to_bits(), q.z.to_bits(), q.w.to_bits()];
         if let Some(&i) = self.quat_index.get(&key) {
-            return i;
+            return Ok(i);
         }
-        let i = self.quats.len() as u16;
+        let i = u16::try_from(self.quats.len())
+            .map_err(|_| Error::Unsupported("anm quaternion palette exceeds 65536 entries"))?;
         self.quats.push(q);
         self.quat_index.insert(key, i);
-        i
+        Ok(i)
     }
 }
 
@@ -66,6 +68,17 @@ impl Animation {
             .unwrap_or(0);
 
         let frame_duration = if self.fps != 0.0 { 1.0 / self.fps } else { 0.0 };
+        let track_count_u32 = u32::try_from(track_count)
+            .map_err(|_| Error::Unsupported("anm track count exceeds u32"))?;
+        let frame_count_u32 = u32::try_from(frame_count)
+            .map_err(|_| Error::Unsupported("anm frame count exceeds u32"))?;
+        let frame_bytes = (track_count as u64)
+            .checked_mul(frame_count as u64)
+            .and_then(|n| n.checked_mul(12))
+            .ok_or(Error::Unsupported("anm frame size overflow"))?;
+        if frame_bytes > u32::MAX as u64 - 76 {
+            return Err(Error::Unsupported("anm resource size exceeds u32"));
+        }
 
         let mut palettes = Palettes::new();
         let mut frame_indices: Vec<Vec<(u16, u16, u16)>> = Vec::with_capacity(track_count);
@@ -75,14 +88,14 @@ impl Animation {
                 let frame = track.frames.get(f).or_else(|| track.frames.last());
                 let (t, s, r) = match frame {
                     Some(fr) => (
-                        palettes.vec(fr.translation),
-                        palettes.vec(fr.scale),
-                        palettes.quat(fr.rotation),
+                        palettes.vec(fr.translation)?,
+                        palettes.vec(fr.scale)?,
+                        palettes.quat(fr.rotation)?,
                     ),
                     None => (
-                        palettes.vec(Vec3::ZERO),
-                        palettes.vec(Vec3::ONE),
-                        palettes.quat(Quat::IDENTITY),
+                        palettes.vec(Vec3::ZERO)?,
+                        palettes.vec(Vec3::ONE)?,
+                        palettes.quat(Quat::IDENTITY)?,
                     ),
                 };
                 indices.push((t, s, r));
@@ -90,8 +103,10 @@ impl Animation {
             frame_indices.push(indices);
         }
 
-        if palettes.vecs.len() > 0xFFFF || palettes.quats.len() > 0xFFFF {
-            return Err(Error::Unsupported("anm palette exceeds 65535 entries"));
+        let file_size =
+            76 + palettes.vecs.len() as u64 * 12 + palettes.quats.len() as u64 * 16 + frame_bytes;
+        if file_size > u32::MAX as u64 {
+            return Err(Error::Unsupported("anm resource size exceeds u32"));
         }
 
         buf.write_bytes(b"r3d2anmd")?;
@@ -101,8 +116,8 @@ impl Animation {
         buf.write_u32(0)?; // flags1
         buf.write_u32(0)?; // flags2
 
-        buf.write_u32(track_count as u32)?;
-        buf.write_u32(frame_count as u32)?;
+        buf.write_u32(track_count_u32)?;
+        buf.write_u32(frame_count_u32)?;
         buf.write_f32(frame_duration)?;
 
         let offsets_pos = buf.stream_position().map_err(rs_io::Error::from)?;

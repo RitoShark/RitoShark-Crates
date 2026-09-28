@@ -39,16 +39,32 @@ impl Joint {
 
 /// A League skeleton / rig (`.skl`).
 ///
-/// Models the modern format (magic `0x22FD4FC3`, version `0`): a flat joint list, a list of
-/// skin-influence joint ids, and optional skeleton/asset names. Legacy `r3d2sklt` skeletons are
-/// rejected as [`crate::Error::UnsupportedVersion`].
-#[derive(Clone, Debug, Default, PartialEq)]
+/// Reads modern v0 and legacy v1/v2 rigs. Unchanged rigs retain their source layout;
+/// edited rigs are written as modern v0.
+#[derive(Clone, Debug, Default)]
 pub struct Skeleton {
     pub flags: u16,
     pub name: String,
     pub asset: String,
     pub joints: Vec<Joint>,
     pub influences: Vec<u16>,
+    pub(crate) raw: Option<Box<RawSkeleton>>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RawSkeleton {
+    pub bytes: Vec<u8>,
+    pub decoded: Skeleton,
+}
+
+impl PartialEq for Skeleton {
+    fn eq(&self, other: &Self) -> bool {
+        self.flags == other.flags
+            && self.name == other.name
+            && self.asset == other.asset
+            && self.joints == other.joints
+            && self.influences == other.influences
+    }
 }
 
 impl Skeleton {

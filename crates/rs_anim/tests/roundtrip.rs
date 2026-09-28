@@ -146,12 +146,12 @@ fn skeleton_joint_index_section_sorted_by_hash_ascending() {
 }
 
 #[test]
-fn skeleton_legacy_is_unsupported() {
+fn skeleton_unknown_legacy_version_is_unsupported() {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"r3d2sklt");
-    bytes.extend_from_slice(&2u32.to_le_bytes());
+    bytes.extend_from_slice(&3u32.to_le_bytes());
     let err = Skeleton::from_bytes(&bytes).unwrap_err();
-    assert!(matches!(err, rs_anim::Error::UnsupportedVersion(2)));
+    assert!(matches!(err, rs_anim::Error::UnsupportedVersion(3)));
 }
 
 #[test]
@@ -475,13 +475,21 @@ fn compressed_round_trips_byte_exact() {
         (Vec3::ZERO, Vec3::ONE),
         &records,
     );
-    let anim = Animation::from_bytes(&buf).expect("read compressed anm");
-    assert!(
-        anim.is_byte_exact(),
-        "compressed should preserve source bytes"
-    );
-    let written = anim.to_bytes().expect("write compressed anm");
-    assert_eq!(written, buf, "compressed read -> write must be byte-exact");
+    for version in [1u32, 2, 3] {
+        let mut bytes = buf.clone();
+        bytes[8..12].copy_from_slice(&version.to_le_bytes());
+        let anim = Animation::from_bytes(&bytes).expect("read compressed anm");
+        assert!(anim.is_byte_exact());
+        assert_eq!(anim.to_bytes().unwrap(), bytes);
+    }
+    for (offset, value) in [(36, f32::INFINITY), (36, -1.0), (40, f32::NAN), (40, 0.0)] {
+        let mut bytes = buf.clone();
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        assert!(Animation::from_bytes(&bytes).is_err());
+    }
+    let mut bytes = buf.clone();
+    bytes[28..32].copy_from_slice(&i32::MAX.to_le_bytes());
+    assert!(Animation::from_bytes(&bytes).is_err());
 }
 
 #[test]

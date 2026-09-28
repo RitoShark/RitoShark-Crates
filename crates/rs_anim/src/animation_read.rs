@@ -6,15 +6,15 @@ use rs_math::{Quat, Vec3};
 use crate::animation::{AnimFrame, AnimTrack, Animation};
 use crate::compressed::Compressed;
 use crate::quantized::decompress_quat;
-use crate::raw::RawAnim;
+use crate::raw::{RawAnim, check_range};
 use crate::{Error, Result};
 
-fn section_count(size: i32, element: i32) -> usize {
-    if size <= 0 || element <= 0 {
-        0
-    } else {
-        (size / element) as usize
+fn section_count(start: i32, end: i32, element: i32) -> Result<usize> {
+    let size = i64::from(end) - i64::from(start);
+    if size < 0 {
+        return Err(Error::InvalidData("animation sections are out of order"));
     }
+    Ok((size / i64::from(element)) as usize)
 }
 
 impl Animation {
@@ -33,7 +33,7 @@ impl Animation {
         let _flags1 = reader.read_u32()?;
         let _flags2 = reader.read_u32()?;
 
-        let _track_count = reader.read_u32()?;
+        let track_count = reader.read_u32()? as usize;
         let frame_count = reader.read_u32()?;
         let frame_duration = reader.read_f32()?;
         let fps = if frame_duration != 0.0 {
@@ -54,9 +54,21 @@ impl Animation {
         }
 
         let frame_count = frame_count as usize;
-        let joint_hash_count = section_count(frames_offset - joint_hashes_offset, 4);
-        let vec_count = section_count(quats_offset - vecs_offset, 12);
-        let quat_count = section_count(joint_hashes_offset - quats_offset, 6);
+        let joint_hash_count = section_count(joint_hashes_offset, frames_offset, 4)?;
+        let vec_count = section_count(vecs_offset, quats_offset, 12)?;
+        let quat_count = section_count(quats_offset, joint_hashes_offset, 6)?;
+        if joint_hash_count > track_count {
+            return Err(Error::InvalidData(
+                "more animation joint hashes than tracks",
+            ));
+        }
+        check_range(reader, joint_hashes_offset as u64 + 12, joint_hash_count, 4)?;
+        check_range(reader, vecs_offset as u64 + 12, vec_count, 12)?;
+        check_range(reader, quats_offset as u64 + 12, quat_count, 6)?;
+        let rows = track_count
+            .checked_mul(frame_count)
+            .ok_or(Error::InvalidData("animation frame count overflow"))?;
+        check_range(reader, frames_offset as u64 + 12, rows, 6)?;
 
         reader
             .seek(SeekFrom::Start(joint_hashes_offset as u64 + 12))
@@ -96,10 +108,13 @@ impl Animation {
             .map_err(rs_io::Error::from)?;
         for frame_id in 0..frame_count {
             let time = frame_id as f32 * frame_duration;
-            for track in tracks.iter_mut() {
+            for track_id in 0..track_count {
                 let translate_id = reader.read_u16()?;
                 let scale_id = reader.read_u16()?;
                 let rotate_id = reader.read_u16()?;
+                let Some(track) = tracks.get_mut(track_id) else {
+                    continue;
+                };
                 track.frames.push(AnimFrame {
                     time,
                     rotation: quats
@@ -148,8 +163,14 @@ impl Animation {
             return Err(Error::Unsupported("anm v4 missing data section"));
         }
 
-        let vec_count = section_count(quats_offset - vecs_offset, 12);
-        let quat_count = section_count(frames_offset - quats_offset, 16);
+        let vec_count = section_count(vecs_offset, quats_offset, 12)?;
+        let quat_count = section_count(quats_offset, frames_offset, 16)?;
+        check_range(reader, vecs_offset as u64 + 12, vec_count, 12)?;
+        check_range(reader, quats_offset as u64 + 12, quat_count, 16)?;
+        let rows = track_count
+            .checked_mul(frame_count)
+            .ok_or(Error::InvalidData("animation frame count overflow"))?;
+        check_range(reader, frames_offset as u64 + 12, rows, 12)?;
 
         reader
             .seek(SeekFrom::Start(vecs_offset as u64 + 12))
@@ -214,6 +235,12 @@ impl Animation {
         let fps = reader.read_u32()? as f32;
         let frame_duration = if fps != 0.0 { 1.0 / fps } else { 0.0 };
 
+        let stride = frame_count
+            .checked_mul(28)
+            .and_then(|n| n.checked_add(36))
+            .ok_or(Error::InvalidData("animation frame count overflow"))?;
+        check_range(reader, 28, track_count, stride)?;
+
         let mut tracks = Vec::with_capacity(track_count);
         for _ in 0..track_count {
             let name = reader.read_fixed_string::<32>()?;
@@ -250,7 +277,7 @@ impl Animation {
 
         let compressed = Compressed::from_reader(reader)?;
         let fps = compressed.fps;
-        let tracks = compressed.bake();
+        let tracks = compressed.bake()?;
 
         Ok(Self {
             fps,

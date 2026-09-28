@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rs_anim::Animation;
+use rs_anim::{Animation, Skeleton};
 use rs_io::{Parse, Serialize};
 
 fn sample_dir() -> Option<PathBuf> {
@@ -19,6 +19,30 @@ const COMPRESSED_ANM_FILES: &[&str] = &[
     "compressed_e890878834c561be.anm",
     "compressed_e63f4f2e8c074937.anm",
 ];
+
+#[test]
+fn skeleton_real_files_roundtrip() {
+    let Some(dir) = sample_dir() else { return };
+    for name in [
+        "azir.skl",
+        "azirpair.skl",
+        "azir_small.skl",
+        "janna_skin67.skl",
+    ] {
+        let path = dir.join(name);
+        if !path.is_file() {
+            continue;
+        }
+        let bytes = std::fs::read(path).unwrap();
+        let skeleton = Skeleton::from_bytes(&bytes).unwrap();
+        assert_eq!(skeleton.to_bytes().unwrap(), bytes, "{name}");
+        eprintln!(
+            "{name}: {} joints, {} influences",
+            skeleton.joints.len(),
+            skeleton.influences.len()
+        );
+    }
+}
 
 fn magic(path: &Path) -> [u8; 8] {
     let bytes = std::fs::read(path).expect("read sample bytes");

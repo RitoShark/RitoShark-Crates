@@ -1,130 +1,94 @@
 # rs_anim
 
-Reads and writes League of Legends skeleton (`.skl`) and animation (`.anm`) files.
+Reads and writes League skeletons (`.skl`) and animations (`.anm`), samples tracks, and
+computes poses. See [format layouts and limits](docs/formats-and-limits.md) for frame
+counts, joint counts, influence addressing, and binary field sizes.
 
-## Public API
+## Supported formats
 
-Every type follows the workspace-wide `Parse` / `Serialize` shape (see the root `CLAUDE.md`):
+| Container | Versions | Decode | Unchanged write | Edited/new write |
+|---|---|---|---|---|
+| SKL `0x22FD4FC3` | 0 | Yes | Original bytes | Modern v0 |
+| SKL `r3d2sklt` | 1, 2 | Yes | Original bytes | Modern v0 |
+| ANM `r3d2anmd` | 3, 4, 5 | Yes | Original bytes | Uncompressed v4 |
+| ANM `r3d2canm` | 1, 2, 3 | Yes, baked curves | Original bytes | Uncompressed v4 |
 
-```rust
-use rs_anim::{Animation, Skeleton, AnimTrack, AnimFrame, Joint};
+Unknown versions return `UnsupportedVersion`. These are the versions implemented by the
+reviewed references, not a promise of undocumented future variants. There is no encoder
+for newly authored compressed ANM, v3/v5 ANM, or legacy SKL.
 
-let skl  = Skeleton::from_path("aatrox.skl")?;
-let anim = Animation::from_path("aatrox_idle.anm")?;
+## API
 
-let bytes = anim.to_bytes()?;     // any file in -> byte-exact out; emits v4 after make_editable()
-skl.to_path("out.skl")?;
+```rust,no_run
+use rs_anim::{Animation, Skeleton, Pose};
+use rs_io::{Parse, Serialize};
+
+let skeleton = Skeleton::from_path("champion.skl")?;
+let mut animation = Animation::from_path("idle.anm")?;
+let pose = Pose::sample(&skeleton, &animation, 0.5);
+let matrices = pose.skinning_matrices(&skeleton);
+let original = animation.to_bytes()?;
+
+animation.make_editable();
+animation.tracks[0].frames[0].translation.x += 1.0;
+animation.to_path("edited.anm")?;
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Constructors: `from_reader`, `from_bytes`, `from_path`. Serializers: `to_writer`, `to_bytes`,
-`to_path`. Accessors use bare field names (`tracks()`, `joints()`, `influences()`).
+`Parse` supplies `from_reader`, `from_bytes`, and `from_path`; `Serialize` supplies
+`to_writer`, `to_bytes`, and `to_path`.
 
-| Type | Fields of note |
+| Type | Main fields |
 |---|---|
-| `Animation` | `fps: f32`, `tracks: Vec<AnimTrack>` |
-| `AnimTrack` | `joint_hash: u32`, `frames: Vec<AnimFrame>` |
-| `AnimFrame` | `time`, `rotation: Quat`, `translation: Vec3`, `scale: Vec3` |
-| `Skeleton` | `flags`, `name`, `asset`, `joints: Vec<Joint>`, `influences: Vec<u16>` |
-| `Joint` | name, ids, parent, radius, hash, local + inverse-bind transforms |
+| `Animation` | `fps`, `tracks` |
+| `AnimTrack` | `joint_hash`, `frames` |
+| `AnimFrame` | `time` in seconds, `rotation`, `translation`, `scale` |
+| `Skeleton` | `flags`, `name`, `asset`, `joints`, `influences` |
+| `Joint` | name/hash, signed IDs, radius, local and inverse-bind transforms |
 
-`quantized` is a public module exposing the bit-level codecs (`decompress_quat`/`compress_quat`,
-`decompress_vec3`) for callers that need them directly.
+Construct skeletons with `Skeleton::new()` and assign their public fields. A private source
+snapshot preserves legacy matrices, reserved fields, padding, and original bytes.
+Skeleton serialization detects field edits automatically and rebuilds modern v0 when changed.
+Skeleton equality compares decoded fields, excluding the source snapshot.
 
-## Skeleton (`.skl`) format
+Animation serialization retains its explicit editing contract: call `make_editable()` before
+changing tracks or fps. Otherwise writing replays the original buffer even after public fields
+change. `is_byte_exact()` reports whether that buffer remains attached.
 
-Two on-disk shapes exist; this crate implements the **modern** one and rejects the legacy one.
+V4 output shares one vector palette between translation and scale and a separate quaternion
+palette. Each supports 65,536 distinct entries; overflow returns an error. Short tracks hold
+their last frame, empty tracks use identity, and frame times are rebuilt from frame index/fps.
+The writer does not preserve irregular timestamps. Rotations remain full `f32x4`.
 
-- **Modern** — magic `0x22FD4FC3` at byte offset 4 (offset 0 holds the file size), version `0`.
-  Header carries `flags`, joint count, influence count, and section offsets (joints, joint
-  indices, influences, skeleton name, asset name, bone names, plus reserved slots). Each joint
-  record is 100 bytes: flags/id/parent, a 4-byte hash, a radius, a local
-  (translation, scale, rotation) transform and an inverse-bind transform, then a relative offset
-  to its NUL-terminated name. Influences are a flat `u16` list of joint ids (the C# oracle reads
-  these as signed `i16`; the bytes are identical). The joint-id-hash section is emitted ordered by
-  hash **ascending**, matching the C# `RigResource` writer. Round-trips byte-exactly.
-- **Legacy** — magic `r3d2sklt` (versions 1/2). Returned as `Error::UnsupportedVersion`.
+## Decoding and posing
 
-> No `.skl` sample ships in `sample-files/`, so the skeleton path is currently exercised only by
-> the synthetic round-trip test, not by a real game asset. **This is a known coverage gap** — drop
-> a real `.skl` next to the `.anm` samples to close it.
+- Legacy SKL v1 supplies an identity influence table; v2 reads explicit influence IDs.
+  Global bind matrices become parent-local and inverse-bind transforms. Parents must precede
+  children. Singular transforms and invalid influence IDs return errors. Matrix-to-TRS
+  conversion cannot represent arbitrary shear exactly; original bytes survive unchanged writes.
+- ANM v3 hashes names with lowercase ELF. V4 embeds hashes in records; v5 keeps a separate
+  hash table and quantized rotations. V5 consumes unnamed tracks too, keeping rows aligned.
+- Compressed ANM uses four-key Catmull-Rom interpolation, optional time parametrization,
+  shortest-path quaternion alignment, and jump caches. It bakes at the declared fps.
+  Missing channels retain defaults. Baking loses the original sparse curve structure;
+  retained bytes preserve the source file.
+- `AnimTrack::sample` interpolates baked frames. `Pose::sample` matches tracks by hash;
+  joints absent from the animation keep their bind pose.
 
-## Animation (`.anm`) format
+## Tests
 
-The 8-byte magic selects the container; a `u32` version follows.
-
-### Uncompressed — `r3d2anmd` (versions 3, 4, 5)
-
-A header records track count, frame count, and frame duration (fps = 1 / duration), plus byte
-offsets (relative to byte 12) into shared data sections.
-
-- **v5** — sections `vecs -> quats -> joint_hashes -> frames`. Vectors are raw `Vec3`; quaternions
-  are **48-bit quantized** (see below). Each frame row is three `u16` palette indices
-  (translation, scale, rotation) per track.
-- **v4** — sections `vecs -> quats -> frames`; quaternions are full `f32x4`. Frame rows embed the
-  joint hash per track plus the three indices and a padding `u16`.
-- **v3 (legacy)** — per-track fixed 32-byte name (hashed with the **lowercased ELF** hash, shared
-  from `rs_hash::elf_lower` — the same `Elf.HashLower` the C# oracle keys joints on), then a full
-  rotation+translation per frame; scale is implicitly `(1,1,1)`.
-
-**Writing is format-preserving for every container the reader accepts.** Reading decodes the tracks
-*and* retains the complete source byte buffer. An unedited `read -> write` replays that buffer
-verbatim, so the round-trip is **byte-identical** for uncompressed v3, v4, and v5 **and** for
-compressed `r3d2canm` — there is no lossy "normalize to v4" step on the write path for an unmodified
-file. The three real v5 samples and synthetic v3/v4/compressed fixtures are all verified byte-exact.
-
-If you mutate `tracks`, call `Animation::make_editable()` first to drop the preserved buffer; the
-writer then rebuilds from the decoded tracks and emits uncompressed **v4** (full quaternions, no
-quantization loss). Animations constructed in memory have no preserved buffer and always write as
-v4. `Animation::is_byte_exact()` reports whether the preserved source bytes are present.
-
-### Compressed — `r3d2canm` (versions 1, 2, 3)  ✅ supported
-
-Real League animations are frequently compressed. The header carries joint/frame/jump-cache
-counts, a max-time and fps, three error metrics, and per-component `min`/`max` bounds for
-translation and scale, followed by offsets to the frame stream, jump caches, and joint hashes.
-
-The frame stream is a flat list of **sparse** keyframes. Each 10-byte record is:
-
-```
-u16 compressed_time   // time = compressed_time / 65535 * max_time * fps   (in frames)
-u16 bits              // low 14 bits = joint id; high 2 bits = transform type
-u8[6] value           // quantized payload
-```
-
-Transform type `0` = rotation (48-bit quantized quaternion), `1` = translation, `2` = scale (both
-48-bit quantized `Vec3` against the header `min`/`max`). Because each component is keyed
-independently and sparsely, the reader collects per-joint keys and **resamples** every integer
-output frame by linear-interpolating translation/scale and spherically interpolating rotation
-between the surrounding keys, producing the same explicit `AnimFrame` layout as the uncompressed
-path. The jump-cache table (a seek-acceleration structure for streaming playback) is not needed
-for full decode and is skipped.
-
-#### 48-bit quantized quaternion
-
-Two bits pick the dropped largest-magnitude component; three 15-bit fields hold the rest mapped to
-`[-1/√2, 1/√2]`; the dropped component is rebuilt as `sqrt(1 - a² - b² - c²)`. See
-`quantized::decompress_quat` / `compress_quat`.
-
-## Supported / unsupported matrix
-
-| Container | Versions | Read | Write |
-|---|---|---|---|
-| `.skl` modern `0x22FD4FC3` | 0 | yes (byte-exact) | yes (byte-exact) |
-| `.skl` legacy `r3d2sklt` | 1, 2 | `UnsupportedVersion` | no |
-| `.anm` `r3d2anmd` v3/v4/v5 | 3, 4, 5 | yes | **byte-exact** (v4 after `make_editable`) |
-| `.anm` `r3d2canm` | 1, 2, 3 | yes (resampled) | **byte-exact** passthrough (v4 after `make_editable`) |
-| `.anm` `r3d2canm` | other | `UnsupportedVersion` | — |
-
-## Tests & fixtures
-
-Real game assets are gitignored. Drop samples into `../../sample-files/` (workspace
-`sample-files/`); `tests/real_files.rs` skips cleanly when the directory is absent.
-
-```
+```text
 cargo test -p rs_anim
+cargo clippy -p rs_anim --all-targets -- -D warnings
 ```
 
-## Attribution
+Synthetic tests cover every supported version, legacy transforms, unnamed v5 tracks,
+65,536-entry palettes, 70,000-frame clips, 32,768-joint skeletons, and malformed counts.
+Local game fixtures are gitignored under `../../sample-files/`; missing fixtures are skipped.
+See the [fixture report](docs/real-files-report.md) for coverage and its limits.
 
-The binary layouts and quantization constants were cross-checked against the C# LeagueToolkit
-(behavioral oracle), the Rust `ltk_anim` crate, and `pyritofile`. See `NOTICE`.
+## References
+
+Layouts were checked against [C# LeagueToolkit](https://github.com/LeagueToolkit/LeagueToolkit)
+and [Rust ltk_anim](https://github.com/LeagueToolkit/league-toolkit/tree/main/crates/ltk_anim).
+Exact revisions and source files appear in the format document. See also `NOTICE`.

@@ -17,6 +17,7 @@ use rs_math::{Quat, Vec3};
 
 use crate::animation::{AnimFrame, AnimTrack};
 use crate::quantized::{decompress_quat, decompress_vec3};
+use crate::raw::check_range;
 use crate::{Error, Result};
 
 const FLAG_USE_KEYFRAME_PARAMETRIZATION: u32 = 1 << 2;
@@ -66,10 +67,23 @@ impl Compressed {
 
         let joint_count = reader.read_i32()?;
         let frame_count = reader.read_i32()?;
-        let jump_cache_count = reader.read_i32()?.max(0) as usize;
+        let jump_cache_count = reader.read_i32()?;
+        if jump_cache_count < 0 {
+            return Err(Error::InvalidData("negative animation jump cache count"));
+        }
+        let jump_cache_count = jump_cache_count as usize;
 
         let duration = reader.read_f32()?;
         let fps = reader.read_f32()?;
+        if !duration.is_finite() || duration < 0.0 || !fps.is_finite() || fps <= 0.0 {
+            return Err(Error::InvalidData("invalid compressed animation timing"));
+        }
+        let samples = (duration * fps).round();
+        if !samples.is_finite() || samples as f64 >= u32::MAX as f64 {
+            return Err(Error::Unsupported(
+                "baked animation frame count exceeds u32",
+            ));
+        }
 
         for _ in 0..6 {
             let _error_metric = reader.read_f32()?;
@@ -92,6 +106,13 @@ impl Compressed {
         }
         let joint_count = joint_count as usize;
         let frame_count = frame_count as usize;
+        if joint_count > 0x4000 {
+            return Err(Error::InvalidData(
+                "compressed animation exceeds 16384 joint ids",
+            ));
+        }
+        check_range(reader, joint_hashes_offset as u64 + 12, joint_count, 4)?;
+        check_range(reader, frames_offset as u64 + 12, frame_count, 10)?;
 
         reader
             .seek(SeekFrom::Start(joint_hashes_offset as u64 + 12))
@@ -109,6 +130,11 @@ impl Compressed {
             let time = reader.read_u16()?;
             let joint_id_raw = reader.read_u16()?;
             let value = reader.read_byte_array::<6>()?;
+            if (joint_id_raw & 0x3fff) as usize >= joint_count || joint_id_raw >> 14 == 3 {
+                return Err(Error::InvalidData(
+                    "invalid compressed animation joint or channel",
+                ));
+            }
             frames.push(Frame {
                 time,
                 joint_id_raw,
@@ -124,6 +150,7 @@ impl Compressed {
                 .ok_or(Error::Unsupported(
                     "compressed anm jump cache size overflow",
                 ))?;
+            check_range(reader, jump_caches_offset as u64 + 12, total, 1)?;
             reader
                 .seek(SeekFrom::Start(jump_caches_offset as u64 + 12))
                 .map_err(rs_io::Error::from)?;
@@ -151,18 +178,21 @@ impl Compressed {
 
     /** Resamples the compressed curves at `fps` over `duration`, producing one explicit keyframe per
     output frame for every joint. */
-    pub(crate) fn bake(&self) -> Vec<AnimTrack> {
+    pub(crate) fn bake(&self) -> Result<Vec<AnimTrack>> {
         let frame_duration = if self.fps != 0.0 { 1.0 / self.fps } else { 0.0 };
         let out_frames = ((self.duration * self.fps).round() as usize + 1).max(1);
 
         let mut tracks: Vec<AnimTrack> = self
             .joints
             .iter()
-            .map(|&joint_hash| AnimTrack {
-                joint_hash,
-                frames: Vec::with_capacity(out_frames),
+            .map(|&joint_hash| {
+                let mut frames = Vec::new();
+                frames
+                    .try_reserve_exact(out_frames)
+                    .map_err(|_| Error::Unsupported("insufficient memory to bake animation"))?;
+                Ok(AnimTrack { joint_hash, frames })
             })
-            .collect();
+            .collect::<Result<_>>()?;
 
         let mut evaluator = Evaluator::new(self);
         let clamp_to = self.duration.max(0.0);
@@ -182,7 +212,7 @@ impl Compressed {
             }
         }
 
-        tracks
+        Ok(tracks)
     }
 }
 

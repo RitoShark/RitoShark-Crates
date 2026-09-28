@@ -161,15 +161,12 @@ impl Skl {
     #[staticmethod]
     #[pyo3(signature = (joints, influences, name = String::new(), asset = String::new()))]
     fn new(joints: Vec<PyJoint>, influences: Vec<u16>, name: String, asset: String) -> Self {
-        Self {
-            inner: Skeleton {
-                flags: 0,
-                name,
-                asset,
-                joints: joints.into_iter().map(|j| j.inner).collect(),
-                influences,
-            },
-        }
+        let mut inner = Skeleton::new();
+        inner.name = name;
+        inner.asset = asset;
+        inner.joints = joints.into_iter().map(|j| j.inner).collect();
+        inner.influences = influences;
+        Self { inner }
     }
 
     #[getter]

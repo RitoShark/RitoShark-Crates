@@ -11,7 +11,8 @@ into the same explicit keyframes. v3 joint hashes use the shared lowercased ELF 
 an unedited `read -> write` reproduces the original file byte-for-byte (uncompressed v3/v4/v5 and
 compressed `r3d2canm` alike). Editing a parsed animation (after `make_editable`) or writing an
 in-memory animation emits uncompressed version 4, where full quaternions survive a round-trip
-without quantization loss. Legacy skeletons are reported as errors.
+without quantization loss. Legacy skeleton versions 1 and 2 are also decoded; unchanged skeletons
+retain their original bytes, while edited skeletons are emitted as modern version 0.
 
 On top of the decoded keyframes the crate poses a rig: [`AnimTrack::sample`] interpolates a track at
 an arbitrary time, and [`Pose`] binds an animation to a [`Skeleton`], composing the joint hierarchy

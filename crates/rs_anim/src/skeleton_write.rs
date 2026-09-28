@@ -13,6 +13,24 @@ impl Skeleton {
     fn write_to(&self, buf: &mut Cursor<Vec<u8>>) -> Result<()> {
         let joint_count = self.joints.len();
         let influence_count = self.influences.len();
+        if joint_count > i16::MAX as usize + 1 {
+            return Err(Error::Unsupported("skeleton exceeds 32768 joint ids"));
+        }
+        let influence_count_u32 = u32::try_from(influence_count)
+            .map_err(|_| Error::Unsupported("skeleton influence count exceeds u32"))?;
+        let mut size = 64u64 + joint_count as u64 * 108 + influence_count as u64 * 2;
+        size = size.next_multiple_of(4);
+        for name in std::iter::once(&self.name)
+            .chain(std::iter::once(&self.asset))
+            .chain(self.joints.iter().map(|joint| &joint.name))
+        {
+            size = size
+                .checked_add((name.len() as u64 + 1).next_multiple_of(4))
+                .ok_or(Error::Unsupported("skeleton size overflow"))?;
+        }
+        if size > i32::MAX as u64 {
+            return Err(Error::Unsupported("skeleton section offsets exceed i32"));
+        }
 
         buf.write_u32(0)?; // file size, patched last
         buf.write_u32(Self::MAGIC)?;
@@ -20,7 +38,7 @@ impl Skeleton {
 
         buf.write_u16(self.flags)?;
         buf.write_u16(joint_count as u16)?;
-        buf.write_u32(influence_count as u32)?;
+        buf.write_u32(influence_count_u32)?;
 
         let joint_indices_offset = JOINTS_OFFSET + joint_count * JOINT_RECORD_SIZE;
         let influences_offset = joint_indices_offset + joint_count * JOINT_INDEX_SIZE;
@@ -127,6 +145,12 @@ impl Serialize for Skeleton {
     type Error = Error;
 
     fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
+        if let Some(raw) = &self.raw {
+            if self == &raw.decoded {
+                writer.write_all(&raw.bytes).map_err(rs_io::Error::from)?;
+                return Ok(());
+            }
+        }
         let mut buf = Cursor::new(Vec::new());
         self.write_to(&mut buf)?;
         writer
