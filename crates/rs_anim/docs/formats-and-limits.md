@@ -10,10 +10,10 @@ renderers, authoring tools, and file size can impose much smaller ceilings.
 |---|---|
 | Is animation limited to 65,535 frames? | No. Uncompressed frame counts occupy 32 bits. A 70,000-frame clip is covered by a round-trip test. |
 | What does the 16-bit animation limit apply to? | V4/v5 palette indices: 65,536 vector entries and 65,536 quaternion entries. Repeated values reuse indices across frames and tracks. |
-| How many joints can a modern skeleton identify? | 32,768 nonnegative signed-16-bit IDs, numbered 0 through 32,767. Its unsigned-16-bit count field alone can hold 65,535, but that exceeds the nonnegative ID namespace. |
+| How many joints can a modern skeleton store? | Its `u16` count can represent 65,535 joint records. This crate's current signed-ID model and canonical writer support 32,768 nonnegative IDs. Client support for the upper half of the 16-bit ID space is unverified. |
 | How many joints can deform a standard SKN? | Its byte-sized blend indices address 256 influence slots, each mapping to a skeleton joint. The stored influence table may be longer. |
 | How many weights can one SKN vertex have? | Four index/weight pairs; fewer nonzero weights are allowed. |
-| Do joints without influences count toward the skeleton limit? | Yes. Helper, attachment, and parent joints use the same ID namespace. They need not appear in the influence table. |
+| Do joints without influences count toward the skeleton limit? | Yes. All joint records count toward the 65,535 header ceiling and this crate's 32,768 canonical-write limit. They need not appear in the influence table. |
 | Does removing the influence table increase the joint limit? | No. A viewer using direct indices still has only 256 byte-addressable joint slots; the remaining rig joints can still be animated or parent other joints. |
 | How many joints can compressed ANM keys address? | 16,384, using 14 bits per key. This is separate from SKL joint IDs. |
 
@@ -39,15 +39,29 @@ Each 100-byte joint record contains:
 | Inverse-bind translation, scale, quaternion | 12 + 12 + 16 |
 | Relative name offset, measured from this offset field | 4 |
 
-Joint and parent IDs are `i16`; parent `-1` marks a root. The joint-index section uses
+This crate and C#/Rust LTK read joint and parent IDs as `i16`; parent `-1` marks a root. The joint-index section uses
 8-byte `(id:i16, padding:i16, hash:u32)` records sorted by hash. Influence entries occupy
 two bytes each (`u16` in this crate, `i16` in the references).
+
+**The 32,768 limit is an implementation restriction, not a proven SKL/client limit.**
+The header's unsigned count supports 65,535 records (`2^16 - 1`), not 65,536 records:
+65,536 is the number of distinct values a 16-bit field can encode, including zero.
+The [LTK layout reference](https://wiki.leaguetoolkit.dev/reference/file-formats/skl/)
+labels the joint record ID `u16`, but its index-hash IDs and influences `i16`.
+[pyritofile](https://github.com/GuiSaiUwU/pyritofile-package/blob/main/pyritofile/skl.py)
+writes joint IDs as `u16` while reading them as `i16`, and writes parents as `i16`.
+Consequently these sources do not establish consistent handling of IDs 32,768 and above.
+A signed parent field limits which IDs can be named as parents; it does not by itself
+prove a 32,768 total-joint ceiling if joint IDs are unsigned and higher IDs are leaves.
+Client tests or a verified client layout are needed before claiming full upper-range support.
 
 The influence count field can encode 4,294,967,295 entries. That is only a field-width
 ceiling: storage, signed offsets, valid joint IDs, and the consuming mesh impose tighter
 constraints. An influence entry identifies a joint; duplicate entries do not create joints.
 The canonical writer limits total output to `i32::MAX` bytes so signed offsets remain
-representable and rejects more than 32,768 joints. Source-preserving writes replay accepted
+representable and conservatively rejects more than 32,768 joints under its current signed-ID
+model. This check was added in `b56d75f`; it is not a demonstrated client restriction.
+Source-preserving writes replay accepted
 original layouts without rebuilding them.
 
 For standard SKN skinning:
