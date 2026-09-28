@@ -8,7 +8,7 @@ a per-vertex Python loop.
 ## Public surface
 
 ```
-AnimFrame, AnimTrack, Anm, FormatError, Joint, MapGeo, MapModel, MapSubmesh, ParseError,
+AnimFrame, AnimTrack, Anm, Dds, FormatError, Joint, MapGeo, MapModel, MapSubmesh, ParseError,
 Scb, ScbFace, Sco, Skl, Skn, Submesh, Tex, UnsupportedVersion, Wad, WadChunk, WriteError,
 bin_to_text, bin_to_text_bytes, build_wad, build_wad_to_path, read_bin, read_bin_bytes,
 read_bin_editable, read_bin_editable_bytes, write_bin, write_bin_bytes, text_to_bin_bytes,
@@ -44,10 +44,15 @@ all of them.
 | `.mapgeo` map geometry | yes | yes (re-emit only, no construction) |
 | `.sco` static mesh | yes | **no** — Riot removed the format; `rs_mesh` writes no `.sco` |
 | `.tex` texture | yes | no |
+| `.dds` texture (first surface) | yes | no |
 | `.wad` archive | yes | yes |
 | `.bin` property bin | yes (plain Python values, or the editable tree) | yes, via the editable tree or text round-trip (see below) |
 
 ## Buffer layouts
+
+`Dds.from_path(path)` and `Dds.from_bytes(data)` decode through `rs_tex` and expose
+`width`, `height`, and `rgba` (top-down RGBA8, including alpha). BC1, BC2, BC3, BC5,
+BC7 and uncompressed RGBA/BGRA use the same decoder as the other RitoShark tools.
 
 This is the contract callers write DCC code against. Every geometry buffer is tightly packed
 little-endian bytes; unpack with `struct`, `array`, or `memoryview(...).cast(...)`.

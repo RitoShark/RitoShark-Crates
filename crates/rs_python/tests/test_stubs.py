@@ -38,7 +38,7 @@ def test_no_leaked_submodule():
 
 def test_public_names_match_expected_set():
     expected = {
-        "AnimFrame", "AnimTrack", "Anm", "FormatError", "Joint", "MapGeo",
+        "AnimFrame", "AnimTrack", "Anm", "Dds", "FormatError", "Joint", "MapGeo",
         "MapModel", "MapSubmesh", "ParseError", "Scb", "ScbFace", "Sco",
         "Skl", "Skn", "Submesh", "Tex", "UnsupportedVersion", "Wad",
         "WadChunk", "WriteError", "bin_to_text", "bin_to_text_bytes", "build_wad",

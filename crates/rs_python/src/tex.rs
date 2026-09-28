@@ -90,7 +90,49 @@ impl Tex {
     }
 }
 
+#[pyclass]
+pub struct Dds {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+#[pymethods]
+impl Dds {
+    #[staticmethod]
+    fn from_path(path: std::path::PathBuf) -> PyResult<Self> {
+        let data = std::fs::read(path).map_err(parse_err)?;
+        Self::from_bytes(&data)
+    }
+
+    #[staticmethod]
+    fn from_bytes(data: &[u8]) -> PyResult<Self> {
+        let image = ritoshark::tex::read_dds_bytes(data).map_err(parse_err)?;
+        Ok(Self {
+            width: image.width(),
+            height: image.height(),
+            rgba: image.into_raw(),
+        })
+    }
+
+    #[getter]
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[getter]
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    #[getter]
+    fn rgba<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.rgba)
+    }
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Tex>()?;
+    m.add_class::<Dds>()?;
     Ok(())
 }
