@@ -109,6 +109,8 @@ pub enum BinValue {
     Rgba([u8; 4]),
     String(String),
     Hash(u32),
+    /// An eight-byte Hash (tag 17), preserving width even when the value fits in u32.
+    Hash64(u64),
     File(u64),
     Link(u32),
     List {
@@ -157,7 +159,7 @@ impl BinValue {
             BinValue::Mtx44(_) => BinType::Mtx44,
             BinValue::Rgba(_) => BinType::Rgba,
             BinValue::String(_) => BinType::String,
-            BinValue::Hash(_) => BinType::Hash,
+            BinValue::Hash(_) | BinValue::Hash64(_) => BinType::Hash,
             BinValue::File(_) => BinType::File,
             BinValue::Link(_) => BinType::Link,
             BinValue::List { is_list2, .. } => {

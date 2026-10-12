@@ -748,7 +748,7 @@ impl<'a> Parser<'a> {
                 BinValue::Rgba(a)
             }
             BinType::String => BinValue::String(self.read_string()?),
-            BinType::Hash => BinValue::Hash(self.read_hash32()?),
+            BinType::Hash => self.read_hash_value()?,
             BinType::Link => BinValue::Link(self.read_hash32()?),
             BinType::File => BinValue::File(self.read_hash64()?),
             BinType::Pointer => self.read_struct(false)?,
@@ -886,6 +886,21 @@ impl<'a> Parser<'a> {
             return self.err("too few array elements");
         }
         Ok(out)
+    }
+
+    fn read_hash_value(&mut self) -> Result<BinValue> {
+        let backup = self.pos;
+        self.skip_inline();
+        let word = self.read_word();
+        if let Some(hex) = word.strip_prefix("0x").or_else(|| word.strip_prefix("0X")) {
+            if hex.len() > 8 {
+                return u64::from_str_radix(hex, 16)
+                    .map(BinValue::Hash64)
+                    .or_else(|_| self.err("invalid 64-bit hash"));
+            }
+        }
+        self.pos = backup;
+        self.read_hash32().map(BinValue::Hash)
     }
 
     /// Reads a 32-bit hash: `0xHEX`, or a bareword/quoted string hashed with FNV1a-32.

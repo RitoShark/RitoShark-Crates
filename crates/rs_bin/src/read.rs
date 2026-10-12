@@ -1,4 +1,4 @@
-use std::io::{Read, Seek};
+use std::io::{Cursor, Read, Seek};
 
 use indexmap::IndexMap;
 use rs_io::{Parse, ReaderExt};
@@ -45,22 +45,11 @@ impl Parse for Bin {
         let mut entries = Vec::with_capacity(entry_count.min(1 << 20));
         for class_hash in class_hashes {
             let length = reader.read_u32()? as u64;
-            let start = reader.stream_position()?;
-            let path_hash = reader.read_u32()?;
-            let field_count = reader.read_u16()? as usize;
-            let mut fields = IndexMap::with_capacity(field_count.min(1 << 16));
-            for _ in 0..field_count {
-                let name = reader.read_u32()?;
-                let ty = BinType::from_u8(reader.read_u8()?)?;
-                fields.insert(name, read_value(reader, ty)?);
-            }
-            let consumed = reader.stream_position()? - start;
-            if consumed != length {
-                return Err(Error::SizeMismatch {
-                    declared: length as usize,
-                    actual: consumed as usize,
-                });
-            }
+            let mut budget = Budget::new(length);
+            let (path_hash, fields) = region(reader, length, &mut budget, |r, choices, budget| {
+                let path_hash = r.read_u32()?;
+                Ok((path_hash, read_fields(r, choices, budget)?))
+            })?;
             entries.push(BinEntry {
                 path_hash,
                 class_hash,
@@ -99,11 +88,12 @@ impl Parse for Bin {
 fn read_patch<R: Read + Seek>(reader: &mut R) -> Result<BinPatch> {
     let key_hash = reader.read_u32()?;
     let length = reader.read_u32()? as u64;
-    let start = reader.stream_position()?;
-    let ty = BinType::from_u8(reader.read_u8()?)?;
-    let path = reader.read_string_u16()?;
-    let value = read_value(reader, ty)?;
-    check_size(reader, start, length)?;
+    let mut budget = Budget::new(length);
+    let (path, value) = region(reader, length, &mut budget, |r, choices, budget| {
+        let ty = BinType::from_u8(r.read_u8()?)?;
+        let path = r.read_string_u16()?;
+        Ok((path, read_value(r, ty, choices, budget)?))
+    })?;
     Ok(BinPatch {
         key_hash,
         path,
@@ -111,7 +101,13 @@ fn read_patch<R: Read + Seek>(reader: &mut R) -> Result<BinPatch> {
     })
 }
 
-fn read_value<R: Read + Seek>(reader: &mut R, ty: BinType) -> Result<BinValue> {
+fn read_value<R: Read + Seek>(
+    reader: &mut R,
+    ty: BinType,
+    choices: &mut Choices,
+    budget: &mut Budget,
+) -> Result<BinValue> {
+    budget.step()?;
     Ok(match ty {
         BinType::None => BinValue::None,
         BinType::Bool => BinValue::Bool(reader.read_bool()?),
@@ -137,39 +133,167 @@ fn read_value<R: Read + Seek>(reader: &mut R, ty: BinType) -> Result<BinValue> {
         BinType::Mtx44 => BinValue::Mtx44(reader.read_mtx44()?),
         BinType::Rgba => BinValue::Rgba(reader.read_byte_array::<4>()?),
         BinType::String => BinValue::String(reader.read_string_u16()?),
-        BinType::Hash => BinValue::Hash(reader.read_u32()?),
+        BinType::Hash => read_hash(reader, choices.next())?,
         BinType::File => BinValue::File(reader.read_u64()?),
         BinType::Link => BinValue::Link(reader.read_u32()?),
         BinType::Flag => BinValue::Flag(reader.read_bool()?),
-        BinType::List | BinType::List2 => read_list(reader, ty == BinType::List2)?,
-        BinType::Map => read_map(reader)?,
-        BinType::Option => read_option(reader)?,
-        BinType::Pointer => read_struct(reader, false)?,
-        BinType::Embed => read_struct(reader, true)?,
+        BinType::List | BinType::List2 => read_list(reader, ty == BinType::List2, budget)?,
+        BinType::Map => read_map(reader, budget)?,
+        BinType::Option => read_option(reader, choices, budget)?,
+        BinType::Pointer => read_struct(reader, false, budget)?,
+        BinType::Embed => read_struct(reader, true, budget)?,
     })
 }
 
-fn read_list<R: Read + Seek>(reader: &mut R, is_list2: bool) -> Result<BinValue> {
+// Width is not encoded in the Hash tag. Resolve each sized region independently,
+// trying the legacy four-byte layout first. A shared budget bounds all retries,
+// including nested regions. Field names, class names and object links remain u32.
+#[derive(Default)]
+struct Choices {
+    wide: Vec<bool>,
+    index: usize,
+}
+impl Choices {
+    fn next(&mut self) -> bool {
+        if self.index == self.wide.len() {
+            self.wide.push(false);
+        }
+        let wide = self.wide[self.index];
+        self.index += 1;
+        wide
+    }
+    fn advance(&mut self) -> bool {
+        let Some(i) = self.wide.iter().rposition(|wide| !wide) else {
+            return false;
+        };
+        self.wide[i] = true;
+        self.wide.truncate(i + 1);
+        true
+    }
+}
+struct Budget {
+    remaining: u64,
+    depth: usize,
+}
+impl Budget {
+    fn new(size: u64) -> Self {
+        Self {
+            remaining: size.saturating_mul(64).saturating_add(1024).min(16_000_000),
+            depth: 0,
+        }
+    }
+    fn step(&mut self) -> Result<()> {
+        self.remaining = self
+            .remaining
+            .checked_sub(1)
+            .ok_or(Error::Unsupported("hash-width search limit"))?;
+        Ok(())
+    }
+}
+fn region<R: Read, T>(
+    reader: &mut R,
+    size: u64,
+    budget: &mut Budget,
+    mut parse: impl FnMut(&mut Cursor<&[u8]>, &mut Choices, &mut Budget) -> Result<T>,
+) -> Result<T> {
+    budget.step()?;
+    if size > 128 * 1024 * 1024 || budget.depth >= 128 {
+        return Err(Error::Unsupported("BIN region size or nesting limit"));
+    }
+    let mut bytes = Vec::new();
+    reader.take(size).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 != size {
+        return Err(Error::SizeMismatch {
+            declared: size as usize,
+            actual: bytes.len(),
+        });
+    }
+    budget.depth += 1;
+    let mut choices = Choices::default();
+    let mut first_error = None;
+    let result = loop {
+        let mut r = Cursor::new(bytes.as_slice());
+        choices.index = 0;
+        let parsed = parse(&mut r, &mut choices, budget);
+        let error = match parsed {
+            Ok(value) if r.position() == size => break Ok(value),
+            Ok(_) => Error::SizeMismatch {
+                declared: size as usize,
+                actual: r.position() as usize,
+            },
+            Err(error) => error,
+        };
+        first_error.get_or_insert(error);
+        if budget.remaining == 0 || !choices.advance() {
+            break Err(first_error.take().unwrap());
+        }
+        budget.remaining -= 1;
+    };
+    budget.depth -= 1;
+    result
+}
+fn read_hash<R: Read>(reader: &mut R, wide: bool) -> Result<BinValue> {
+    Ok(if wide {
+        BinValue::Hash64(reader.read_u64()?)
+    } else {
+        BinValue::Hash(reader.read_u32()?)
+    })
+}
+fn read_fields<R: Read + Seek>(
+    reader: &mut R,
+    choices: &mut Choices,
+    budget: &mut Budget,
+) -> Result<IndexMap<u32, BinValue>> {
+    let count = reader.read_u16()? as usize;
+    let mut fields = IndexMap::with_capacity(count.min(1024));
+    for _ in 0..count {
+        let name = reader.read_u32()?;
+        let ty = BinType::from_u8(reader.read_u8()?)?;
+        fields.insert(name, read_value(reader, ty, choices, budget)?);
+    }
+    Ok(fields)
+}
+fn read_list<R: Read + Seek>(
+    reader: &mut R,
+    is_list2: bool,
+    budget: &mut Budget,
+) -> Result<BinValue> {
     let item = BinType::from_u8(reader.read_u8()?)?;
     if item.is_container() {
         return Err(Error::NestedContainer(item.to_u8()));
     }
     let size = reader.read_u32()? as u64;
-    let start = reader.stream_position()?;
-    let count = reader.read_u32()? as usize;
-    let mut items = Vec::with_capacity(count.min(1 << 24));
-    for _ in 0..count {
-        items.push(read_value(reader, item)?);
-    }
-    check_size(reader, start, size)?;
+    let items = region(reader, size, budget, |r, choices, budget| {
+        let count = r.read_u32()? as usize;
+        let mut items = Vec::with_capacity(count.min(1024));
+        let width = if item == BinType::Hash && count > 0 {
+            let payload = size
+                .checked_sub(4)
+                .ok_or(Error::Unsupported("short hash list"))?;
+            if payload % count as u64 != 0 || !matches!(payload / count as u64, 4 | 8) {
+                return Err(Error::Unsupported("invalid hash list width"));
+            }
+            payload / count as u64
+        } else {
+            4
+        };
+        for _ in 0..count {
+            items.push(if item == BinType::Hash {
+                budget.step()?;
+                read_hash(r, width == 8)?
+            } else {
+                read_value(r, item, choices, budget)?
+            });
+        }
+        Ok(items)
+    })?;
     Ok(BinValue::List {
         is_list2,
         item,
         items,
     })
 }
-
-fn read_map<R: Read + Seek>(reader: &mut R) -> Result<BinValue> {
+fn read_map<R: Read + Seek>(reader: &mut R, budget: &mut Budget) -> Result<BinValue> {
     let key = BinType::from_u8(reader.read_u8()?)?;
     let value = BinType::from_u8(reader.read_u8()?)?;
     if !key.is_primitive() {
@@ -179,68 +303,74 @@ fn read_map<R: Read + Seek>(reader: &mut R) -> Result<BinValue> {
         return Err(Error::NestedContainer(value.to_u8()));
     }
     let size = reader.read_u32()? as u64;
-    let start = reader.stream_position()?;
-    let count = reader.read_u32()? as usize;
-    let mut entries = Vec::with_capacity(count.min(1 << 24));
-    for _ in 0..count {
-        let k = read_value(reader, key)?;
-        let v = read_value(reader, value)?;
-        entries.push((k, v));
-    }
-    check_size(reader, start, size)?;
+    let entries = region(reader, size, budget, |r, choices, budget| {
+        let count = r.read_u32()? as usize;
+        if key == BinType::Hash
+            && value == BinType::Hash
+            && count > 0
+            && size == 4 + 12 * count as u64
+        {
+            return Err(Error::Unsupported("ambiguous hash map widths (4+8 or 8+4)"));
+        }
+        // Each map column has one width, shared by every entry.
+        let key_wide = key == BinType::Hash && choices.next();
+        let value_wide = value == BinType::Hash && choices.next();
+        let mut entries = Vec::with_capacity(count.min(1024));
+        for _ in 0..count {
+            budget.step()?;
+            let k = if key == BinType::Hash {
+                read_hash(r, key_wide)?
+            } else {
+                read_value(r, key, choices, budget)?
+            };
+            let v = if value == BinType::Hash {
+                read_hash(r, value_wide)?
+            } else {
+                read_value(r, value, choices, budget)?
+            };
+            entries.push((k, v));
+        }
+        Ok(entries)
+    })?;
     Ok(BinValue::Map {
         key,
         value,
         entries,
     })
 }
-
-fn read_option<R: Read + Seek>(reader: &mut R) -> Result<BinValue> {
+fn read_option<R: Read + Seek>(
+    reader: &mut R,
+    choices: &mut Choices,
+    budget: &mut Budget,
+) -> Result<BinValue> {
     let item = BinType::from_u8(reader.read_u8()?)?;
     if item.is_container() {
         return Err(Error::NestedContainer(item.to_u8()));
     }
-    let count = reader.read_u8()?;
-    let value = match count {
+    let value = match reader.read_u8()? {
         0 => None,
-        1 => Some(Box::new(read_value(reader, item)?)),
-        other => return Err(Error::InvalidOptionCount(other)),
+        1 => Some(Box::new(read_value(reader, item, choices, budget)?)),
+        n => return Err(Error::InvalidOptionCount(n)),
     };
     Ok(BinValue::Option { item, value })
 }
-
-fn read_struct<R: Read + Seek>(reader: &mut R, is_embed: bool) -> Result<BinValue> {
+fn read_struct<R: Read + Seek>(
+    reader: &mut R,
+    is_embed: bool,
+    budget: &mut Budget,
+) -> Result<BinValue> {
     let class = reader.read_u32()?;
     if !is_embed && class == 0 {
         return Ok(BinValue::Pointer {
-            class: 0,
+            class,
             fields: IndexMap::new(),
         });
     }
     let size = reader.read_u32()? as u64;
-    let start = reader.stream_position()?;
-    let field_count = reader.read_u16()? as usize;
-    let mut fields = IndexMap::with_capacity(field_count.min(1 << 16));
-    for _ in 0..field_count {
-        let name = reader.read_u32()?;
-        let ty = BinType::from_u8(reader.read_u8()?)?;
-        fields.insert(name, read_value(reader, ty)?);
-    }
-    check_size(reader, start, size)?;
-    if is_embed {
-        Ok(BinValue::Embed { class, fields })
+    let fields = region(reader, size, budget, |r, c, b| read_fields(r, c, b))?;
+    Ok(if is_embed {
+        BinValue::Embed { class, fields }
     } else {
-        Ok(BinValue::Pointer { class, fields })
-    }
-}
-
-fn check_size<R: Seek>(reader: &mut R, start: u64, declared: u64) -> Result<()> {
-    let consumed = reader.stream_position()? - start;
-    if consumed != declared {
-        return Err(Error::SizeMismatch {
-            declared: declared as usize,
-            actual: consumed as usize,
-        });
-    }
-    Ok(())
+        BinValue::Pointer { class, fields }
+    })
 }

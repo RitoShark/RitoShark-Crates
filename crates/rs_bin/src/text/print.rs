@@ -234,6 +234,7 @@ fn push_value(out: &mut String, value: &BinValue, depth: usize, ctx: &Ctx, blend
         }
         BinValue::String(s) => push_string(out, s),
         BinValue::Hash(v) => push_hash32(out, *v, ctx.mapper),
+        BinValue::Hash64(v) => out.push_str(&format!("0x{v:016x}")),
         BinValue::Link(v) => push_hash32(out, *v, ctx.mapper),
         BinValue::File(v) => push_hash64(out, *v, ctx.mapper),
         BinValue::List { items, .. } => {

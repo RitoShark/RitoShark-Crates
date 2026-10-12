@@ -3,7 +3,7 @@ use std::io::Write;
 use indexmap::IndexMap;
 use rs_io::{Serialize, WriterExt};
 
-use crate::bin::{Bin, BinValue};
+use crate::bin::{Bin, BinType, BinValue};
 use crate::error::{Error, Result};
 
 impl Serialize for Bin {
@@ -116,10 +116,12 @@ fn write_value<W: Write>(writer: &mut W, value: &BinValue) -> Result<()> {
             writer.write_string_u16(s)?;
         }
         BinValue::Hash(v) => writer.write_u32(*v)?,
+        BinValue::Hash64(v) => writer.write_u64(*v)?,
         BinValue::File(v) => writer.write_u64(*v)?,
         BinValue::Link(v) => writer.write_u32(*v)?,
         BinValue::Flag(v) => writer.write_bool(*v)?,
         BinValue::List { item, items, .. } => {
+            validate_column(*item, items.iter())?;
             writer.write_u8(item.to_u8())?;
             let mut body = Vec::new();
             body.write_u32(len_u32(items.len(), "list count")?)?;
@@ -134,6 +136,16 @@ fn write_value<W: Write>(writer: &mut W, value: &BinValue) -> Result<()> {
             value,
             entries,
         } => {
+            validate_column(*key, entries.iter().map(|(k, _)| k))?;
+            validate_column(*value, entries.iter().map(|(_, v)| v))?;
+            if *key == BinType::Hash
+                && *value == BinType::Hash
+                && entries.first().is_some_and(|(k, v)| {
+                    matches!(k, BinValue::Hash64(_)) != matches!(v, BinValue::Hash64(_))
+                })
+            {
+                return Err(Error::Unsupported("ambiguous hash map widths (4+8 or 8+4)"));
+            }
             writer.write_u8(key.to_u8())?;
             writer.write_u8(value.to_u8())?;
             let mut body = Vec::new();
@@ -178,4 +190,25 @@ fn write_value<W: Write>(writer: &mut W, value: &BinValue) -> Result<()> {
 
 fn len_u32(n: usize, what: &'static str) -> Result<u32> {
     u32::try_from(n).map_err(|_| Error::TooLarge(what))
+}
+
+fn validate_column<'a>(ty: BinType, values: impl Iterator<Item = &'a BinValue>) -> Result<()> {
+    let mut width = None;
+    for value in values {
+        if value.ty() != ty {
+            return Err(Error::Unsupported(
+                "container value does not match declared type",
+            ));
+        }
+        if ty == BinType::Hash {
+            let wide = matches!(value, BinValue::Hash64(_));
+            if width.is_some_and(|previous| previous != wide) {
+                return Err(Error::Unsupported(
+                    "mixed hash widths in a container column",
+                ));
+            }
+            width = Some(wide);
+        }
+    }
+    Ok(())
 }

@@ -124,3 +124,13 @@ cargo test -p rs_bin
   the suite stays green without them.
 
 Drop real `.bin` files into `RitoShark-Crates/sample-files/` to exercise the real-file suite.
+
+## Four- and eight-byte Hash values
+
+`BinValue::Hash(u32)` retains the existing API. `BinValue::Hash64(u64)` stores an eight-byte value under the same on-disk tag 17, including values whose upper half is zero. Entry keys, class/field names and Link values remain 32-bit; File values retain their separate XXH64 semantics.
+
+The reader uses declared region sizes to resolve widths, trying four bytes first. Lists and map columns use uniform widths. Mixed-width columns and ambiguous hash/hash maps with twelve-byte pairs are rejected. Search work and nesting are bounded. The algorithm cannot distinguish layouts whose four-byte interpretation also satisfies every declared size; schema information is needed for those cases.
+
+Text prints wide hashes as sixteen-digit hex literals, never through the 32-bit name dictionary. Editable Python dictionaries use the same `0x` plus sixteen-digit string to retain width and precision. Hashing a new material name requires the property's actual hashing algorithm; widening a legacy FNV hash is not a conversion to XXH3.
+
+Run `cargo test -p rs_bin`. The ignored `pbe_material_binary_and_text_roundtrip` test accepts `RS_BIN_WIDE_SAMPLE`, tested with LeagueToolkit's `crates/ltk_meta/tests/bins/zac_skin31_material.bin` at commit `0598de719015ea25f7ecbd8c47c1a2a4ee711a95` (PBE 16.21).

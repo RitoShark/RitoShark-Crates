@@ -60,6 +60,7 @@ fn value_to_py<'py>(py: Python<'py>, v: &BinValue, depth: usize) -> PyResult<Bou
         BinValue::Rgba(a) => (a[0], a[1], a[2], a[3]).into_pyobject(py)?.into_any(),
         BinValue::String(s) => s.into_pyobject(py)?.into_any(),
         BinValue::Hash(h) | BinValue::Link(h) => h.into_pyobject(py)?.into_any(),
+        BinValue::Hash64(h) => format!("0x{h:016x}").into_pyobject(py)?.into_any(),
         BinValue::File(h) => h.into_pyobject(py)?.into_any(),
         BinValue::List { items, .. } => {
             let list = PyList::empty(py);
@@ -221,6 +222,7 @@ fn primitive_to_editable_py<'py>(py: Python<'py>, v: &BinValue) -> PyResult<Boun
         BinValue::String(s) => s.into_pyobject(py)?.into_any(),
         BinValue::Hash(h) => h.into_pyobject(py)?.into_any(),
         BinValue::Link(h) => h.into_pyobject(py)?.into_any(),
+        BinValue::Hash64(h) => format!("0x{h:016x}").into_pyobject(py)?.into_any(),
         BinValue::File(h) => h.into_pyobject(py)?.into_any(),
         BinValue::Flag(b) => b.into_pyobject(py)?.to_owned().into_any(),
         _ => {
@@ -525,8 +527,14 @@ fn py_to_primitive(any: &Bound<'_, PyAny>, ty: BinType, ctx: &Ctx) -> PyResult<B
             BinValue::U64(u64::try_from(n).map_err(|_| range_err(ctx, name, n))?)
         }
         BinType::Hash => {
-            let n = extract_i128(any, ctx, name)?;
-            BinValue::Hash(u32::try_from(n).map_err(|_| range_err(ctx, name, n))?)
+            if let Ok(text) = any.extract::<String>() {
+                let hex = text.strip_prefix("0x").filter(|s| s.len() == 16)
+                    .ok_or_else(|| ctx.err("wide hashes require 0x and 16 hex digits"))?;
+                BinValue::Hash64(u64::from_str_radix(hex, 16).map_err(|_| ctx.err("invalid wide hash"))?)
+            } else {
+                let n = extract_i128(any, ctx, name)?;
+                BinValue::Hash(u32::try_from(n).map_err(|_| range_err(ctx, name, n))?)
+            }
         }
         BinType::Link => {
             let n = extract_i128(any, ctx, name)?;
