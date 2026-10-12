@@ -528,9 +528,13 @@ fn py_to_primitive(any: &Bound<'_, PyAny>, ty: BinType, ctx: &Ctx) -> PyResult<B
         }
         BinType::Hash => {
             if let Ok(text) = any.extract::<String>() {
-                let hex = text.strip_prefix("0x").filter(|s| s.len() == 16)
+                let hex = text
+                    .strip_prefix("0x")
+                    .filter(|s| s.len() == 16)
                     .ok_or_else(|| ctx.err("wide hashes require 0x and 16 hex digits"))?;
-                BinValue::Hash64(u64::from_str_radix(hex, 16).map_err(|_| ctx.err("invalid wide hash"))?)
+                BinValue::Hash64(
+                    u64::from_str_radix(hex, 16).map_err(|_| ctx.err("invalid wide hash"))?,
+                )
             } else {
                 let n = extract_i128(any, ctx, name)?;
                 BinValue::Hash(u32::try_from(n).map_err(|_| range_err(ctx, name, n))?)
