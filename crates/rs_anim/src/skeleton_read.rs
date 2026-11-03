@@ -65,8 +65,8 @@ impl Skeleton {
             reader
                 .seek(SeekFrom::Start(joints_offset as u64))
                 .map_err(rs_io::Error::from)?;
-            for _ in 0..joint_count {
-                joints.push(read_joint(reader)?);
+            for index in 0..joint_count {
+                joints.push(read_joint(reader, index == 0)?);
             }
         }
 
@@ -182,7 +182,7 @@ impl Skeleton {
     }
 }
 
-fn read_joint<R: Read + Seek>(reader: &mut R) -> Result<Joint> {
+fn read_joint<R: Read + Seek>(reader: &mut R, recover_first_name: bool) -> Result<Joint> {
     let flags = reader.read_u16()?;
     let id = reader.read_i16()?;
     let parent_id = reader.read_i16()?;
@@ -201,7 +201,21 @@ fn read_joint<R: Read + Seek>(reader: &mut R) -> Result<Joint> {
     let name_offset = reader.read_i32()?;
     let return_pos = reader.stream_position().map_err(rs_io::Error::from)?;
     let name_abs = (return_pos as i64 - 4 + name_offset as i64) as u64;
-    let name = read_name_at(reader, name_abs)?;
+    let mut name = read_name_at(reader, name_abs)?;
+    // Compatibility with SKLs accepted by Aventurine's pre-Rust importer:
+    // the first joint's name pointer can precede its string by two bytes.
+    // Do not guess a name unless the exact legacy retry matches the stored hash.
+    // Failed/truncated candidates leave the original empty name intact; callers
+    // requiring named joints can then report it without changing other readers.
+    if recover_first_name
+        && name.is_empty()
+        && let Some(candidate_offset) = name_abs.checked_add(2)
+        && let Ok(candidate) = read_name_at(reader, candidate_offset)
+        && !candidate.is_empty()
+        && rs_hash::elf_lower(&candidate) == hash
+    {
+        name = candidate;
+    }
     reader
         .seek(SeekFrom::Start(return_pos))
         .map_err(rs_io::Error::from)?;

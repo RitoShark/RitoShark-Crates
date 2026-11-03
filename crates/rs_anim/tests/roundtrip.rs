@@ -145,6 +145,107 @@ fn skeleton_joint_index_section_sorted_by_hash_ascending() {
     assert_eq!(bytes, bytes2, "skl round-trip is byte-exact");
 }
 
+fn skeleton_with_name_hashes() -> Vec<u8> {
+    let mut skeleton = Skeleton::new();
+    skeleton.joints = vec![
+        sample_joint("Root", 0, -1, rs_hash::elf_lower("Root")),
+        sample_joint("Child", 1, 0, rs_hash::elf_lower("Child")),
+    ];
+    skeleton.influences = vec![1, 0];
+    skeleton.to_bytes().unwrap()
+}
+
+fn joint_name_field(bytes: &[u8], index: usize) -> usize {
+    let joints = i32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize;
+    joints + index * 100 + 96
+}
+
+fn move_joint_name_pointer(bytes: &mut [u8], index: usize, absolute: usize) {
+    let field = joint_name_field(bytes, index);
+    let relative = i32::try_from(absolute as i64 - field as i64).unwrap();
+    bytes[field..field + 4].copy_from_slice(&relative.to_le_bytes());
+}
+
+fn preceding_name_padding(bytes: &[u8], index: usize) -> usize {
+    let field = joint_name_field(bytes, index);
+    let relative = i32::from_le_bytes(bytes[field..field + 4].try_into().unwrap());
+    let original = (field as i64 + relative as i64) as usize;
+    assert_eq!(&bytes[original - 2..original], &[0, 0]);
+    original - 2
+}
+
+#[test]
+fn skeleton_recovers_first_name_only_when_legacy_retry_matches_hash() {
+    let mut bytes = skeleton_with_name_hashes();
+    let expected = Skeleton::from_bytes(&bytes).unwrap();
+    let padding = preceding_name_padding(&bytes, 0);
+    move_joint_name_pointer(&mut bytes, 0, padding);
+    let mut parsed = Skeleton::from_bytes(&bytes).unwrap();
+    assert_eq!(parsed, expected, "only the name lookup is repaired");
+    assert_eq!(
+        parsed.to_bytes().unwrap(),
+        bytes,
+        "raw round trip stays exact"
+    );
+    parsed.joints[0].radius += 1.0; // Force a rebuilt file, as a DCC export does.
+    let rebuilt = parsed.to_bytes().unwrap();
+    let field = joint_name_field(&rebuilt, 0);
+    let offset = i32::from_le_bytes(rebuilt[field..field + 4].try_into().unwrap());
+    let absolute = (field as i64 + offset as i64) as usize;
+    assert_eq!(&rebuilt[absolute..absolute + 5], b"Root\0");
+    assert_eq!(
+        Skeleton::from_bytes(&rebuilt).unwrap().joints,
+        parsed.joints
+    );
+}
+
+#[test]
+fn skeleton_does_not_recover_first_name_with_wrong_hash() {
+    let mut bytes = skeleton_with_name_hashes();
+    let padding = preceding_name_padding(&bytes, 0);
+    move_joint_name_pointer(&mut bytes, 0, padding);
+    let hash_field = joint_name_field(&bytes, 0) - 96 + 8;
+    bytes[hash_field..hash_field + 4].copy_from_slice(&rs_hash::elf_lower("Other").to_le_bytes());
+    let parsed = Skeleton::from_bytes(&bytes).unwrap();
+    assert!(parsed.joints[0].name.is_empty());
+    assert_eq!(parsed.joints[1].name, "Child");
+    assert_eq!(parsed.to_bytes().unwrap(), bytes);
+}
+
+#[test]
+fn skeleton_does_not_retry_other_joint_names() {
+    let mut bytes = skeleton_with_name_hashes();
+    let padding = preceding_name_padding(&bytes, 1);
+    move_joint_name_pointer(&mut bytes, 1, padding);
+    let parsed = Skeleton::from_bytes(&bytes).unwrap();
+    assert_eq!(parsed.joints[0].name, "Root");
+    assert!(parsed.joints[1].name.is_empty());
+}
+
+#[test]
+fn skeleton_legacy_name_retry_is_safe_at_eof() {
+    let mut bytes = skeleton_with_name_hashes();
+    let last_zero = bytes.len() - 1;
+    assert_eq!(bytes[last_zero], 0);
+    move_joint_name_pointer(&mut bytes, 0, last_zero);
+    let parsed = Skeleton::from_bytes(&bytes).unwrap();
+    assert!(parsed.joints[0].name.is_empty());
+    assert_eq!(parsed.joints[1].name, "Child");
+    assert_eq!(parsed.to_bytes().unwrap(), bytes);
+}
+
+#[test]
+fn skeleton_does_not_accept_unterminated_recovery_name() {
+    let mut bytes = skeleton_with_name_hashes();
+    let padding = bytes.len();
+    bytes.extend_from_slice(b"\0\0Root");
+    move_joint_name_pointer(&mut bytes, 0, padding);
+    let parsed = Skeleton::from_bytes(&bytes).unwrap();
+    assert!(parsed.joints[0].name.is_empty());
+    assert_eq!(parsed.joints[1].name, "Child");
+    assert_eq!(parsed.to_bytes().unwrap(), bytes);
+}
+
 #[test]
 fn skeleton_unknown_legacy_version_is_unsupported() {
     let mut bytes = Vec::new();
