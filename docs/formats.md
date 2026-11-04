@@ -8,6 +8,7 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 - **Text:** the human-readable `#PROP_text` form is both **parsed** (`from_text`) and **printed** (`to_text`); `bin → text → bin` is byte-identical.
 - **Covers:** all value types (scalars, vectors, matrix, colour, string, hash/link/file), both list kinds, ordered maps (duplicate keys preserved), pointer/embed structs, options, null pointers, linked-file lists, and the `PTCH` patches / data-override trailer.
 - **Hashing:** field/class/entry names are FNV-1a; resolve to readable names with a `HashMapper`.
+- **`ritobinmap`:** the names a mod invented, kept inside the bin as a normal entry so a repathed asset stays readable once its path is only a hash — see [ritobinmap.md](ritobinmap.md).
 - **CLI:** `rs_cli read`, `rs_cli transform`, `rs_cli bin convert`, `rs_cli bin diff`.
 
 ## `.wad`, `.wad.client` — archive — `rs_wad`

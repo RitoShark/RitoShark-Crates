@@ -843,34 +843,107 @@ fn trailing_bytes_survive_roundtrip() {
     );
 }
 
-/// The hash->path side table lives in `Bin.trailing`, so a bin carrying one still
-/// parses to the same entries, still round-trips byte-exactly, and hands the map
-/// back after a read -> write cycle.
+/// The `ritobinmap` record is a normal entry, so it survives a binary round-trip, leaves
+/// nothing after the declared body for a stricter parser to trip over, and comes back off
+/// the reparsed tree unchanged.
 #[test]
-fn trailer_side_table_survives_a_bin_roundtrip() {
+fn path_map_record_survives_a_bin_roundtrip() {
+    let clean = sample_prop();
+    let mut bin = Bin::from_bytes(&clean).expect("parse clean");
+
+    let mut map = rs_bin::PathMap::new();
+    map.bin_hashes.insert("MyRepathedEmitter".to_string());
+    map.game.insert("ASSETS/Modders/Me/Custom.dds".to_string());
+    rs_bin::write_path_map(&mut bin, &map);
+
+    let bytes = bin.to_bytes().expect("serialize");
+    assert_eq!(&bytes[..8], &clean[..8], "header must be untouched");
+
+    let mut reparsed = Bin::from_bytes(&bytes).expect("parse with record");
+    assert!(
+        reparsed.trailing.is_empty(),
+        "the record must live inside the declared body"
+    );
+    assert_eq!(rs_bin::read_path_map(&reparsed), map);
+    assert_eq!(reparsed.to_bytes().expect("serialize"), bytes);
+
+    // Dropping the record restores the original file byte for byte.
+    assert_eq!(rs_bin::strip_path_map(&mut reparsed), map);
+    assert_eq!(reparsed.to_bytes().expect("serialize"), clean);
+}
+
+/// A bin still carrying the superseded `CELMAP` footer migrates: its names are re-filed by
+/// category into the record, and the trailing bytes ritobin chokes on are gone.
+#[test]
+fn a_legacy_footer_migrates_into_the_record() {
+    let mut bin = Bin::from_bytes(&sample_prop()).expect("parse clean");
+    bin.entries[0].class_hash = rs_hash::fnv1a("SomeClass");
+    bin.entries[0].fields.insert(
+        rs_hash::fnv1a("mEmitterName"),
+        rs_bin::BinValue::Hash(rs_hash::fnv1a("MyRepathedEmitter")),
+    );
+    bin.entries[0].fields.insert(
+        rs_hash::fnv1a("texturePath"),
+        rs_bin::BinValue::File(rs_hash::xxh64("ASSETS/Modders/Me/Custom.dds")),
+    );
+
     let mut trailer = rs_bin::Trailer::new();
     trailer
         .names
-        .insert(0xdeadbeef, "MyRepathedEmitter".to_string());
+        .insert(rs_hash::fnv1a("SomeClass"), "SomeClass".to_string());
+    trailer.names.insert(
+        rs_hash::fnv1a("MyRepathedEmitter"),
+        "MyRepathedEmitter".to_string(),
+    );
     trailer.files.insert(
-        0x0011223344556677,
+        rs_hash::xxh64("ASSETS/Modders/Me/Custom.dds"),
         "ASSETS/Modders/Me/Custom.dds".to_string(),
     );
+    trailer.files.insert(
+        0x0011223344556677,
+        "ASSETS/Never/Referenced.dds".to_string(),
+    );
+    bin.trailing = legacy_footer(&trailer);
 
-    let clean = sample_prop();
-    let mut bin = Bin::from_bytes(&clean).expect("parse clean");
-    bin.trailing = rs_bin::append_trailer(&bin.trailing, &trailer);
+    let recovered = rs_bin::read_trailer(&bin.trailing);
+    assert_eq!(recovered, trailer);
 
-    let bytes = bin.to_bytes().expect("serialize");
-    assert_eq!(&bytes[..clean.len()], &clean[..], "body must be untouched");
+    let map = rs_bin::capture(&bin, recovered.all_names());
+    rs_bin::write_path_map(&mut bin, &map);
 
-    let reparsed = Bin::from_bytes(&bytes).expect("parse trailered");
-    assert_eq!(reparsed.entries, bin.entries);
-    assert_eq!(rs_bin::read_trailer(&reparsed.trailing), trailer);
-    assert_eq!(reparsed.to_bytes().expect("serialize"), bytes);
+    assert!(bin.trailing.is_empty(), "legacy footer must be dropped");
+    assert!(
+        map.bin_types.contains("SomeClass"),
+        "a class name belongs in binTypes"
+    );
+    assert!(
+        map.bin_hashes.contains("MyRepathedEmitter"),
+        "a `hash` value belongs in binHashes"
+    );
+    assert!(
+        map.game.contains("ASSETS/Modders/Me/Custom.dds"),
+        "a `file` value belongs in game"
+    );
+    assert!(
+        !map.game.contains("ASSETS/Never/Referenced.dds"),
+        "a hash the bin never references is not worth carrying"
+    );
 
-    // Dropping the table restores the original file byte for byte.
-    let mut stripped = reparsed;
-    stripped.trailing = rs_bin::append_trailer(&stripped.trailing, &rs_bin::Trailer::new());
-    assert_eq!(stripped.to_bytes().expect("serialize"), clean);
+    let reparsed = Bin::from_bytes(&bin.to_bytes().expect("serialize")).expect("parse");
+    assert_eq!(rs_bin::read_path_map(&reparsed), map);
+}
+
+fn legacy_footer(trailer: &rs_bin::Trailer) -> Vec<u8> {
+    let mut entries: std::collections::BTreeMap<String, &str> = std::collections::BTreeMap::new();
+    for (hash, name) in &trailer.names {
+        entries.insert(format!("{hash:08x}"), name);
+    }
+    for (hash, name) in &trailer.files {
+        entries.insert(format!("{hash:016x}"), name);
+    }
+    let payload = serde_json::to_vec(&entries).expect("encode");
+    let mut out = payload.clone();
+    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(b"CELMAP\x00\x00");
+    out
 }
