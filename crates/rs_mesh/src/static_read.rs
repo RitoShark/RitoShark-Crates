@@ -36,11 +36,8 @@ impl StaticMesh {
 
         let major = reader.read_u16()?;
         let minor = reader.read_u16()?;
-        // Accept major 2 or 3 regardless of minor, matching Jade and the ltk
-        // reference. 2.1, 2.2, and 3.2 all occur in the wild; the only layout
-        // branch that depends on the exact version is the 3.2 `vertex_type`
-        // field read below. Anything outside major {2,3} is unknown — reject.
-        if !matches!(major, 2 | 3) {
+        // Known legacy layouts have no vertex-type word; only 3.2 carries it.
+        if !matches!((major, minor), (2, 1) | (2, 2) | (3, 1) | (3, 2)) {
             return Err(Error::UnsupportedVersion(
                 (u32::from(major) << 16) | u32::from(minor),
             ));
@@ -59,14 +56,18 @@ impl StaticMesh {
             None
         };
 
-        let mut positions = Vec::with_capacity(vertex_count);
+        if vertex_type.is_some_and(|t| t > 1) {
+            return Err(Error::InvalidVertexType(vertex_type.unwrap()));
+        }
+        // Grow with successfully read records rather than trusting unvalidated counts.
+        let mut positions = Vec::new();
         for _ in 0..vertex_count {
             positions.push(reader.read_vec3()?);
         }
 
         let colors = match vertex_type {
             Some(t) if t >= 1 => {
-                let mut c = Vec::with_capacity(vertex_count);
+                let mut c = Vec::new();
                 for _ in 0..vertex_count {
                     c.push(reader.read_byte_array::<4>()?);
                 }
@@ -77,9 +78,12 @@ impl StaticMesh {
 
         let central = reader.read_vec3()?;
 
-        let mut faces = Vec::with_capacity(face_count);
+        let mut faces = Vec::new();
         for _ in 0..face_count {
             let indices = [reader.read_u32()?, reader.read_u32()?, reader.read_u32()?];
+            if indices.iter().any(|&i| i as usize >= vertex_count) {
+                return Err(Error::Unsupported("SCB face index is out of range"));
+            }
             let material = reader.read_fixed_string::<64>()?;
             let u = [reader.read_f32()?, reader.read_f32()?, reader.read_f32()?];
             let v = [reader.read_f32()?, reader.read_f32()?, reader.read_f32()?];

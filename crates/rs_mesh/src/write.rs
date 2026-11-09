@@ -121,6 +121,7 @@ impl StaticMesh {
     /// bounds, vertex-type word, and post-face tail verbatim so a read of a real file round-trips
     /// byte-for-byte.
     pub fn to_scb_writer<W: Write>(&self, w: &mut W) -> Result<()> {
+        self.validate_scb()?;
         let (major, minor) = if self.version == (0, 0) {
             (3, 2)
         } else {

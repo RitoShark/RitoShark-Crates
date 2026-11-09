@@ -48,6 +48,79 @@ pub struct StaticMesh {
 }
 
 impl StaticMesh {
+    /// Validate authored SCB data before serialization, without rewriting source bounds.
+    pub fn validate_scb(&self) -> crate::error::Result<()> {
+        use crate::error::Error;
+        let version = if self.version == (0, 0) {
+            (3, 2)
+        } else {
+            self.version
+        };
+        if !matches!(version, (2, 1) | (2, 2) | (3, 1) | (3, 2)) {
+            return Err(Error::UnsupportedVersion(
+                (u32::from(version.0) << 16) | u32::from(version.1),
+            ));
+        }
+        if self.name.len() > 128 || self.name.contains('\0') {
+            return Err(Error::Unsupported(
+                "SCB name exceeds 128 bytes or contains NUL",
+            ));
+        }
+        if self.positions.len() > u32::MAX as usize || self.faces.len() > u32::MAX as usize {
+            return Err(Error::Unsupported("SCB count exceeds uint32"));
+        }
+        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !finite(self.central) || self.positions.iter().any(|&p| !finite(p)) {
+            return Err(Error::Unsupported(
+                "SCB positions and central must be finite",
+            ));
+        }
+        let vtype = self.vertex_type.unwrap_or(u32::from(self.colors.is_some()));
+        if vtype > 1 {
+            return Err(Error::InvalidVertexType(vtype));
+        }
+        if (version != (3, 2) && self.colors.is_some())
+            || (version == (3, 2) && (vtype == 1) != self.colors.is_some())
+        {
+            return Err(Error::Unsupported(
+                "SCB version/vertex type does not match color data",
+            ));
+        }
+        if self
+            .colors
+            .as_ref()
+            .is_some_and(|c| c.len() != self.positions.len())
+        {
+            return Err(Error::Unsupported(
+                "SCB color count does not match vertex count",
+            ));
+        }
+        for f in &self.faces {
+            if f.indices
+                .iter()
+                .any(|&i| i as usize >= self.positions.len())
+            {
+                return Err(Error::Unsupported("SCB face index is out of range"));
+            }
+            if f.material.len() > 64 || f.material.contains('\0') {
+                return Err(Error::Unsupported(
+                    "SCB material exceeds 64 bytes or contains NUL",
+                ));
+            }
+            if f.uvs.iter().any(|v| !v.x.is_finite() || !v.y.is_finite()) {
+                return Err(Error::Unsupported("SCB UVs must be finite"));
+            }
+        }
+        let required = if self.flags & 1 != 0 {
+            self.faces.len() * 9
+        } else {
+            0
+        };
+        if self.trailing.len() < required {
+            return Err(Error::Unsupported("SCB per-corner color tail is truncated"));
+        }
+        Ok(())
+    }
     pub fn name(&self) -> &str {
         &self.name
     }
