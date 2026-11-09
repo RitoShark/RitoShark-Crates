@@ -57,6 +57,30 @@ pub(crate) struct Compressed {
 }
 
 impl Compressed {
+    pub(crate) fn joint_hashes(&self) -> &[u32] {
+        &self.joints
+    }
+
+    pub(crate) fn visit_samples(
+        &self,
+        times: impl Iterator<Item = f32>,
+        mut visit: impl FnMut(f32, &[[rs_math::Vec4; 3]]) -> Result<()>,
+    ) -> Result<()> {
+        let mut evaluator = Evaluator::new(self);
+        let mut values = vec![[rs_math::Vec4::ZERO; 3]; self.joints.len()];
+        for time in times {
+            let sample_time = time.clamp(0., self.duration.max(0.));
+            evaluator.seek(sample_time);
+            let tick = compress_time(sample_time, self.duration);
+            for (joint, value) in values.iter_mut().enumerate() {
+                let (r, p, s) = evaluator.hot[joint].sample(tick, self.parametrized);
+                *value = [r.into(), p.extend(0.), s.extend(0.)];
+            }
+            visit(time, &values)?;
+        }
+        Ok(())
+    }
+
     /** Reads the compressed header, joint-hash table, sparse frame stream, and jump-cache block.
     The reader must be positioned immediately after the 8-byte magic and 4-byte version; all section
     offsets are signed and relative to that point (`+12`), matching the uncompressed path. */
@@ -179,8 +203,13 @@ impl Compressed {
     /** Resamples the compressed curves at `fps` over `duration`, producing one explicit keyframe per
     output frame for every joint. */
     pub(crate) fn bake(&self) -> Result<Vec<AnimTrack>> {
-        let frame_duration = if self.fps != 0.0 { 1.0 / self.fps } else { 0.0 };
-        let out_frames = ((self.duration * self.fps).round() as usize + 1).max(1);
+        self.bake_at_rate(self.fps)
+    }
+
+    /// Evaluate the actual sparse playback curves at an explicit validation rate.
+    pub(crate) fn bake_at_rate(&self, fps: f32) -> Result<Vec<AnimTrack>> {
+        let frame_duration = if fps != 0.0 { 1.0 / fps } else { 0.0 };
+        let out_frames = ((self.duration * fps).round() as usize + 1).max(1);
 
         let mut tracks: Vec<AnimTrack> = self
             .joints
@@ -537,7 +566,7 @@ fn catmull_rom_weights(amount: f32, ease_in: f32, ease_out: f32) -> (f32, f32, f
     (m0, m1, m2, m3)
 }
 
-fn compress_time(time: f32, duration: f32) -> u16 {
+pub(crate) fn compress_time(time: f32, duration: f32) -> u16 {
     if duration <= 0.0 {
         return 0;
     }
@@ -569,9 +598,67 @@ fn read_keys_u32(b: &[u8]) -> [usize; 4] {
     ]
 }
 
+// Share the exact playback interpolation with the encoder's error estimator.
+pub(crate) fn sample_parametrized_rotation(time: u16, times: [u16; 4], values: [Quat; 4]) -> Quat {
+    let mut keys = std::array::from_fn(|i| QuatKey {
+        time: times[i],
+        value: values[i],
+    });
+    align_shortest_path(&mut keys);
+    sample_quat(time, true, &keys)
+}
+
+pub(crate) fn sample_parametrized_vector(time: u16, times: [u16; 4], values: [Vec3; 4]) -> Vec3 {
+    let keys = std::array::from_fn(|i| VecKey {
+        time: times[i],
+        value: values[i],
+    });
+    sample_vec3(time, true, &keys)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encoded_seek_cache_supports_out_of_order_playback() {
+        use crate::{AnimFrame, AnimTrack, Animation, CompressionOptions};
+        let mut anim = Animation::new(30.0);
+        anim.tracks.push(AnimTrack {
+            joint_hash: 7,
+            frames: (0..90)
+                .map(|i| {
+                    let t = i as f32 / 30.0;
+                    AnimFrame::new(
+                        t,
+                        Quat::from_rotation_y(t),
+                        Vec3::new(t.sin(), t, 0.0),
+                        Vec3::ONE,
+                    )
+                })
+                .collect(),
+        });
+        let bytes = anim
+            .to_compressed_bytes(&CompressionOptions::default())
+            .unwrap();
+        let mut reader = std::io::Cursor::new(bytes);
+        reader.set_position(12);
+        let compressed = Compressed::from_reader(&mut reader).unwrap();
+        let sequential = compressed.bake().unwrap();
+        let mut evaluator = Evaluator::new(&compressed);
+        for frame in [89, 0, 45, 12, 88, 1, 70, 0, 89] {
+            let time = frame as f32 * (1.0 / anim.fps);
+            evaluator.seek(time);
+            let (rotation, translation, scale) = evaluator.hot[0].sample(
+                compress_time(time, compressed.duration),
+                compressed.parametrized,
+            );
+            let expected = sequential[0].frames[frame];
+            assert!(translation.abs_diff_eq(expected.translation, 1e-6));
+            assert!(scale.abs_diff_eq(expected.scale, 1e-6));
+            assert!(rotation.abs_diff_eq(expected.rotation, 1e-6));
+        }
+    }
 
     #[test]
     fn compress_time_clamps() {

@@ -44,7 +44,10 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 ## `.anm` — animation — `rs_anim`
 
 - **Read / write:** **byte-exact** for uncompressed v3 / v4 / v5 **and** compressed `r3d2canm`, via faithful preservation of the on-disk sections.
-- **Editing:** mutating a compressed animation re-emits it as a lossless uncompressed v4 (the decoded keyframes are preserved; the compressed encoder is not reproduced).
+- **Default editing:** after `make_editable()`, normal saves emit uncompressed v4 and preserve the decoded samples.
+- **Format selection:** `Animation::export_bytes` / `export_to_path` use the adaptive CANM writer with explicit CANM -> v5 -> v4 fallback, decoded-byte validation, and a report of the actual format and fallback reasons. See [the export API guide](../crates/rs_anim/docs/animation-export.md).
+- **V5 export:** explicit `to_v5_bytes`, `write_v5` and `to_v5_path` retain every frame and float32 vectors with 48-bit rotations.
+- **Strict compressed export:** explicit `Animation::to_compressed_bytes`, `write_compressed` and `to_compressed_path` methods encode current tracks as `r3d2canm` v1. `CompressionOptions` controls subframe-grid error bounds, including quantization, and optional skeleton model-space checks. See [compressed export](../crates/rs_anim/README.md#compressed-export) for constraints and Python support.
 - **CLI:** `rs_cli read` only.
 
 ## `.mapgeo` — environment geometry (OEGM) — `rs_mapgeo`

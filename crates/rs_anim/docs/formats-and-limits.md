@@ -194,6 +194,23 @@ much more memory than the source. Later sampling of baked frames uses linear vec
 spherical quaternions, so arbitrary-time results can differ from the original spline between
 baked samples.
 
+The strict `to_compressed_bytes` writer emits v1 with keyframe-time parametrized cubic interpolation (flags 7), all
+three channels, and one initial jump cache. Key records after the initial windows are
+ordered by when playback consumes them, which differs from sorting their stored timestamps.
+It fits and checks a regularly spaced grid, by default four intervals per input frame, with
+at most 65,536 points per track. It rejects collisions on the quantized time grid. A supplied
+skeleton adds model-space checks and adaptive key-reduction refinement. This is an encoder input constraint, not the decoder's frame
+limit. See [compressed export](../README.md#compressed-export) for accuracy controls,
+quantization limits and save behaviour.
+
+The recommended `export_bytes` / `export_to_path` API uses adaptive key fitting and
+periodic seek caches. It checks 96 and 97 subintervals per source frame and both
+edges of each CANM clock cell. Its initial fitting grid accepts up to 32,768 input
+frames; exceeding that encoder budget or failing accuracy checks tries v5, then v4.
+That frame limit is separate from the number of sparse key records, which may
+exceed 65,536 using wide seek indices. Each fallback must pass the same requested
+quality. See [format selection and fallback](animation-export.md).
+
 ## Reference review
 
 Reviewed on 2026-09-28:

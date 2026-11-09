@@ -196,6 +196,65 @@ so there is nothing for it to do.
 
 ## `Anm` byte-exactness
 
+### Animation format selection and fallback
+
+`Anm.export("canm", skeleton=rig)` returns an `AnmExport` containing `bytes`,
+`requested_format`, actual `format`, `fallbacks` (format/reason pairs), and `metrics`.
+Use `result.to_path(path)` to save the checked output. Accepted selections are
+`"canm"` (CANM -> v5 -> v4), `"v5"` (v5 -> v4), and `"v4"` (v4 only).
+All attempts use the same requested tolerances; malformed input remains an error.
+Normal saves and the older strict format-specific writers are unchanged.
+See [the detailed guide](../rs_anim/docs/animation-export.md).
+
+### Explicit v5 export
+
+`anm.to_v5_bytes()` and `anm.to_v5_path("compact.anm")` encode current samples as ANMD v5.
+All frames and float32 vectors are retained, while rotations use 48-bit packing. Both palettes
+allow 65,536 values. Input validation matches the sampled-track requirements below, without
+CANM's 16-bit time-grid limit. These methods leave normal saves and retained bytes unchanged.
+
+### Explicit compressed export
+
+```python
+anm = ritoshark.Anm.from_path("input.anm")  # Or Anm.new(fps, tracks).
+anm.to_compressed_path(
+    "compressed.anm",
+    rotation_error=0.001,     # Radians; about 0.057 degrees.
+    translation_error=0.05,   # Maximum component error in the animation's units.
+    scale_error=0.001,        # Maximum component error in scale factors.
+    sample_subdivisions=4,   # Check four intervals per source frame.
+    skeleton=ritoshark.Skl.from_path("champion.skl"),
+    model_space_error=0.1,   # Model-space origin/unit-axis probe error.
+)
+data = anm.to_compressed_bytes()  # Same defaults; useful for archive builders.
+```
+
+These methods encode the current tracks as `r3d2canm` v1 even when original source bytes
+are retained. They do not change `is_byte_exact` or the behaviour of `to_bytes()` / `to_path()`.
+Python releases the GIL during encoding. Rust callers can use `Animation::to_compressed_bytes`,
+`write_compressed` or `to_compressed_path` with `CompressionOptions`.
+
+Tracks must be nonempty, have unique joint hashes and equal sample counts, and be sampled
+at `fps` starting at zero (`frame.time = index / fps`). The decoder already produces this
+representation. The format supports at most 16,384 tracks; this encoder accepts up to
+65,536 validation points per track and rejects collisions on the 16-bit time grid.
+For long clips, lower sample_subdivisions explicitly or choose v5. Resample irregular
+tracks before writing. Nonfinite transforms, invalid timing and zero-length quaternions
+are rejected; other quaternions are normalized.
+
+Accuracy is checked at the original frames and intermediate validation points, against linear
+vectors and shortest-path spherical rotations. With `skeleton`, the encoder also checks composed
+joint origins and unit-axis probes, tightening reduction as needed. This is not a bound on the
+entire skinned mesh or continuously between grid points. Unanimated joints keep rest transforms;
+unmatched tracks are retained. `model_space_error` is ignored without a skeleton. `WriteError` identifies the joint,
+channel, sample and error if a requested tolerance cannot be met. Translation and scale each
+use clip-wide quantization bounds: a very large range can make tight tolerances impossible even
+with every key retained. Explicitly choose a larger tolerance or use uncompressed export
+in that case. File methods finish encoding before opening the destination, so an encoding
+error leaves an existing file untouched.
+
+### Default save behaviour
+
 An unedited `Anm.from_path(...).to_bytes()` round-trip is byte-exact — the original source
 bytes are reproduced verbatim. Calling `make_editable()` switches the instance to an editable
 track representation and drops that byte-exact passthrough permanently: subsequent writes
@@ -220,5 +279,6 @@ skip by design rather than fail.
 `tests/dcc/` holds smoke scripts that load the built wheel inside an actual Blender or Maya
 interpreter. They are not collected by pytest — see `tests/dcc/README.md` for how to run them.
 The abi3 wheel has been verified to load under Maya 2023's `mayapy` (Python 3.9.7, the abi3
-floor) and build a mesh from a real `.skn`; the Blender script is written and reviewed but has
-not been executed on this machine, since Blender isn't installed here.
+floor) and build a mesh from a real `.skn`. The animation export API also passes
+CANM and both fallback smoke checks under Maya 2023 Python 3.9 and Blender 4.0
+bundled Python 3.10. These API checks do not replace scene or in-game validation.

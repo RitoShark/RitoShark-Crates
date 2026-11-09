@@ -33,6 +33,8 @@ let bytes = bin.to_bytes()?;                     // byte-exact re-encode
 | Audio container | `.wpk`, `.bnk` | `rs_audio` | ✅ | ✅ |
 
 Versions, capabilities, and known limits per format are in [docs/formats.md](docs/formats.md).
+Animation APIs include [CANM, v5 and v4 export with automatic fallback](crates/rs_anim/docs/animation-export.md),
+configurable accuracy and optional skeleton validation, available to Rust and Python callers.
 
 ## Install
 

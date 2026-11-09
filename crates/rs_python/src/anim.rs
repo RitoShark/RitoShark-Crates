@@ -357,6 +357,119 @@ impl Anm {
         self.inner.to_path(path).map_err(write_err)
     }
 
+    /// Explicit selection with CANM -> v5 -> v4 fallback and decoded-byte quality checks.
+    /// Returns bytes, actual format, fallback reasons and measured errors. Does not alter the clip.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(format, *, skeleton=None, rotation_error=0.034906585, translation_error=0.5, scale_error=0.005, model_space_error=1.0))]
+    fn export(
+        &self,
+        py: Python<'_>,
+        format: &str,
+        skeleton: Option<PyRef<'_, Skl>>,
+        rotation_error: f32,
+        translation_error: f32,
+        scale_error: f32,
+        model_space_error: f32,
+    ) -> PyResult<PyAnmExport> {
+        use ritoshark::anim::{AnimationExportOptions, AnimationFormat};
+        let format = match format {
+            "canm" => AnimationFormat::Canm,
+            "v5" => AnimationFormat::V5,
+            "v4" => AnimationFormat::V4,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "format must be 'canm', 'v5' or 'v4'",
+                ));
+            }
+        };
+        let options = AnimationExportOptions {
+            format,
+            rotation_error,
+            translation_error,
+            scale_error,
+            model_space_error,
+        };
+        let skeleton = skeleton.as_ref().map(|s| &s.inner);
+        let inner = py
+            .allow_threads(|| self.inner.export_bytes(&options, skeleton))
+            .map_err(write_err)?;
+        Ok(PyAnmExport { inner })
+    }
+
+    /// Dense ANMD v5, retaining every frame and float32 translation/scale.
+    fn to_v5_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let data = py
+            .allow_threads(|| self.inner.to_v5_bytes())
+            .map_err(write_err)?;
+        Ok(PyBytes::new(py, &data))
+    }
+
+    fn to_v5_path(&self, py: Python<'_>, path: std::path::PathBuf) -> PyResult<()> {
+        py.allow_threads(|| self.inner.to_v5_path(path))
+            .map_err(write_err)
+    }
+
+    /// CANM v1, checking subframes and optionally the composed skeleton hierarchy.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (*, rotation_error=0.001, translation_error=0.05, scale_error=0.001, sample_subdivisions=4, skeleton=None, model_space_error=0.1))]
+    fn to_compressed_bytes<'py>(
+        &self,
+        py: Python<'py>,
+        rotation_error: f32,
+        translation_error: f32,
+        scale_error: f32,
+        sample_subdivisions: u32,
+        skeleton: Option<PyRef<'_, Skl>>,
+        model_space_error: f32,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let options = ritoshark::anim::CompressionOptions {
+            rotation_error,
+            translation_error,
+            scale_error,
+            sample_subdivisions,
+            model_space_error,
+        };
+        let skeleton = skeleton.as_ref().map(|s| &s.inner);
+        let data = py
+            .allow_threads(|| match skeleton {
+                Some(s) => self.inner.to_compressed_bytes_with_skeleton(&options, s),
+                None => self.inner.to_compressed_bytes(&options),
+            })
+            .map_err(write_err)?;
+        Ok(PyBytes::new(py, &data))
+    }
+
+    /// Validate and encode before opening the destination file.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (path, *, rotation_error=0.001, translation_error=0.05, scale_error=0.001, sample_subdivisions=4, skeleton=None, model_space_error=0.1))]
+    fn to_compressed_path(
+        &self,
+        py: Python<'_>,
+        path: std::path::PathBuf,
+        rotation_error: f32,
+        translation_error: f32,
+        scale_error: f32,
+        sample_subdivisions: u32,
+        skeleton: Option<PyRef<'_, Skl>>,
+        model_space_error: f32,
+    ) -> PyResult<()> {
+        let options = ritoshark::anim::CompressionOptions {
+            rotation_error,
+            translation_error,
+            scale_error,
+            sample_subdivisions,
+            model_space_error,
+        };
+        let skeleton = skeleton.as_ref().map(|s| &s.inner);
+        py.allow_threads(|| match skeleton {
+            Some(s) => self
+                .inner
+                .to_compressed_path_with_skeleton(path, &options, s),
+            None => self.inner.to_compressed_path(path, &options),
+        })
+        .map_err(write_err)
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Anm(fps={}, tracks={}, frames={})",
@@ -367,10 +480,74 @@ impl Anm {
     }
 }
 
+fn format_name(format: ritoshark::anim::AnimationFormat) -> &'static str {
+    use ritoshark::anim::AnimationFormat::*;
+    match format {
+        Canm => "canm",
+        V5 => "v5",
+        V4 => "v4",
+    }
+}
+
+/// Validated animation bytes and the actual format selected by fallback.
+#[pyclass(name = "AnmExport")]
+pub struct PyAnmExport {
+    inner: ritoshark::anim::AnimationExport,
+}
+#[pymethods]
+impl PyAnmExport {
+    #[getter]
+    fn bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.inner.bytes)
+    }
+    #[getter]
+    fn format(&self) -> &'static str {
+        format_name(self.inner.format)
+    }
+    #[getter]
+    fn requested_format(&self) -> &'static str {
+        format_name(self.inner.requested_format)
+    }
+    #[getter]
+    fn fallbacks(&self) -> Vec<(&'static str, String)> {
+        self.inner
+            .fallbacks
+            .iter()
+            .map(|f| (format_name(f.format), f.reason.clone()))
+            .collect()
+    }
+    #[getter]
+    fn metrics(&self) -> std::collections::BTreeMap<&'static str, Option<f32>> {
+        let m = &self.inner.metrics;
+        [
+            ("rotation", Some(m.rotation)),
+            ("translation", Some(m.translation)),
+            ("scale", Some(m.scale)),
+            ("model_space", m.model_space),
+        ]
+        .into_iter()
+        .collect()
+    }
+    fn to_path(&self, path: std::path::PathBuf) -> PyResult<()> {
+        std::fs::write(path, &self.inner.bytes)
+            .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))
+    }
+    fn __repr__(&self) -> String {
+        format!(
+            "AnmExport(requested={:?}, format={:?}, bytes={}, fallbacks={})",
+            self.requested_format(),
+            self.format(),
+            self.inner.bytes.len(),
+            self.inner.fallbacks.len()
+        )
+    }
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Skl>()?;
     m.add_class::<PyJoint>()?;
     m.add_class::<Anm>()?;
+    m.add_class::<PyAnmExport>()?;
     m.add_class::<PyAnimTrack>()?;
     m.add_class::<PyAnimFrame>()?;
     Ok(())

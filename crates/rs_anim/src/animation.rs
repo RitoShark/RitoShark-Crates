@@ -45,6 +45,10 @@ impl AnimTrack {
 /// accepted container preserves its source bytes so an unedited `read -> write` is byte-exact;
 /// after [`Animation::make_editable`] (or for in-memory animations) writing emits uncompressed
 /// version 4 (full quaternions) so values round-trip without quantization loss.
+/// Explicit [`Animation::to_compressed_bytes`] / [`Animation::to_compressed_path`] calls
+/// encode the current samples as compressed v1, with [`crate::CompressionOptions`] controlling
+/// error bounds on a subframe grid and optional skeleton probes. Explicit v5 writing retains
+/// every frame with packed rotations. Neither explicit writer alters normal save behaviour.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Animation {
     pub fps: f32,

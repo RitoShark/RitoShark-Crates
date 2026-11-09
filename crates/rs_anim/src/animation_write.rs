@@ -50,6 +50,12 @@ impl Palettes {
 }
 
 impl Animation {
+    pub(crate) fn to_v4_export_bytes(&self) -> Result<Vec<u8>> {
+        let mut buf = Cursor::new(Vec::new());
+        self.write_v4(&mut buf)?;
+        Ok(buf.into_inner())
+    }
+
     fn write_to(&self, buf: &mut Cursor<Vec<u8>>) -> Result<()> {
         if let Some(raw) = &self.raw {
             buf.write_bytes(&raw.bytes)?;
