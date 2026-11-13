@@ -82,6 +82,7 @@ pub enum HircBody {
     RandomSequenceContainer(Container),
     SwitchContainer(SwitchContainer),
     ActorMixer(Container),
+    LayerContainer(Container),
     MusicSegment(Container),
     MusicTrack(MusicTrack),
     MusicSwitch(MusicSwitch),
@@ -155,6 +156,7 @@ impl HircObject {
         match &self.body {
             HircBody::RandomSequenceContainer(c)
             | HircBody::ActorMixer(c)
+            | HircBody::LayerContainer(c)
             | HircBody::MusicSegment(c)
             | HircBody::MusicPlaylist(c) => &c.children,
             HircBody::SwitchContainer(c) => &c.children,
@@ -187,7 +189,12 @@ pub(super) fn decode(kind: HircKind, body: &[u8], version: u32) -> Result<(u32, 
         HircKind::SwitchContainer => {
             HircBody::SwitchContainer(read_switch_container(id, &mut reader, version)?)
         }
-        HircKind::ActorMixer => HircBody::ActorMixer(read_actor_mixer(id, &mut reader, version)?),
+        HircKind::ActorMixer => {
+            HircBody::ActorMixer(read_child_container(id, &mut reader, version)?)
+        }
+        HircKind::LayerContainer => {
+            HircBody::LayerContainer(read_child_container(id, &mut reader, version)?)
+        }
         HircKind::MusicSegment => {
             HircBody::MusicSegment(read_music_container(id, &mut reader, version)?)
         }
@@ -295,7 +302,7 @@ fn read_switch_container(id: u32, reader: &mut Reader, version: u32) -> Result<S
     })
 }
 
-fn read_actor_mixer(id: u32, reader: &mut Reader, version: u32) -> Result<Container> {
+fn read_child_container(id: u32, reader: &mut Reader, version: u32) -> Result<Container> {
     let parent_id = skip_base_params(reader, version)?;
     let count = reader.u32()?;
     Ok(Container {

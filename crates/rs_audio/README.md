@@ -199,8 +199,8 @@ version:    145
 bank id:    1765265800
 sections:   BKHD, HIRC
 wems:       0
-hierarchy:  564 objects (13 opaque), 239 sounds
-events:     69 (64 resolve to audio)
+hierarchy:  564 objects (10 opaque), 239 sounds
+events:     69 (55 resolve to audio)
 ```
 
 ---
@@ -301,8 +301,8 @@ the same standard.
   fixture. This is the check that catches a mis-rebuilt codebook or a misread setup field, which a
   self-consistent round-trip never could.
 - **Cross-file validation of the event graph.** Events resolved by walking one file's object
-  hierarchy are checked against a completely separate file's index — currently **478 of 478**
-  resolved ids match.
+  hierarchy are checked against a completely separate file's index. The Aatrox fixture
+  resolves 55 of 69 events, with all 326 returned media references present in its audio bank.
 - **No-op edit identity.** Replacing a payload with itself produces a byte-identical file.
 - **No panics.** Every reader bounds each declared size and offset against the real input before
   allocating or slicing. Truncated, over-declared and adversarial input returns `Err`.
@@ -319,6 +319,11 @@ it fully tend to break on revisions they predate. Here only the object types on 
 event to a WEM are decoded; everything else, and anything that fails to parse, is kept opaque. The
 per-object length prefix means one unfamiliar object costs one object, not the whole section. Since
 the bank stores the section's bytes verbatim, this can never threaten the round-trip contract.
+
+Layer containers expose their parent and children through `HircBody::LayerContainer`,
+so event traversal includes their reachable sounds. This is a read-only relationship
+view; layer curves, attenuation, mixing properties, and HIRC editing are not exposed.
+Synthetic bounds checks and v134/v145 fixture events cover the layer child layout.
 
 ---
 

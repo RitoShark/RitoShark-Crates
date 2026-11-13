@@ -16,6 +16,92 @@ fn bank(name: &str) -> Option<Bnk> {
 }
 
 #[test]
+fn layer_children_are_parsed_with_bounds_checks() {
+    for version in [134, 145] {
+        let mut body = 42u32.to_le_bytes().to_vec();
+        body.extend_from_slice(&[0, 0]);
+        if version == 145 {
+            body.extend_from_slice(&[0, 0]);
+        }
+        body.push(0);
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(&99u32.to_le_bytes());
+        body.extend_from_slice(&[0; 5]);
+        if version == 145 {
+            body.extend_from_slice(&[0; 4]);
+        }
+        body.extend_from_slice(&[0; 10]);
+        body.extend_from_slice(&2u32.to_le_bytes());
+        body.extend_from_slice(&123u32.to_le_bytes());
+        body.extend_from_slice(&456u32.to_le_bytes());
+        let children_end = body.len();
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.push(0);
+
+        for length in 4..=body.len() {
+            let mut section = 1u32.to_le_bytes().to_vec();
+            section.push(9);
+            section.extend_from_slice(&(length as u32).to_le_bytes());
+            section.extend_from_slice(&body[..length]);
+            let parsed = rs_audio::HircSection::parse(&section, version).unwrap();
+            let object = &parsed.objects[0];
+            if length < children_end {
+                assert_eq!(object.body, HircBody::Opaque);
+            } else {
+                let HircBody::LayerContainer(container) = &object.body else {
+                    panic!("expected a layer container at version {version}");
+                };
+                assert_eq!(container.parent_id, 99);
+                assert_eq!(object.children(), [123, 456]);
+            }
+        }
+    }
+}
+
+#[test]
+fn layer_container_events_resolve_all_media_in_v134_and_v145() {
+    let cases: &[(&str, u32, &[u32])] = &[
+        (
+            "aatrox_base_sfx_events.bnk",
+            2104018719,
+            &[169285944, 188151291, 600759752, 735881422],
+        ),
+        (
+            "aatrox_base_sfx_events.bnk",
+            2819496052,
+            &[6448483, 38230179, 135123480, 544373583],
+        ),
+        (
+            "aatrox_base_sfx_events.bnk",
+            4110049304,
+            &[65618375, 135123480, 208698719, 1008809683],
+        ),
+        (
+            "bank_v134_events.bnk",
+            2514123500,
+            &[8236510, 365464164, 380115980],
+        ),
+        (
+            "bank_v134_events.bnk",
+            3520266929,
+            &[
+                152500772, 256913936, 398887821, 409307022, 463504475, 937011941, 1023886688,
+            ],
+        ),
+    ];
+    for &(name, event, expected) in cases {
+        let Some(bank) = bank(name) else {
+            eprintln!("skipping {name}: sample missing");
+            continue;
+        };
+        let hirc = bank.hirc().unwrap().unwrap();
+        let mut sources = hirc.wems_for_event(event);
+        sources.sort_unstable();
+        assert_eq!(sources, expected, "{name}: event {event}");
+    }
+}
+
+#[test]
 fn real_event_banks_expose_their_hierarchy() {
     for name in [
         "aatrox_base_sfx_events.bnk",
