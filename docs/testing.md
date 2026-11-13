@@ -55,5 +55,9 @@ which checks run; no line/branch coverage percentage is currently measured.
 Save tests verify that serializer errors and failed replacement preserve existing
 data and clean up temporary files. WAD tests cover TOC-only serialization, payload
 bounds, changing builder input, exact decompressed lengths, and subchunk coverage.
+Lookup/extraction tests cover unsorted tables, duplicate hashes, repeated requests,
+and TOC-only indexed reads, in both sequential and parallel runs. MAPGEO synthetic
+tests cover half-float attributes, missing buffer references, and failed multi-stream
+edits preserving the complete map, including shared buffers.
 Keep adding small synthetic reproductions alongside fixes; reserve real fixtures
 for compatibility questions that synthetic data cannot answer.

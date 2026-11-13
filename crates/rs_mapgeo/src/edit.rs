@@ -224,6 +224,15 @@ impl MapGeometry {
             .iter()
             .enumerate()
             .map(|(offset, &id)| {
+                if usize::try_from(id)
+                    .ok()
+                    .and_then(|id| self.vertex_buffers.get(id))
+                    .is_none()
+                {
+                    return Err(Error::InvalidData(format!(
+                        "model {index} references missing vertex buffer {id}"
+                    )));
+                }
                 let description = self
                     .vertex_descriptions
                     .get(first + offset)
@@ -267,7 +276,13 @@ impl MapGeometry {
         let index_layer = usize::try_from(model.index_buffer_id)
             .ok()
             .and_then(|id| self.index_buffers.get(id))
-            .map_or(0, |buffer| buffer.layer);
+            .ok_or_else(|| {
+                Error::InvalidData(format!(
+                    "model {index} references missing index buffer {}",
+                    model.index_buffer_id
+                ))
+            })?
+            .layer;
 
         let descriptions: Vec<VertexDescription> = layouts.into_iter().map(|(_, d)| d).collect();
         let new_vertex_ids = self.write_vertex_buffers(&descriptions, geometry, &buffer_layers)?;
@@ -381,6 +396,7 @@ impl MapGeometry {
     ) -> Result<Vec<i32>> {
         let vertex_count = geometry.vertex_count();
         let mut ids = Vec::with_capacity(descriptions.len());
+        let mut buffers = Vec::with_capacity(descriptions.len());
         for (offset, description) in descriptions.iter().enumerate() {
             let stride = description.vertex_size();
             if stride == 0 {
@@ -388,7 +404,10 @@ impl MapGeometry {
                     "vertex description for buffer {offset} has a zero stride"
                 )));
             }
-            let mut data = vec![0u8; vertex_count * stride];
+            let byte_count = vertex_count.checked_mul(stride).ok_or_else(|| {
+                Error::InvalidData("vertex buffer byte count overflows usize".into())
+            })?;
+            let mut data = vec![0u8; byte_count];
             for (name, values) in [
                 (ElementName::Position, &geometry.positions),
                 (ElementName::Normal, &geometry.normals),
@@ -398,12 +417,19 @@ impl MapGeometry {
                     description.write_attribute(&mut data, name, values)?;
                 }
             }
-            self.vertex_buffers.push(VertexBuffer {
+            buffers.push(VertexBuffer {
                 layer: layers.get(offset).copied().unwrap_or(0),
                 data,
             });
-            ids.push((self.vertex_buffers.len() - 1) as i32);
+            let id = self
+                .vertex_buffers
+                .len()
+                .checked_add(offset)
+                .and_then(|id| i32::try_from(id).ok())
+                .ok_or_else(|| Error::InvalidData("vertex buffer id exceeds i32".into()))?;
+            ids.push(id);
         }
+        self.vertex_buffers.extend(buffers);
         Ok(ids)
     }
 
@@ -423,7 +449,9 @@ impl MapGeometry {
                 .ok()
                 .and_then(|id| self.vertex_buffers.get(id))
             else {
-                continue;
+                return Err(Error::InvalidData(format!(
+                    "model {index} references missing vertex buffer {id}"
+                )));
             };
             for (name, slot) in [
                 (ElementName::Position, &mut positions),
@@ -443,8 +471,14 @@ impl MapGeometry {
         let indices = usize::try_from(model.index_buffer_id)
             .ok()
             .and_then(|id| self.index_buffers.get(id))
-            .map(|buffer| buffer.indices.clone())
-            .unwrap_or_default();
+            .ok_or_else(|| {
+                Error::InvalidData(format!(
+                    "model {index} references missing index buffer {}",
+                    model.index_buffer_id
+                ))
+            })?
+            .indices
+            .clone();
 
         Ok(Geometry {
             positions,
