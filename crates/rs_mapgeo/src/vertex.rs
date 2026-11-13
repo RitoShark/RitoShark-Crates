@@ -5,15 +5,25 @@ round-tripping them requires nothing else; editing does, since a caller supplyin
 plain `f32` attributes and no way to know the stride, element order or packing a given description
 demands.
 
-The packed formats are fixed-point: a `1616`/`161616` component is a `u16` holding the value scaled
-into a per-buffer range, and a `8888` component is a normalised byte. Riot's packed ranges are not
-stored in the file, so a decoded packed attribute is returned in its raw normalised `0..=1` form and
-an encoded one is expected in the same space. Positions are always `XyzFloat32` in every observed
-file, so the lossy path never applies to them.
+The 16-bit packed components are IEEE 754 binary16 (half-floats), widened to `f32` on read
+and rounded to half precision on write. They retain negative values and values outside `0..=1`.
+The `8888` formats use normalised bytes. The three-component half format occupies eight bytes;
+attribute writes leave its final two bytes untouched.
 */
 
 use crate::error::{Error, Result};
 use crate::mapgeo::{ElementFormat, ElementName, VertexDescription};
+
+fn attribute_span(count: usize, stride: usize, offset: usize, size: usize) -> Result<usize> {
+    if count == 0 {
+        return Ok(0);
+    }
+    (count - 1)
+        .checked_mul(stride)
+        .and_then(|n| n.checked_add(offset))
+        .and_then(|n| n.checked_add(size))
+        .ok_or_else(|| Error::InvalidData("vertex attribute byte range overflows usize".into()))
+}
 
 impl ElementFormat {
     /// Number of scalar components one attribute of this format carries.
@@ -30,7 +40,7 @@ impl ElementFormat {
         }
     }
 
-    /// Whether this format stores its components as normalised fixed-point rather than `f32`.
+    /// Whether this format stores half-floats or packed bytes rather than `f32`.
     pub fn is_packed(self) -> bool {
         !matches!(
             self,
@@ -55,7 +65,7 @@ impl ElementFormat {
                 for (i, slot) in out.iter_mut().enumerate() {
                     let base = i * 2;
                     let raw = u16::from_le_bytes([bytes[base], bytes[base + 1]]);
-                    *slot = f32::from(raw) / f32::from(u16::MAX);
+                    *slot = half::f16::from_bits(raw).to_f32();
                 }
             }
             Self::BgraPacked8888 => {
@@ -88,7 +98,7 @@ impl ElementFormat {
             }
             Self::XyPacked1616 | Self::XyzPacked161616 | Self::XyzwPacked16161616 => {
                 for (i, &value) in values.iter().enumerate() {
-                    let raw = (clamp_unit(value) * f32::from(u16::MAX)).round() as u16;
+                    let raw = half::f16::from_f32(value).to_bits();
                     bytes[i * 2..i * 2 + 2].copy_from_slice(&raw.to_le_bytes());
                 }
             }
@@ -121,7 +131,8 @@ impl VertexDescription {
     }
 
     /** Reads one attribute for every vertex, returning `vertex_count * component_count` floats in
-    vertex order. Packed formats are normalised to `0..=1`. Returns `Ok(None)` when the layout does
+    vertex order. Half-floats are widened; packed bytes are normalised to `0..=1`.
+    Returns `Ok(None)` when the layout does
     not carry the attribute at all, which is a normal state rather than an error: a `.mapgeo` splits
     its attributes across several buffers and any one of them holds only some of them. */
     pub fn read_attribute(
@@ -139,7 +150,7 @@ impl VertexDescription {
         }
         let size = format.byte_size();
         let components = format.component_count();
-        let needed = vertex_count.saturating_sub(1) * stride + offset + size;
+        let needed = attribute_span(vertex_count, stride, offset, size)?;
         if vertex_count > 0 && needed > data.len() {
             return Err(Error::InvalidData(format!(
                 "vertex buffer holds {} bytes but {:?} at offset {} needs {} for {} vertices",
@@ -192,7 +203,7 @@ impl VertexDescription {
         }
         let size = format.byte_size();
         let vertex_count = values.len() / components;
-        let needed = vertex_count.saturating_sub(1) * stride + offset + size;
+        let needed = attribute_span(vertex_count, stride, offset, size)?;
         if vertex_count > 0 && needed > data.len() {
             return Err(Error::InvalidData(format!(
                 "vertex buffer holds {} bytes but {} vertices of {:?} need {}",

@@ -6,11 +6,12 @@ use crate::error::{Error, Result};
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
 
 /** Decompresses one chunk's raw bytes according to its [`WadCompression`]. `None` copies the
-input; `Gzip` inflates with flate2; `Zstd` decodes a single frame. `ZstdMulti` holds one zstd
+input; `Gzip` inflates with flate2; `Zstd` decodes zstd frames. `ZstdMulti` holds one zstd
 frame per subchunk concatenated end to end (optionally after a stored prefix); the decoder copies
 any bytes before the first frame verbatim and then streams the concatenated frames in order, which
-the zstd reader decodes one after another until the input is exhausted. `uncompressed_size` sizes
-the output buffer up front. `Satellite` is unsupported and returns
+the zstd reader decodes one after another until the input is exhausted. The decoded length must
+equal `uncompressed_size`; decoding stops after at most one excess byte and does not preallocate
+the declared size. `Satellite` is unsupported and returns
 [`Error::UnsupportedCompression`]. */
 pub fn decompress(
     raw: &[u8],
@@ -18,7 +19,10 @@ pub fn decompress(
     uncompressed_size: usize,
 ) -> Result<Vec<u8>> {
     match compression {
-        WadCompression::None => Ok(raw.to_vec()),
+        WadCompression::None => {
+            check_size(raw.len(), uncompressed_size)?;
+            Ok(raw.to_vec())
+        }
         WadCompression::Gzip => decompress_gzip(raw, uncompressed_size),
         WadCompression::Satellite => Err(Error::UnsupportedCompression(
             WadCompression::Satellite as u8,
@@ -29,18 +33,35 @@ pub fn decompress(
 }
 
 fn decompress_gzip(raw: &[u8], uncompressed_size: usize) -> Result<Vec<u8>> {
-    let mut out = vec![0u8; uncompressed_size];
-    flate2::read::GzDecoder::new(Cursor::new(raw))
-        .read_exact(&mut out)
-        .map_err(|e| Error::Decompress(e.to_string()))?;
-    Ok(out)
+    read_decoded(flate2::read::MultiGzDecoder::new(raw), uncompressed_size)
 }
 
 fn decompress_zstd(raw: &[u8], uncompressed_size: usize) -> Result<Vec<u8>> {
-    let mut out = vec![0u8; uncompressed_size];
-    zstd::Decoder::new(Cursor::new(raw))
-        .and_then(|mut d| d.read_exact(&mut out))
+    let decoder =
+        zstd::Decoder::new(Cursor::new(raw)).map_err(|e| Error::Decompress(e.to_string()))?;
+    read_decoded(decoder, uncompressed_size)
+}
+
+fn check_size(actual: usize, expected: usize) -> Result<()> {
+    if actual != expected {
+        return Err(Error::Decompress(format!(
+            "decoded size mismatch: expected {expected} bytes, got {actual}"
+        )));
+    }
+    Ok(())
+}
+
+fn read_decoded(reader: impl Read, expected: usize) -> Result<Vec<u8>> {
+    let limit = u64::try_from(expected)
+        .ok()
+        .and_then(|n| n.checked_add(1))
+        .ok_or_else(|| Error::Decompress(String::from("decoded size exceeds supported limit")))?;
+    let mut out = Vec::new();
+    reader
+        .take(limit)
+        .read_to_end(&mut out)
         .map_err(|e| Error::Decompress(e.to_string()))?;
+    check_size(out.len(), expected)?;
     Ok(out)
 }
 
@@ -56,7 +77,7 @@ pub fn decompress_zstd_multi_with_toc(
     uncompressed_size: usize,
     subchunks: &[WadSubchunk],
 ) -> Result<Vec<u8>> {
-    let mut out = vec![0u8; uncompressed_size];
+    let mut out = Vec::new();
     let mut raw_offset = 0usize;
     let mut out_offset = 0usize;
 
@@ -72,25 +93,23 @@ pub fn decompress_zstd_multi_with_toc(
             })?;
         let out_end = out_offset
             .checked_add(usize_)
-            .filter(|&end| end <= out.len())
+            .filter(|&end| end <= uncompressed_size)
             .ok_or_else(|| {
                 Error::Decompress(String::from("subchunk uncompressed range exceeds chunk"))
             })?;
 
         let src = &raw[raw_offset..raw_end];
         if csize == usize_ {
-            out[out_offset..out_end].copy_from_slice(src);
+            out.extend_from_slice(src);
         } else {
-            zstd::Decoder::new(Cursor::new(src))
-                .and_then(|mut d| d.read_exact(&mut out[out_offset..out_end]))
-                .map_err(|e| Error::Decompress(e.to_string()))?;
+            out.extend_from_slice(&decompress_zstd(src, usize_)?);
         }
 
         raw_offset = raw_end;
         out_offset = out_end;
     }
 
-    if out_offset != out.len() {
+    if out_offset != uncompressed_size || raw_offset != raw.len() {
         return Err(Error::Decompress(String::from(
             "subchunk table did not cover the whole chunk",
         )));
@@ -104,15 +123,15 @@ fn decompress_zstd_multi(raw: &[u8], uncompressed_size: usize) -> Result<Vec<u8>
         .position(|w| w == ZSTD_MAGIC)
         .ok_or_else(|| Error::Decompress(String::from("no zstd frame in multi chunk")))?;
 
-    let mut out = vec![0u8; uncompressed_size];
-    if magic_offset > out.len() || magic_offset > raw.len() {
+    if magic_offset > uncompressed_size {
         return Err(Error::Decompress(String::from(
             "zstd frame offset out of range",
         )));
     }
-    out[..magic_offset].copy_from_slice(&raw[..magic_offset]);
-    zstd::Decoder::new(Cursor::new(&raw[magic_offset..]))
-        .and_then(|mut d| d.read_exact(&mut out[magic_offset..]))
-        .map_err(|e| Error::Decompress(e.to_string()))?;
+    let mut out = raw[..magic_offset].to_vec();
+    out.extend_from_slice(&decompress_zstd(
+        &raw[magic_offset..],
+        uncompressed_size - magic_offset,
+    )?);
     Ok(out)
 }

@@ -167,7 +167,9 @@ impl Animation {
     /// Finish validation and encoding before opening the destination file.
     pub fn to_v5_path(&self, path: impl AsRef<Path>) -> Result<()> {
         let bytes = self.to_v5_bytes()?;
-        std::fs::write(path, bytes).map_err(rs_io::Error::from)?;
+        rs_io::write_atomic(path, |writer| {
+            writer.write_all(&bytes).map_err(rs_io::Error::from)
+        })?;
         Ok(())
     }
 }

@@ -1,13 +1,14 @@
 # Format reference
 
-Detailed support for every format, including versions and known limits. "Byte-exact round-trip" means reading a real file and writing it back reproduces the original bytes exactly, verified by tests against real game files.
+Detailed support for every format, including versions and known limits. "Byte-exact round-trip" means an unchanged binary read/write reproduces the source bytes for the covered fixtures. Coverage combines synthetic and locally available real files; it is not proof for every version or future game patch. See [testing and CI coverage](testing.md).
 
 ## `.bin` — property bin (PROP / PTCH) — `rs_bin`
 
 - **Read / write:** binary, **byte-exact**.
-- **Text:** the human-readable `#PROP_text` form is both **parsed** (`from_text`) and **printed** (`to_text`); `bin → text → bin` is byte-identical.
+- **Text:** the human-readable `#PROP_text` form is both **parsed** (`from_text`) and **printed** (`to_text`). Text round-trips preserve supported values, but not arbitrary appended binary data or noncanonical PTCH header bytes.
 - **Covers:** all value types (scalars, vectors, matrix, colour, string, hash/link/file), both list kinds, ordered maps (duplicate keys preserved), pointer/embed structs, options, null pointers, linked-file lists, and the `PTCH` patches / data-override trailer.
 - **Hashing:** field/class/entry names are FNV-1a; resolve to readable names with a `HashMapper`.
+- **PTCH:** binary and text override records are supported; applying overrides to a base BIN is not implemented. See [PTCH support and examples](ptch.md).
 - **CLI:** `rs_cli read`, `rs_cli transform`, `rs_cli bin convert`, `rs_cli bin diff`.
 
 ## `.wad`, `.wad.client` — archive — `rs_wad`
@@ -15,6 +16,7 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 - **Read / write:** **byte-exact** for v2 and v3 (including v3.4); the header signature/checksum trailer is preserved verbatim.
 - **Compression:** `None`, `Gzip`, `Zstd`, `Zstd-multi` decompress. `Satellite` chunks reference data outside the archive and return a clear error.
 - **Lookup & extract:** `chunk_by_hash` / `chunk_by_path`, a bulk extractor (parallel behind the `parallel` feature), and `.subchunktoc` parsing for explicit multi-subchunk sizing.
+- **Streaming and writes:** `from_reader_toc` supports extraction from a separate reader, but serialization rejects absent payloads. `WadBuilder` builds v3 archives and checks that repeated provider calls return the same content. Decoding rejects incorrect output lengths and incomplete subchunk tables.
 - **CLI:** `rs_cli read`, `rs_cli wad list`, `rs_cli wad extract`.
 
 ## `.tex`, `.dds` — textures — `rs_tex`
@@ -27,7 +29,7 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 
 ## `.skn` — skinned mesh — `rs_mesh`
 
-- **Read / write:** **byte-exact** for versions 1, 2, and 4 (Basic / Colour / Tangent vertex layouts). Submesh ranges, vertex and index buffers, and the trailing tab are all preserved.
+- **Read / write:** majors 0 through 4 (Basic / Colour / Tangent vertex layouts where supported). Submesh ranges, vertex and index buffers, and trailing bytes are preserved; minor versions are retained rather than rejected.
 - **CLI:** `rs_cli read` only.
 
 ## `.scb` — static mesh — `rs_mesh`
@@ -38,7 +40,8 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 
 ## `.skl` — skeleton / rig — `rs_anim`
 
-- **Read / write:** the modern rig format; joints are keyed and ordered by the lowercased ELF hash of their name. Legacy `r3d2sklt` skeletons report an unsupported-version error.
+- **Read:** modern v0 rigs and legacy `r3d2sklt` v1/v2 skeletons.
+- **Write:** unchanged files retain their source bytes; edited/new skeletons emit modern v0. There is no legacy encoder. See [skeleton support](../crates/rs_anim/README.md).
 - **CLI:** `rs_cli read` only.
 
 ## `.anm` — animation — `rs_anim`
@@ -53,6 +56,8 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 ## `.mapgeo` — environment geometry (OEGM) — `rs_mapgeo`
 
 - **Read / write:** **byte-exact** for versions 5, 6, 7, 9, 11, 12, 13, 14, 15, 17, and 18, including the scene graph and planar reflectors.
+- **Editing:** `geometry`, `replace_geometry`, `add_model`, and `remove_model` operate on an existing map, including attributes split across streams. Edits append geometry buffers to avoid corrupting shared buffers. Scene graphs and baked data are preserved, not regenerated from edited render geometry. World-space export helpers and scene-graph authoring remain improvement areas.
+- **Vertex codec:** 16-bit packed components use half-floats; 8-bit packed colors use normalized channels. Half-float reads/writes preserve signed and out-of-unit-range values instead of clamping them to `0..=1`.
 - **Unsupported:** versions 8, 10, and 16 — these revisions were skipped by Riot and are absent from every reference, so rather than guess a layout they return an unsupported-version error.
 - **CLI:** `rs_cli read` only.
 
@@ -71,5 +76,16 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 ## `.wpk`, `.bnk` — audio containers — `rs_audio`
 
 - **Read / write:** **byte-exact** at the container level. `.bnk` preserves every section verbatim (including the `HIRC` event hierarchy), and `.wem` audio is extracted from `DIDX` / `DATA`.
-- **Scope:** container-level only — extracting and repacking `.wem` covers audio modding; the internal Wwise event/object format is intentionally out of scope.
+- **Audio:** WEM decoding to playable Ogg/WAV, PCM/Vorbis encoding, replacement and silence helpers are available.
+- **Hierarchy:** supported HIRC objects expose event-to-WEM relationships; unknown/unsupported data stays opaque. This is not a complete Wwise authoring model. See [audio APIs and limits](../crates/rs_audio/README.md).
 - **CLI:** `rs_cli read`, `rs_cli audio extract`.
+
+## `.troybin`, `.inibin`, `.cfgbin` — legacy parameters — `rs_troybin`
+
+- **Read / write:** v1 and v2; preserve raw hashes, bucket ordering and stored values. `Inibin` aliases the same model.
+- **Editing:** typed v2 lookup/set/insert/remove and name resolution. V1's untyped string body is preserved but not edited through the typed API. Display scaling does not alter raw values.
+
+## `.luabin64` — compiled Lua — `rs_luabin`
+
+- **Read / write:** the supported Lua 5.1 bytecode layout with 64-bit `size_t`, including prototypes, constants, instructions and debug tables.
+- **Editing:** constant traversal by `ConstPath`, typed constant edits, and recovered global assignments. No Lua source decompiler or compiler.

@@ -55,9 +55,11 @@ The library streams validation poses and keeps one 1-MiB tick cache for fitting.
 CANM fitting accepts up to 16,384 tracks and 32,768 input frames; exceeding that
 budget tries the dense formats. V4 and v5 still have their own palette/file limits.
 
-Encoding failures preserve an existing file because `export_to_path` finishes
-encoding before opening it. A write-time I/O failure is returned, not retried with
-another animation format; filesystem writes themselves are not transactional.
+`export_to_path` finishes encoding, writes and flushes a temporary file beside the
+destination, then atomically replaces it using `rs_io::write_atomic`. Failures before
+replacement preserve the destination. A write-time I/O failure is returned, not
+retried with another animation format. Replacement uses new-file metadata and does
+not guarantee parent-directory durability across power loss.
 
 For Python, the `rs_python` crate exposes the same policy:
 

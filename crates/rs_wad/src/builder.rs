@@ -173,6 +173,12 @@ impl WadBuilder {
             let blob = &blobs[key];
             buf.clear();
             provide(blob.rep_hash, &mut buf)?;
+            if buf.len() != blob.uncompressed_size as usize || rs_hash::xxh3_128_bytes(&buf) != *key
+            {
+                return Err(Error::Build(String::from(
+                    "chunk provider is not reproducible: content changed between passes",
+                )));
+            }
             let compressed = compress(&buf, WadCompression::Zstd, self.zstd_level)?;
             if compressed.len() != blob.compressed_size as usize {
                 return Err(Error::Build(String::from(

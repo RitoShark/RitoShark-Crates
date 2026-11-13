@@ -5,8 +5,8 @@ RitoShark is a Cargo workspace of small, single-purpose crates. This document de
 ## Workspace layout
 
 ```
-ritoshark/        umbrella crate — re-exports every format module behind a feature
 crates/
+  ritoshark/      umbrella crate — re-exports format modules behind features
   rs_io/          byte/stream I/O, the Parse/Serialize traits, mmap-backed reads
   rs_hash/        FNV-1a, XXH64/XXH3, SystemV ELF, and hash-name dictionaries
   rs_math/        vector / matrix / colour / bounds primitives (over glam)
@@ -20,7 +20,10 @@ crates/
   rs_rst/         .stringtable string tables
   rs_rman/        .manifest release manifests (read-only)
   rs_audio/       .wpk / .bnk audio containers
-  rs_cli/         the `ritoshark` command-line tool
+  rs_troybin/     .troybin / .inibin / .cfgbin legacy parameters
+  rs_luabin/      .luabin64 bytecode and constant editing
+  rs_python/      Python bindings
+  rs_cli/         the `rs_cli` command-line tool
 ```
 
 ## Crate graph
@@ -35,7 +38,7 @@ rs_file ──────────┘
 - **Foundation** — `rs_io`, `rs_hash`, `rs_math`, `rs_file`. They depend only on third-party crates (and, where useful, each other) and define the shared vocabulary every format speaks.
 - **Format crates** — `rs_bin`, `rs_wad`, `rs_tex`, `rs_mesh`, `rs_anim`, `rs_mapgeo`, `rs_rst`, `rs_rman`, `rs_audio`. Each handles one family of formats and depends only on the foundation.
 - **Umbrella** — `ritoshark` re-exports every format module behind a feature flag of the same name, plus a `prelude`. Nothing depends on the umbrella except the CLI.
-- **CLI** — `rs_cli` builds the `ritoshark` binary.
+- **CLI** — `rs_cli` builds the `rs_cli` binary.
 
 ## The universal interface
 
@@ -55,7 +58,15 @@ pub trait Serialize {
 }
 ```
 
-The verb vocabulary is fixed and never varies between crates:
+`Serialize::to_path` writes through `rs_io::write_atomic`: create a temporary file in
+the same directory, serialize, explicitly flush and sync, then replace the destination.
+An error before replacement leaves the original untouched. The parent directory must
+exist. Replacement creates a new file with new metadata/permissions and replaces a
+destination symlink rather than following it; parent-directory durability across power
+loss is not guaranteed. `to_writer` remains a streaming API and can leave partial output
+on failure; callers own its flush and commit policy.
+
+The common verb vocabulary is:
 
 | Intent | Method |
 |---|---|
@@ -99,13 +110,15 @@ Speed comes from data layout and algorithm, not micro-optimization:
 
 ## Safety
 
-`#![forbid(unsafe_code)]` is set in every crate **except** `rs_io`, whose only `unsafe` is the `memmap2` call inside `Parse::from_path`, isolated in one function with a written safety note. There is no other `unsafe`, no `transmute`, and no SIMD anywhere in the workspace.
+Format crates forbid unsafe code. The shared `rs_io` layer isolates the read-only
+`memmap2` call inside `Parse::from_path`, with a safety note. The CLI also has an unsafe
+LMDB environment-open boundary; the workspace as a whole is not unsafe-free.
 
 ## Correctness and the round-trip contract
 
 For every writeable format, the primary guarantee is a **byte-exact round-trip**: reading a real file and writing it back reproduces the original bytes exactly. This is the headline test in each crate's `tests/`, run against real game files. Additional coverage includes:
 
-- `#PROP_text` round-trips for `rs_bin` (`bin → text → bin` is byte-identical).
+- `#PROP_text` and canonical `#PTCH_text` value round-trips for `rs_bin`; arbitrary binary trailing data and noncanonical PTCH headers are not represented in text.
 - Per-version synthetic round-trips where real samples for a version aren't available.
 - Robustness tests that feed truncated / malformed input and assert a clean `Err`.
 

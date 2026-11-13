@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufWriter, Cursor, Read, Seek, Write};
+use std::io::{Cursor, Read, Seek, Write};
 use std::path::Path;
 
 pub trait Parse: Sized {
@@ -30,8 +30,8 @@ pub trait Serialize {
         Ok(buf)
     }
 
+    /// Saves using [`crate::write_atomic`], preserving the destination on failure.
     fn to_path(&self, path: impl AsRef<Path>) -> core::result::Result<(), Self::Error> {
-        let mut w = BufWriter::new(File::create(path).map_err(crate::Error::from)?);
-        self.to_writer(&mut w)
+        crate::write_atomic(path, |writer| self.to_writer(writer))
     }
 }

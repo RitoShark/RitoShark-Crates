@@ -12,6 +12,12 @@ pub enum Error {
     Decompress(String),
     #[error("wad build failed: {0}")]
     Build(String),
+    #[error("WAD chunk {path_hash:016x} has no complete payload at offset {offset} ({size} bytes)")]
+    MissingChunkData {
+        path_hash: u64,
+        offset: u32,
+        size: u32,
+    },
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

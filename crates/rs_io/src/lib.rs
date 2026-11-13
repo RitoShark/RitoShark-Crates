@@ -10,8 +10,10 @@ the same way everywhere.
 
 mod error;
 mod ext;
+mod save;
 mod traits;
 
 pub use error::{Error, Result};
 pub use ext::{ReaderExt, WriterExt};
+pub use save::write_atomic;
 pub use traits::{Parse, Serialize};

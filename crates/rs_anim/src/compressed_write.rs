@@ -154,7 +154,9 @@ impl Animation {
         skeleton: &Skeleton,
     ) -> Result<()> {
         let bytes = self.to_compressed_bytes_with_skeleton(options, skeleton)?;
-        std::fs::write(path, bytes).map_err(rs_io::Error::from)?;
+        rs_io::write_atomic(path, |writer| {
+            writer.write_all(&bytes).map_err(rs_io::Error::from)
+        })?;
         Ok(())
     }
 
@@ -176,7 +178,9 @@ impl Animation {
         options: &CompressionOptions,
     ) -> Result<()> {
         let bytes = self.to_compressed_bytes(options)?;
-        std::fs::write(path, bytes).map_err(rs_io::Error::from)?;
+        rs_io::write_atomic(path, |writer| {
+            writer.write_all(&bytes).map_err(rs_io::Error::from)
+        })?;
         Ok(())
     }
 }

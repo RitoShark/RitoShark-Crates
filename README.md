@@ -45,7 +45,7 @@ ritoshark = "0.1"   # or: default-features = false, features = ["bin", "wad", "t
 
 ## Command-line tool (`rs_cli`)
 
-Prebuilt binaries are published on the [GitHub Releases] page — download `rs_cli` for your OS
+The release workflow builds Windows binaries for the [GitHub Releases] page — download `rs_cli`
 and (optionally) drop a `hashes/` folder of CDTB dictionaries next to it for name resolution.
 
 ```
@@ -69,7 +69,7 @@ Full reference in [docs/cli.md](docs/cli.md).
 
 ### Install (prebuilt binary)
 
-Download `rs_cli` for your OS from the [GitHub Releases] page. No runtime dependencies are
+Download the Windows `rs_cli` binary from the [GitHub Releases] page. No runtime dependencies are
 required. To enable hash resolution, place a `hashes/` directory containing CDTB dictionary files
 beside the binary.
 
@@ -78,18 +78,20 @@ beside the binary.
 ## Build & test
 
 ```
-cargo build --workspace
-cargo test  --workspace
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo build --workspace --exclude rs_python --locked
+cargo test --workspace --exclude rs_python --locked
+cargo clippy --workspace --exclude rs_python --all-targets --all-features --locked -- -D warnings
 ```
 
-Needs a recent stable toolchain (edition 2024). Real-file tests skip cleanly when the game files (which are never committed) are absent, so the suite is green out of the box.
+Use the pinned toolchain in `rust-toolchain.toml`. Python bindings have a separate wheel/pytest workflow. Real-file tests can skip when game files (which are never committed) are absent; a passing suite does not imply full corpus coverage. See [the CI matrix and local checks](docs/testing.md).
 
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md) — design, the `Parse`/`Serialize` interface, the crate layout, performance and safety, the round-trip contract.
 - [docs/formats.md](docs/formats.md) — per-format support detail, versions, and limits.
-- Each crate under `crates/` has its own `README.md`.
+- [docs/ptch.md](docs/ptch.md) — existing PTCH support, examples, and application limits.
+- [docs/testing.md](docs/testing.md) — explicit CI coverage and fixture limitations.
+- Crate-level API documentation lives under `crates/` in Rust docs and the available READMEs.
 
 ## License
 

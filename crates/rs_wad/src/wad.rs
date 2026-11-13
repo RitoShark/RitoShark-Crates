@@ -68,7 +68,7 @@ impl Wad {
     A WAD mounted this way keeps every `chunk_by_hash` / `chunk_by_path` / TOC accessor working, but
     the in-memory slice accessors ([`Wad::chunk_raw`], [`Wad::chunk_data`]) will fail because there
     are no captured data bytes; use the `*_from` reader variants instead. It is also not suitable for
-    a round-trip write, since [`Wad::to_writer`] would emit an empty data section.
+    a round-trip write: [`Wad::to_writer`] rejects chunks whose payload is missing.
 
     This is the mount to use for large archives that are opened only to read a handful of chunks -
     a full [`Wad::from_reader`] would buffer the entire data section in memory. */
@@ -164,6 +164,15 @@ impl Wad {
 
     /// Writes the header, chunk table, and data section, reproducing the input bytes exactly.
     pub fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
+        for chunk in &self.chunks {
+            if chunk.compressed_size != 0 && self.chunk_raw(chunk).is_err() {
+                return Err(Error::MissingChunkData {
+                    path_hash: chunk.path_hash,
+                    offset: chunk.data_offset,
+                    size: chunk.compressed_size,
+                });
+            }
+        }
         writer.write_u16(MAGIC)?;
         writer.write_u8(self.version.0)?;
         writer.write_u8(self.version.1)?;

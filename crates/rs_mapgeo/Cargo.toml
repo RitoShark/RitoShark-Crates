@@ -11,3 +11,4 @@ rs_hash = { workspace = true }
 rs_io = { workspace = true }
 rs_math = { workspace = true }
 thiserror = { workspace = true }
+half = { workspace = true }

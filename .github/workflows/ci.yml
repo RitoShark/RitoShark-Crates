@@ -21,11 +21,17 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
-      - name: Build
-        run: cargo build --workspace
-      - name: Test
-        run: cargo test --workspace
+      - name: Build core (Python has its own workflow)
+        run: cargo build --workspace --exclude rs_python --locked
+      - name: Test default features (available fixtures only)
+        run: cargo test --workspace --exclude rs_python --locked
+      - name: Test optional WAD parallel and RMAN verification features
+        run: cargo test -p rs_wad -p rs_rman --all-features --locked
+      - name: Check minimal facade
+        run: cargo check -p ritoshark --no-default-features --locked
+      - name: Check BIN and WAD facade
+        run: cargo check -p ritoshark --no-default-features --features bin,wad --locked
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --exclude rs_python --all-targets --all-features --locked -- -D warnings
       - name: Format
         run: cargo fmt --all --check

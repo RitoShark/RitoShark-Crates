@@ -200,7 +200,9 @@ impl Animation {
         skeleton: Option<&Skeleton>,
     ) -> Result<AnimationExport> {
         let result = self.export_bytes(options, skeleton)?;
-        std::fs::write(path, &result.bytes).map_err(rs_io::Error::from)?;
+        rs_io::write_atomic(path, |writer| {
+            writer.write_all(&result.bytes).map_err(rs_io::Error::from)
+        })?;
         Ok(result)
     }
 }
