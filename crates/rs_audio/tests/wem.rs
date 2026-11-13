@@ -4,6 +4,32 @@ use std::path::{Path, PathBuf};
 use rs_audio::{AudioFormat, Bnk, Wem, WemCodec, Wpk};
 use rs_io::Parse;
 
+#[test]
+fn riff_chunk_padding_preserves_following_format_and_audio() {
+    let audio = rs_audio::PcmAudio::new(44100, 1, vec![0, 1, -1, i16::MAX, i16::MIN]);
+    let original = rs_audio::encode_pcm(&audio).unwrap();
+    let expected_wav = Wem::new(&original).unwrap().to_wav().unwrap();
+
+    for offset in [12, 44] {
+        for size in 0u32..=3 {
+            let mut chunk = b"JUNK".to_vec();
+            chunk.extend_from_slice(&size.to_le_bytes());
+            chunk.extend(std::iter::repeat_n(42, size as usize));
+            if size % 2 != 0 {
+                chunk.push(0);
+            }
+            let mut bytes = original.clone();
+            bytes.splice(offset..offset, chunk);
+            let riff_size = (bytes.len() - 8) as u32;
+            bytes[4..8].copy_from_slice(&riff_size.to_le_bytes());
+
+            let wem = Wem::new(&bytes).unwrap();
+            assert_eq!(wem.to_pcm().unwrap(), audio);
+            assert_eq!(wem.to_wav().unwrap(), expected_wav);
+        }
+    }
+}
+
 fn sample(name: &str) -> Option<PathBuf> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../Sample-Files")

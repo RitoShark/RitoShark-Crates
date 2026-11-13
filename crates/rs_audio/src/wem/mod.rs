@@ -141,7 +141,7 @@ impl<'a> Wem<'a> {
                 _ => {}
             }
 
-            at = next;
+            at = next.saturating_add(len & 1);
         }
 
         let (fmt_offset, fmt_size) = fmt.ok_or(Error::Wem("wem has no fmt chunk"))?;
