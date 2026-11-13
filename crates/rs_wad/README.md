@@ -29,7 +29,7 @@ After the version comes a version-specific header span that this crate captures 
 
 Then a `u32` chunk count, followed by that many 32-byte TOC entries.
 
-### TOC entry (32 bytes, identical for every v3 minor)
+### TOC entry (32 bytes)
 
 | Field | Size | Notes |
 |---|---|---|
@@ -38,12 +38,13 @@ Then a `u32` chunk count, followed by that many 32-byte TOC entries.
 | compressed size | 4 | bytes occupied in the data section |
 | uncompressed size | 4 | size after decompression |
 | type / subchunk count | 1 | low nibble = compression, high nibble = subchunk count |
-| is duplicated | 1 | non-zero if this chunk's data is shared with an earlier chunk |
-| first subchunk index | 2 | `u16`, only meaningful for the zstd-multi format |
+| duplicate flag / subchunk index | 3 | layout depends on the version; see below |
 | checksum | 8 | first 8 bytes of the chunk's XXH3-64 |
 
-Every v3 minor (including **v3.4**) uses exactly this layout. There is no 24-bit subchunk field;
-the duplicate flag and the 16-bit first-subchunk index are always present.
+Before v3.4, those three bytes contain a duplicate flag followed by a little-endian
+16-bit first-subchunk index. In **v3.4+**, all three encode a 24-bit first-subchunk
+index in high/low/middle byte order, with no duplicate flag. The checksum remains
+at the same offset. `tests/builder.rs` covers both layouts.
 
 ### Compression types (low nibble of the type byte)
 
@@ -123,6 +124,20 @@ let chunk = wad.chunk_by_path("data/final/champions/azir.skl");
 
 Both return `Option<&WadChunk>` and never panic on a missing key.
 
+These one-off lookups scan the table. For repeated lookups, build a borrowed index once:
+
+```rust
+let index = wad.chunk_index();
+if let Some(chunk) = index.get(&0x431712194fe05916) {
+    let bytes = wad.chunk_data(chunk)?;
+}
+```
+
+`chunk_index()` takes O(n) time and memory, then provides expected O(1) lookups. It
+works on unsorted tables and TOC-only mounts. Duplicate hashes select the first
+entry, matching `chunk_by_hash`. The references borrow the archive, preventing
+table mutations while the index is in use; rebuild it after editing the table.
+
 ### Bulk extraction
 
 ```rust
@@ -137,6 +152,11 @@ let some = wad.extract_selected([0x431712194fe05916, 0x0123_4567_89AB_CDEF])?;
 
 Enable the `parallel` feature to decode chunks across a thread pool; the API is identical and the
 crate stays `#![forbid(unsafe_code)]`.
+
+Selection takes expected O(n + m) time for n table entries and m requested hashes,
+plus decoding. Each selected hash is decoded once; repeated requests are collapsed,
+unknown hashes are skipped, and duplicate table hashes use their first entry.
+`extract_all()` uses the same selection path and avoids repeated table searches.
 
 ### Explicit sub-chunk table
 

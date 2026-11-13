@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use rs_io::{ReaderExt, WriterExt};
@@ -215,6 +215,14 @@ impl Wad {
         self.chunks.iter().find(|c| c.path_hash == path_hash)
     }
 
+    pub fn chunk_index(&self) -> HashMap<u64, &WadChunk> {
+        let mut index = HashMap::with_capacity(self.chunks.len());
+        for chunk in &self.chunks {
+            index.entry(chunk.path_hash).or_insert(chunk);
+        }
+        index
+    }
+
     /** Returns the chunk for `path`, hashing the lowercased path with XXH64 (seed 0) — the same
     convention the archive uses for its path hashes — then looking it up by hash. */
     pub fn chunk_by_path(&self, path: &str) -> Option<&WadChunk> {
@@ -304,10 +312,16 @@ impl Wad {
         &self,
         path_hashes: impl IntoIterator<Item = u64>,
     ) -> Result<HashMap<u64, Vec<u8>>> {
-        let targets: Vec<&WadChunk> = path_hashes
-            .into_iter()
-            .filter_map(|h| self.chunk_by_hash(h))
-            .collect();
+        let mut remaining: HashSet<u64> = path_hashes.into_iter().collect();
+        let mut targets = Vec::with_capacity(remaining.len().min(self.chunks.len()));
+        for chunk in &self.chunks {
+            if remaining.is_empty() {
+                break;
+            }
+            if remaining.remove(&chunk.path_hash) {
+                targets.push(chunk);
+            }
+        }
 
         #[cfg(feature = "parallel")]
         {

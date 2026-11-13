@@ -15,7 +15,7 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 
 - **Read / write:** **byte-exact** for v2 and v3 (including v3.4); the header signature/checksum trailer is preserved verbatim.
 - **Compression:** `None`, `Gzip`, `Zstd`, `Zstd-multi` decompress. `Satellite` chunks reference data outside the archive and return a clear error.
-- **Lookup & extract:** `chunk_by_hash` / `chunk_by_path`, a bulk extractor (parallel behind the `parallel` feature), and `.subchunktoc` parsing for explicit multi-subchunk sizing.
+- **Lookup & extract:** `chunk_by_hash` / `chunk_by_path`, a borrowed `chunk_index` for repeated lookups, a bulk extractor with one table scan (parallel decoding behind the `parallel` feature), and `.subchunktoc` parsing for explicit multi-subchunk sizing. Duplicate hashes use the first table entry.
 - **Streaming and writes:** `from_reader_toc` supports extraction from a separate reader, but serialization rejects absent payloads. `WadBuilder` builds v3 archives and checks that repeated provider calls return the same content. Decoding rejects incorrect output lengths and incomplete subchunk tables.
 - **CLI:** `rs_cli read`, `rs_cli wad list`, `rs_cli wad extract`.
 
