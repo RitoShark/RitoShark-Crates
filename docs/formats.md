@@ -57,7 +57,8 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 ## `.mapgeo` — environment geometry (OEGM) — `rs_mapgeo`
 
 - **Read / write:** **byte-exact** for versions 5, 6, 7, 9, 11, 12, 13, 14, 15, 17, and 18, including the scene graph and planar reflectors.
-- **Editing:** `geometry`, `replace_geometry`, `add_model`, and `remove_model` operate on an existing map, including attributes split across streams. Edits append geometry buffers to avoid corrupting shared buffers. Scene graphs and baked data are preserved, not regenerated from edited render geometry. World-space export helpers and scene-graph authoring remain improvement areas.
+- **Editing:** `geometry`, `replace_geometry`, `add_model`, and `remove_model` operate on an existing map, including attributes split across streams. Edits append geometry buffers to avoid corrupting shared buffers. Scene graphs and baked data are preserved, not regenerated from edited render geometry.
+- **Export geometry:** `geometry_world` applies placement, transforms normals with the inverse transpose, and reverses triangle winding for reflected models. `Geometry::submesh_triangles` provides validated material-range triangles. See [export behavior and limits](../crates/rs_mapgeo/README.md#geometry-for-export). Scene-graph generation and FBX serialization are not provided.
 - **Vertex codec:** 16-bit packed components use half-floats; 8-bit packed colors use normalized channels. Half-float reads/writes preserve signed and out-of-unit-range values instead of clamping them to `0..=1`.
 - **Edit validation:** missing vertex/index buffer references return errors. `replace_geometry` prepares all vertex streams before appending them, so an encoding failure in a later stream leaves the map unchanged.
 - **Unsupported:** versions 8, 10, and 16 — these revisions were skipped by Riot and are absent from every reference, so rather than guess a layout they return an unsupported-version error.

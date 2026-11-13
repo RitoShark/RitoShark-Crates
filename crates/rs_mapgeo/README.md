@@ -10,6 +10,51 @@ writer is its byte-exact inverse, so a read → write round-trip of a supported 
 over the whole file (all three real samples round-trip in full; the remaining versions are validated
 synthetically).
 
+## Geometry for export
+
+`geometry(index)` returns local-space positions, normals, UV0, indices, and named
+submesh ranges using the existing `Geometry` type. `geometry_world(index)` returns
+the same representation with the model's placement baked into it:
+
+```rust,no_run
+use rs_io::Parse;
+use rs_mapgeo::MapGeometry;
+
+let map = MapGeometry::from_path("map.mapgeo")?;
+for (model_index, model) in map.models.iter().enumerate() {
+    let geometry = map.geometry_world(model_index)?;
+    for (submesh_index, submesh) in geometry.submeshes.iter().enumerate() {
+        let triangles: Vec<[u16; 3]> = geometry.submesh_triangles(submesh_index)?.collect();
+        println!("{} / {}: {} triangles", model.name, submesh.name, triangles.len());
+    }
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Positions use the model transform. Normals use its inverse transpose and are
+normalized, which handles non-uniform scale and shear; zero normals remain zero.
+A negative determinant reverses every triangle's winding once, keeping front faces
+consistent with the transformed normals. UVs, submesh names/order, and vertex indices
+otherwise retain their meaning. Missing normals/UVs stay empty. Attributes split
+across streams, including half-floats, use the shared vertex codec.
+
+The returned positions are already placed: do not apply the original transform a
+second time. The source map, shared buffers, scene graphs, and baked data are unchanged.
+FBX encoding, coordinate-system conversion, material merging, and file export remain
+the consumer's responsibility; this is not a scene-graph generator.
+
+`geometry_world` requires nonempty valid geometry within the editable `Geometry`
+limits (at most 65,536 vertices), finite attributes, and a finite invertible affine
+transform. Unsupported attribute component counts, incomplete triangles, bad references,
+singular/projective transforms, and floating-point overflow return errors. Submesh
+starts and counts must align to complete triangles. These checks apply to this export
+helper; raw parsing and unchanged binary round-trips remain separate operations.
+
+`submesh_triangles(index)` validates that range and its vertex references, then yields
+`[u16; 3]` triples without allocating another index buffer. The indices address the
+geometry's vertex list directly; no per-submesh vertex offset is added. Duplicate
+material names and overlapping ranges are retained as separate ranges.
+
 ## Format overview (OEGM)
 
 All integers are little-endian. Strings are a `u32` length prefix followed by that many UTF-8

@@ -30,6 +30,33 @@ fn triangle() -> Geometry {
 }
 
 #[test]
+fn world_geometry_exports_a_model_from_each_available_sample() {
+    for name in SAMPLES {
+        let Some(map) = sample(name) else { continue };
+        let before = map.clone();
+        let local = map.geometry(0).unwrap();
+        let world = map
+            .geometry_world(0)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(world.positions.len(), local.positions.len());
+        for (local, world) in local
+            .positions
+            .chunks_exact(3)
+            .zip(world.positions.chunks_exact(3))
+        {
+            let expected = map.models[0]
+                .transform
+                .transform_point3(rs_math::Vec3::from_slice(local));
+            let actual = rs_math::Vec3::from_slice(world);
+            assert!(actual.abs_diff_eq(expected, 1e-4), "{name}");
+        }
+        assert_eq!(world.uvs, local.uvs);
+        assert_eq!(world.submeshes, local.submeshes);
+        assert_eq!(map, before);
+    }
+}
+
+#[test]
 fn untouched_file_still_round_trips() {
     for name in SAMPLES {
         let Some(map) = sample(name) else { continue };

@@ -59,6 +59,9 @@ Lookup/extraction tests cover unsorted tables, duplicate hashes, repeated reques
 and TOC-only indexed reads, in both sequential and parallel runs. MAPGEO synthetic
 tests cover half-float attributes, missing buffer references, and failed multi-stream
 edits preserving the complete map, including shared buffers.
+World-space MAPGEO tests cover rotation/translation, non-uniform scale, shear,
+reflected winding, split half-float streams, and invalid export inputs. A fixture
+test exports the first model of each available map sample without changing its source.
 Texture-header tests verify bounded reads, all truncated header prefixes, DDS flags
 and structure sizes, and unknown format handling. CLI tests inspect TEX/DDS headers
 without pixel payloads and verify that an unknown TEX mip count is JSON `null`.

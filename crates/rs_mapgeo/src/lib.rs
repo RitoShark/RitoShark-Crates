@@ -18,6 +18,7 @@ carries are not derivable from geometry.
 
 mod edit;
 mod error;
+mod export;
 mod mapgeo;
 mod read;
 mod vertex;

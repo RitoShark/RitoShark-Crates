@@ -76,7 +76,7 @@ impl Geometry {
         self.positions.len() / 3
     }
 
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.positions.is_empty() {
             return Err(Error::InvalidData("geometry has no positions".to_string()));
         }
@@ -129,13 +129,13 @@ impl Geometry {
             return Err(Error::InvalidData("geometry has no submeshes".to_string()));
         }
         for submesh in &self.submeshes {
-            let end = submesh.index_start as usize + submesh.index_count as usize;
-            if end > self.indices.len() {
+            let end = (submesh.index_start as usize).checked_add(submesh.index_count as usize);
+            if end.is_none_or(|end| end > self.indices.len()) {
                 return Err(Error::InvalidData(format!(
-                    "submesh {:?} spans indices {}..{} but only {} were supplied",
+                    "submesh {:?} starts at index {} with {} indices but only {} were supplied",
                     submesh.name,
                     submesh.index_start,
-                    end,
+                    submesh.index_count,
                     self.indices.len()
                 )));
             }
