@@ -122,18 +122,32 @@ Supported `.tex` format bytes:
 | 11   | `Bc1Alt`      | DXT1 / BC1 (alt code)    | yes    | yes    |
 | 12   | `Bc3`         | DXT5 / BC3               | yes    | yes    |
 | 13   | `Bc7`         | BC7                      | yes    | yes    |
-| 14   | `Bc5`         | BC5 (two-channel/normal) | yes    | yes    |
+| 14   | `Bc5`         | BC5 unsigned normal preview | yes | yes    |
 | 20   | `Bgra8`       | uncompressed BGRA8       | yes    | yes    |
-| 21   | `Rgba16Snorm` | 16-bit signed RGBA       | yes    | no     |
+| 21   | `Rgba16Snorm` | provisional RGBA16_SNORM | provisional | no |
+
+Code 21's numeric interpretation remains unverified: the current decoder treats it as
+signed normalized integers, while Rust LTK labels it half-float. No code-21 sample was
+found in the checked corpus. Code 14 keeps unsigned decoding and encoding; the live
+samples do not justify changing it globally to signed. See the
+[numeric-format audit](docs/numeric-format-audit.md) for evidence and limitations.
 
 The ETC byte mapping (`2 = ETC2-EAC`, `3 = ETC2`) follows the two production C++ `.tex` codecs
 (TexThumbnailProvider and RitoTex), which are the tie-breaker over the inconsistent docs.
 
 ### `.dds` (DirectDraw Surface)
 
-Parsed via `ddsfile`. The pixel format is resolved from either the DXGI header (BC1/BC2/BC3/BC7,
+Parsed via `ddsfile`. The pixel format is resolved from either the DXGI header (BC1/BC2/BC3/BC5/BC7,
 R8G8B8A8, B8G8R8A8/X8) or the legacy D3D9 `FourCC`/mask header (DXT1–5, A8R8G8B8, A8B8G8R8).
 The main image is decoded to RGBA8.
+
+`BC5_SNorm` uses signed endpoints and interpolation through `bcdec_rs`; `BC5_UNorm`
+and `BC5_Typeless` retain unsigned decoding. Both produce an opaque normal-map preview:
+R/G contain the two channels mapped to display bytes, and blue reconstructs positive Z.
+This is not a raw two-channel export. Signed values map `[-1, 1]` to `[0, 255]` with
+nearest-integer rounding (zero becomes 128). Typeless DDS has no declared numeric
+interpretation; unsigned is the existing fallback. DDS writing supports BC1/BC3/BGRA8;
+BC5/BC7 writing remains rejected for game compatibility.
 
 ## API
 
@@ -166,7 +180,7 @@ let tex = Texture::from_dds_bytes(&buf)?;              // DDS -> Texture (BC1/BC
 
 // DDS write
 let dds = write_dds_bytes(&img)?;                      // RgbaImage -> uncompressed RGBA8 .dds
-let dds = write_dds_bytes_bc(&img, TexFormat::Bc7)?;   // RgbaImage -> compressed BC7 .dds
+let dds = write_dds_bytes_bc(&img, TexFormat::Bc3)?;   // RgbaImage -> compressed BC3 .dds
 tex.save_dds("out.dds")?;                              // a Texture's decoded image -> .dds (RGBA8)
 tex.save_dds_bc("out.dds", TexFormat::Bc3)?;           // a Texture's decoded image -> BC3 .dds
 ```
@@ -183,12 +197,12 @@ Key items:
 - `TexFormat` — the format byte enum with `from_u8` / `to_u8`, `block_size`,
   `bytes_per_block`, `mip_size`.
 - `read_dds` / `read_dds_bytes` — decode the first DDS surface to RGBA8, including formats with
-  no `.tex` equivalent (BC2, BC7). `read_dds_faces` / `read_dds_faces_bytes` decode **all**
+  no supported DDS-to-TEX adoption (BC2, BC5). `read_dds_faces` / `read_dds_faces_bytes` decode **all**
   surfaces (six cubemap faces or every array layer). `dds_is_cubemap` reports the surface kind.
 - `write_dds_bytes` / `save_dds` and `Texture::to_dds_bytes` / `Texture::save_dds` — write an
   uncompressed RGBA8 `.dds`. `write_dds_bytes_bc` / `save_dds_bc` and
   `Texture::to_dds_bytes_bc` / `Texture::save_dds_bc` — write a block-compressed
-  (BC1/BC3/BC5/BC7) `.dds`.
+  (BC1/BC3) `.dds`.
 - `Texture::from_dds_bytes` — adopt a DDS payload as a `Texture` when its format maps onto a
   `.tex` format.
 

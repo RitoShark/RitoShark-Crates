@@ -6,8 +6,9 @@ Block-compressed payloads (ETC/BC) decode to a BGRA value per pixel, reordered i
 
 /// The League `.tex` extended format byte. Values match the on-disk encoding used by the
 /// production `.tex` codecs: ETC variants `1..=3` (where `2` carries EAC alpha and `3` is plain
-/// ETC2 RGB), the DXT/BC block formats `10..=14`, uncompressed BGRA8 at `20`, and the rarely
-/// seen 16-bit signed-normalised `21`.
+/// ETC2 RGB), the DXT/BC block formats `10..=14`, and uncompressed BGRA8 at `20`.
+/// Code `21` retains a provisional signed-normalized interpretation; its game semantics
+/// are not verified. See the numeric-format audit in the crate documentation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TexFormat {
@@ -20,6 +21,7 @@ pub enum TexFormat {
     Bc7 = 13,
     Bc5 = 14,
     Bgra8 = 20,
+    /// Provisional RGBA16_SNORM interpretation; no independently verified game sample.
     Rgba16Snorm = 21,
 }
 

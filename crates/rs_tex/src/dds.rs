@@ -3,7 +3,7 @@ use std::path::Path;
 use ddsfile::{Caps2, D3DFormat, Dds, DxgiFormat, MiscFlag, NewD3dParams};
 use image::RgbaImage;
 
-use crate::decode::decode_block_format;
+use crate::decode::{decode_bc5_snorm, decode_block_format};
 use crate::error::{Error, Result};
 use crate::texture::{TexFormat, Texture};
 
@@ -14,6 +14,7 @@ enum DdsKind {
     Bc2,
     Bc3,
     Bc5,
+    Bc5Snorm,
     Bc7,
     Bgra8,
     Rgba8,
@@ -31,9 +32,8 @@ fn classify(dds: &Dds) -> Result<DdsKind> {
             DxgiFormat::BC3_Typeless | DxgiFormat::BC3_UNorm | DxgiFormat::BC3_UNorm_sRGB => {
                 Ok(DdsKind::Bc3)
             }
-            DxgiFormat::BC5_Typeless | DxgiFormat::BC5_UNorm | DxgiFormat::BC5_SNorm => {
-                Ok(DdsKind::Bc5)
-            }
+            DxgiFormat::BC5_Typeless | DxgiFormat::BC5_UNorm => Ok(DdsKind::Bc5),
+            DxgiFormat::BC5_SNorm => Ok(DdsKind::Bc5Snorm),
             DxgiFormat::BC7_Typeless | DxgiFormat::BC7_UNorm | DxgiFormat::BC7_UNorm_sRGB => {
                 Ok(DdsKind::Bc7)
             }
@@ -74,6 +74,7 @@ fn decode_dds_surface(dds: &Dds, data: &[u8]) -> Result<RgbaImage> {
         DdsKind::Bc1 => decode_block_format(TexFormat::Bc1, width, height, data),
         DdsKind::Bc3 => decode_block_format(TexFormat::Bc3, width, height, data),
         DdsKind::Bc5 => decode_block_format(TexFormat::Bc5, width, height, data),
+        DdsKind::Bc5Snorm => decode_bc5_snorm(width, height, data),
         DdsKind::Bgra8 => decode_block_format(TexFormat::Bgra8, width, height, data),
         DdsKind::Rgba8 => {
             let expected = w * h * 4;

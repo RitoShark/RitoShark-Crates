@@ -33,6 +33,52 @@ fn bc5_u32_to_rgba_image(width: u32, height: u32, pixels: &[u32]) -> Result<Rgba
         .ok_or_else(|| Error::Decode("decoded buffer does not match dimensions".into()))
 }
 
+/// Decode signed BC5 channels into an opaque normal-map preview with reconstructed blue.
+pub(crate) fn decode_bc5_snorm(width: u32, height: u32, data: &[u8]) -> Result<RgbaImage> {
+    if width == 0 || height == 0 {
+        return Err(Error::Decode("bc5_snorm dimensions must be nonzero".into()));
+    }
+    let (w, h) = (width as usize, height as usize);
+    let blocks_w = w.div_ceil(4);
+    let expected = blocks_w
+        .checked_mul(h.div_ceil(4))
+        .and_then(|blocks| blocks.checked_mul(16))
+        .ok_or_else(|| Error::Decode("bc5_snorm payload size overflow".into()))?;
+    if data.len() < expected {
+        return Err(Error::Decode(format!(
+            "bc5_snorm payload too small: have {}, need {expected}",
+            data.len()
+        )));
+    }
+    let size = w
+        .checked_mul(h)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| Error::Decode("bc5_snorm image size overflow".into()))?;
+    let mut rgba = Vec::new();
+    rgba.try_reserve_exact(size)
+        .map_err(|e| Error::Decode(format!("bc5_snorm image allocation failed: {e}")))?;
+    rgba.resize(size, 0);
+    for (index, block) in data[..expected].chunks_exact(16).enumerate() {
+        let mut rg = [0.0; 32];
+        bcdec_rs::bc5_float(block, &mut rg, 8, true);
+        let origin_x = (index % blocks_w) * 4;
+        let origin_y = (index / blocks_w) * 4;
+        for y in 0..(h - origin_y).min(4) {
+            for x in 0..(w - origin_x).min(4) {
+                let source = (y * 4 + x) * 2;
+                let nx = rg[source];
+                let ny = rg[source + 1];
+                let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+                let pixel = [nx, ny, nz].map(|v| ((v + 1.0) * 127.5).round() as u8);
+                let dest = ((origin_y + y) * w + origin_x + x) * 4;
+                rgba[dest..dest + 4].copy_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+            }
+        }
+    }
+    RgbaImage::from_raw(width, height, rgba)
+        .ok_or_else(|| Error::Decode("bc5_snorm buffer does not match dimensions".into()))
+}
+
 /// Reorder a tightly packed BGRA8 byte buffer into an RGBA8 image of the given size.
 fn bgra_bytes_to_rgba_image(width: u32, height: u32, data: &[u8]) -> Result<RgbaImage> {
     let expected = (width as usize) * (height as usize) * 4;
@@ -120,6 +166,13 @@ impl Texture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signed_bc5_rejects_invalid_dimensions_before_allocating() {
+        for (width, height) in [(0, 4), (4, 0), (u32::MAX, u32::MAX)] {
+            assert!(decode_bc5_snorm(width, height, &[0; 16]).is_err());
+        }
+    }
 
     #[test]
     fn bc5_reconstructs_blue_and_is_opaque() {

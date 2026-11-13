@@ -25,9 +25,10 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 - **Header inspection:** `TextureHeader` reads TEX/DDS dimensions and declared format without reading pixel data, including unknown formats. A mipmapped TEX has no header-level count; `mip_count` is `None`. Metadata success does not validate the payload. See [header inspection](../crates/rs_tex/README.md#header-inspection).
 - **Mip validation and extraction:** full parsing checks the exact known mip-chain byte length. `Texture::from_reader_largest_mip` explicitly extracts a single full-resolution image from the end of a 2D TEX; it does not repair or validate lower levels. See [the non-square audit](../crates/rs_tex/docs/mip-layout-audit.md).
 - **Unknown TEX inspection:** raw format, depth/reserved, resource, and flag bytes remain available through `TextureHeader`. [Format 23](../crates/rs_tex/docs/format23-audit.md) was observed in 26 identical zero-filled live entries; its pixel meaning is unverified and full parsing/decoding remains unsupported.
-- **Decode:** BC1–BC7, ETC1 / ETC2 / ETC2-EAC, RGBA8 / BGRA8, RGBA16_SNORM → `image::RgbaImage`. Cubemaps and multi-surface DDS decode all faces.
-- **Encode:** BC1 / BC3 / BC5 (pure-Rust) and BC7, with full mip-chain generation; writes both `.tex` and compressed or uncompressed `.dds`.
-- **Limits:** no ETC encoder (none exists in pure Rust), no RGBA16_SNORM encode; the DDS writer re-compresses rather than copying original blocks.
+- **Decode:** BC1 / BC2 (DDS) / BC3 / BC5 / BC7, ETC1 / ETC2 / ETC2-EAC, RGBA8 / BGRA8 → `image::RgbaImage`. Cubemaps and multi-surface DDS decode all faces. DDS BC5 distinguishes signed and unsigned channels; both produce an opaque normal preview with reconstructed blue.
+- **Unverified numeric mapping:** TEX code 21 retains the provisional RGBA16_SNORM interpretation; no independently verified game sample establishes SNORM versus half-float. TEX code 14 retains unsigned BC5. See the [numeric-format audit](../crates/rs_tex/docs/numeric-format-audit.md).
+- **Encode:** TEX supports BC1 / BC3 / BC5 (pure-Rust) and BC7, with full mip-chain generation. DDS writing supports BC1 / BC3 or uncompressed BGRA8; BC5/BC7 export is rejected for game compatibility.
+- **Limits:** no ETC or RGBA16_SNORM encoder; the DDS writer re-compresses rather than copying original blocks.
 - **CLI:** `rs_cli read`, `rs_cli transform`, `rs_cli tex info`, `rs_cli tex decode`, `rs_cli tex encode`.
 
 ## `.skn` — skinned mesh — `rs_mesh`
