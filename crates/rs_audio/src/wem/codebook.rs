@@ -33,7 +33,7 @@ impl CodebookLibrary {
             data[data.len() - 1],
         ]) as usize;
 
-        if table_start >= data.len() || (data.len() - table_start) % 4 != 0 {
+        if table_start >= data.len() || !(data.len() - table_start).is_multiple_of(4) {
             return Err(Error::Wem("codebook offset table is out of range"));
         }
 

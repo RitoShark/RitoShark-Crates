@@ -549,7 +549,7 @@ fn encode_with_template(
     if audio.channels == 0 {
         return Err(Error::Wem("cannot encode zero channels"));
     }
-    if audio.samples.len() % audio.channels as usize != 0 {
+    if !audio.samples.len().is_multiple_of(audio.channels as usize) {
         return Err(Error::Wem("sample count is not a whole number of frames"));
     }
 

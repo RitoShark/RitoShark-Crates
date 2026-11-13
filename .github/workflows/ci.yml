@@ -6,6 +6,41 @@ on:
   pull_request:
 
 jobs:
+  msrv:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install declared minimum Rust version
+        shell: pwsh
+        run: |
+          if ((Get-Content Cargo.toml -Raw) -notmatch '(?m)^rust-version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"') {
+            throw 'Expected a full minimum Rust version in Cargo.toml'
+          }
+          $minimumRust = $Matches[1]
+          "MSRV=$minimumRust" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          rustup toolchain install $minimumRust --profile minimal
+      - name: Cache minimum-version build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-msrv-${{ env.MSRV }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-msrv-${{ env.MSRV }}-
+      - name: Compile all core test targets and features
+        run: rustup run $env:MSRV cargo test --workspace --exclude rs_python --all-targets --all-features --no-run --locked
+      - name: Run core library unit tests
+        run: rustup run $env:MSRV cargo test --workspace --exclude rs_python --all-features --lib --locked
+      - name: Check minimal facade
+        run: rustup run $env:MSRV cargo check -p ritoshark --no-default-features --locked
+      - name: Check BIN and WAD facade
+        run: rustup run $env:MSRV cargo check -p ritoshark --no-default-features --features bin,wad --locked
+      - name: Check Python binding compilation (ABI3, no interpreter)
+        env:
+          PYO3_NO_PYTHON: "1"
+        run: rustup run $env:MSRV cargo check -p rs_python --locked
+
   check:
     runs-on: windows-latest
     steps:

@@ -42,18 +42,18 @@ pub fn resolve(flag: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = flag {
         return Some(p.to_path_buf());
     }
-    if let Ok(env) = std::env::var("RITOSHARK_HASHES") {
-        if !env.is_empty() {
-            return Some(PathBuf::from(env));
-        }
+    if let Ok(env) = std::env::var("RITOSHARK_HASHES")
+        && !env.is_empty()
+    {
+        return Some(PathBuf::from(env));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            for name in NEARBY {
-                let candidate = dir.join(name);
-                if candidate.is_dir() {
-                    return Some(candidate);
-                }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        for name in NEARBY {
+            let candidate = dir.join(name);
+            if candidate.is_dir() {
+                return Some(candidate);
             }
         }
     }

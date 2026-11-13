@@ -8,7 +8,7 @@ impl Geometry {
             .submeshes
             .get(index)
             .ok_or_else(|| Error::InvalidData(format!("no submesh at index {index}")))?;
-        if self.positions.len() % 3 != 0 {
+        if !self.positions.len().is_multiple_of(3) {
             return Err(Error::InvalidData(
                 "positions must contain three floats per vertex".into(),
             ));

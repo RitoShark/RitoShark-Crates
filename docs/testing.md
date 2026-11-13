@@ -5,6 +5,7 @@
 | Lane | Environment | Checks |
 |---|---|---|
 | Core (`ci.yml`) | Windows, Rust pinned in `rust-toolchain.toml` (currently 1.96.0) | Locked workspace build and default-feature tests, excluding `rs_python` |
+| Minimum Rust (`ci.yml`, `msrv` job) | Windows x64 MSVC, declared `rust-version` (1.88.0) | Compile all core test targets/features, run library unit tests, check minimal facades and ABI3 Python-binding compilation |
 | Optional features (core job) | Same | `rs_wad/parallel` and `rs_rman/verify` tests |
 | Facade (core job) | Same | Compile `ritoshark` with no default features, then with only `bin,wad` |
 | Lints (core job) | Same | All-target/all-feature Clippy excluding Python; workspace rustfmt |
@@ -16,9 +17,50 @@ Python checks are deliberately separate from the core Rust job because building
 lockfile, and toolchain also trigger the Python pull-request workflow.
 
 This matrix does not establish Linux/macOS runtime support, compatibility with every
-Python version, every feature combination, or a tested minimum Rust version.
-`Cargo.toml` declares Rust 1.85, but CI currently verifies only the pinned 1.96.0
-toolchain. Do not treat the declared minimum as a validated dependency/MSRV promise.
+Python version, or every feature combination.
+
+## Minimum Rust version
+
+The workspace minimum is **Rust 1.88.0**, validated with the checked-in lockfile on
+`x86_64-pc-windows-msvc`. All crates inherit this common baseline. The regular
+development, lint, and runtime-test toolchain remains pinned to 1.96.0.
+
+The previous 1.85 declaration was inconsistent with both source and dependencies:
+the animation reader uses [let chains, stabilized in Rust 1.88](https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/),
+and locked `image` 0.25.10 declares Rust 1.88.0. The locked Vorbis stack declares
+1.87, and ICU dependencies declare 1.86. No dependency downgrade or lockfile change
+was needed to establish the 1.88 baseline.
+
+The `msrv` job reads `rust-version` directly from `Cargo.toml`, installs that full
+version, and uses it explicitly instead of the development override. It compiles
+all non-Python workspace test targets with all features, runs library unit tests,
+and checks the facade with no features and with `bin,wad`. Integration tests are
+compiled at the minimum; their runtime coverage remains in the normal pinned-toolchain
+job and the local corpus runner.
+
+Python bindings are checked with `PYO3_NO_PYTHON=1` and their existing ABI3 settings.
+That validates Rust compilation without an interpreter; it does not link/install
+a wheel or run Python tests at the minimum. The separate Python workflow retains
+its existing runtime checks on the development toolchain.
+
+Dependency updates must pass the minimum-version job or deliberately update the
+declared baseline. This verifies the locked Windows graph, not every dependency
+resolution a downstream consumer might select or other operating systems.
+
+```powershell
+rustup toolchain install 1.88.0 --profile minimal
+cargo +1.88.0 test --workspace --exclude rs_python --all-targets --all-features --no-run --locked --target-dir target/msrv
+cargo +1.88.0 test --workspace --exclude rs_python --all-features --lib --locked --target-dir target/msrv
+cargo +1.88.0 check -p ritoshark --no-default-features --locked --target-dir target/msrv
+cargo +1.88.0 check -p ritoshark --no-default-features --features bin,wad --locked --target-dir target/msrv
+$previousNoPython = $env:PYO3_NO_PYTHON
+try {
+    $env:PYO3_NO_PYTHON = '1'
+    cargo +1.88.0 check -p rs_python --locked --target-dir target/msrv
+} finally {
+    $env:PYO3_NO_PYTHON = $previousNoPython
+}
+```
 
 ## Reproduce the checks
 

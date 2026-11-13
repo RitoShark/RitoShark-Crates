@@ -145,11 +145,11 @@ impl Serialize for Skeleton {
     type Error = Error;
 
     fn to_writer<W: Write>(&self, writer: &mut W) -> Result<()> {
-        if let Some(raw) = &self.raw {
-            if self == &raw.decoded {
-                writer.write_all(&raw.bytes).map_err(rs_io::Error::from)?;
-                return Ok(());
-            }
+        if let Some(raw) = &self.raw
+            && self == &raw.decoded
+        {
+            writer.write_all(&raw.bytes).map_err(rs_io::Error::from)?;
+            return Ok(());
         }
         let mut buf = Cursor::new(Vec::new());
         self.write_to(&mut buf)?;

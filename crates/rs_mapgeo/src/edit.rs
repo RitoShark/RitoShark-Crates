@@ -80,7 +80,7 @@ impl Geometry {
         if self.positions.is_empty() {
             return Err(Error::InvalidData("geometry has no positions".to_string()));
         }
-        if self.positions.len() % 3 != 0 {
+        if !self.positions.len().is_multiple_of(3) {
             return Err(Error::InvalidData(format!(
                 "positions must be 3 floats per vertex, got {}",
                 self.positions.len()
@@ -118,12 +118,12 @@ impl Geometry {
                 usize::from(u16::MAX) + 1
             )));
         }
-        if let Some(&worst) = self.indices.iter().max() {
-            if usize::from(worst) >= vertex_count {
-                return Err(Error::InvalidData(format!(
-                    "index {worst} addresses past the {vertex_count} vertices supplied"
-                )));
-            }
+        if let Some(&worst) = self.indices.iter().max()
+            && usize::from(worst) >= vertex_count
+        {
+            return Err(Error::InvalidData(format!(
+                "index {worst} addresses past the {vertex_count} vertices supplied"
+            )));
         }
         if self.submeshes.is_empty() {
             return Err(Error::InvalidData("geometry has no submeshes".to_string()));
@@ -458,12 +458,11 @@ impl MapGeometry {
                 (ElementName::Normal, &mut normals),
                 (ElementName::Texcoord0, &mut uvs),
             ] {
-                if slot.is_empty() {
-                    if let Some(values) =
+                if slot.is_empty()
+                    && let Some(values) =
                         description.read_attribute(&buffer.data, name, vertex_count)?
-                    {
-                        *slot = values;
-                    }
+                {
+                    *slot = values;
                 }
             }
         }

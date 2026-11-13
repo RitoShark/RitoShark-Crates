@@ -122,10 +122,11 @@ impl<'a> Oracle<'a> {
     }
     fn sample(&self, c: usize, t: u16) -> Vec4 {
         let mut cache = self.cache.borrow_mut();
-        if let Some((channel, values)) = cache.as_ref() {
-            if *channel == c && values[t as usize].is_finite() {
-                return values[t as usize];
-            }
+        if let Some((channel, values)) = cache.as_ref()
+            && *channel == c
+            && values[t as usize].is_finite()
+        {
+            return values[t as usize];
         }
         let seconds = if t == 0 {
             0.
@@ -135,10 +136,10 @@ impl<'a> Oracle<'a> {
             ((t as f64 + 0.5) / 65535. * self.duration as f64) as f32
         };
         let value = sample_frame_channel(self.dense, c, seconds);
-        if let Some((channel, values)) = cache.as_mut() {
-            if *channel == c {
-                values[t as usize] = value;
-            }
+        if let Some((channel, values)) = cache.as_mut()
+            && *channel == c
+        {
+            values[t as usize] = value;
         }
         value
     }
@@ -792,10 +793,10 @@ fn scan(
             for (index, &j) in chain.iter().enumerate() {
                 let local = if rig.tracks[j].is_some() {
                     let mut v = if all { reference[index] } else { actual[index] };
-                    if let Some((a, c)) = fix {
-                        if a == index {
-                            v[c] = reference[index][c];
-                        }
+                    if let Some((a, c)) = fix
+                        && a == index
+                    {
+                        v[c] = reference[index][c];
                     }
                     matrix(v)
                 } else {

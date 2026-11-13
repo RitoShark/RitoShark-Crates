@@ -193,7 +193,7 @@ impl VertexDescription {
             ));
         }
         let components = format.component_count();
-        if values.len() % components != 0 {
+        if !values.len().is_multiple_of(components) {
             return Err(Error::InvalidData(format!(
                 "{:?} takes {} components per vertex but got {} values",
                 name,

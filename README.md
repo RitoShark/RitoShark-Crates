@@ -38,6 +38,10 @@ configurable accuracy and optional skeleton validation, available to Rust and Py
 
 ## Install
 
+Requires **Rust 1.88.0 or newer**. The development toolchain is pinned separately
+to 1.96.0. See [minimum-version checks](docs/testing.md#minimum-rust-version) for
+the tested platform, dependency graph, and Python limits.
+
 ```toml
 [dependencies]
 ritoshark = "0.1"   # or: default-features = false, features = ["bin", "wad", "tex"]

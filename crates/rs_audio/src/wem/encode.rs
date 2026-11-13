@@ -71,7 +71,7 @@ pub fn encode_pcm(audio: &PcmAudio) -> Result<Vec<u8>> {
     if audio.sample_rate == 0 {
         return Err(Error::Wem("cannot encode a zero sample rate"));
     }
-    if audio.samples.len() % audio.channels as usize != 0 {
+    if !audio.samples.len().is_multiple_of(audio.channels as usize) {
         return Err(Error::Wem("sample count is not a whole number of frames"));
     }
 

@@ -892,12 +892,12 @@ impl<'a> Parser<'a> {
         let backup = self.pos;
         self.skip_inline();
         let word = self.read_word();
-        if let Some(hex) = word.strip_prefix("0x").or_else(|| word.strip_prefix("0X")) {
-            if hex.len() > 8 {
-                return u64::from_str_radix(hex, 16)
-                    .map(BinValue::Hash64)
-                    .or_else(|_| self.err("invalid 64-bit hash"));
-            }
+        if let Some(hex) = word.strip_prefix("0x").or_else(|| word.strip_prefix("0X"))
+            && hex.len() > 8
+        {
+            return u64::from_str_radix(hex, 16)
+                .map(BinValue::Hash64)
+                .or_else(|_| self.err("invalid 64-bit hash"));
         }
         self.pos = backup;
         self.read_hash32().map(BinValue::Hash)

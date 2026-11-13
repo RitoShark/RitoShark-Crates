@@ -46,10 +46,10 @@ fn check_file(name: &str) {
 
     let mut non_empty = 0usize;
     for (hash, _) in rst.entries.iter().take(16) {
-        if let Some(s) = rst.get_by_hash(*hash) {
-            if !s.is_empty() {
-                non_empty += 1;
-            }
+        if let Some(s) = rst.get_by_hash(*hash)
+            && !s.is_empty()
+        {
+            non_empty += 1;
         }
     }
     assert!(
