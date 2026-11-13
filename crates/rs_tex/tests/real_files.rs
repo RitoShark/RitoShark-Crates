@@ -15,7 +15,7 @@ fn mean_abs_diff(a: &image::RgbaImage, b: &image::RgbaImage) -> f64 {
 }
 
 fn sample_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sample-files")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Sample-Files")
 }
 
 fn read_sample(name: &str) -> Option<Vec<u8>> {

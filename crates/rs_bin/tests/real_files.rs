@@ -3,7 +3,7 @@ use rs_io::{Parse, Serialize};
 
 fn sample(name: &str) -> Option<std::path::PathBuf> {
     let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../sample-files")
+        .join("../../Sample-Files")
         .join(name);
     p.exists().then_some(p)
 }

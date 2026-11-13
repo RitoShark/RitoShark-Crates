@@ -121,5 +121,5 @@ even though the format is never written back.
 ## Fixtures
 
 Real `.manifest` files are copyrighted game data and are **gitignored**. Drop them in
-the workspace `sample-files/` directory; `tests/real_files.rs` skips cleanly when they
+the workspace `Sample-Files/` directory; `tests/real_files.rs` skips cleanly when they
 are absent.

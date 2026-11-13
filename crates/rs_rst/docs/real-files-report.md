@@ -5,7 +5,7 @@ against reference implementations.
 
 ## Samples
 
-Located in the gitignored workspace `sample-files/` directory.
+Located in the gitignored workspace `Sample-Files/` directory.
 
 | File                     | Size       | Magic | Version |
 |--------------------------|-----------:|-------|---------|

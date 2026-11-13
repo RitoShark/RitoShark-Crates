@@ -192,3 +192,36 @@ prefix of a synthetic DDS plus 592 single-byte header mutations through the publ
 decoders. These tests run in ordinary CI without assets or a fuzzing toolchain; they
 are bounded regression checks, not a claim of coverage-guided fuzzing or exhaustive
 malformed-input safety.
+
+Equivalent deterministic sweeps cover PROP/PTCH and the WAD header/table. WAD
+readers check table byte availability before reserving the declared chunk count;
+the same path serves full and TOC-only mounts. Count regressions cover v2, v3.3,
+and v3.4. These small mutation sweeps strengthen normal CI without introducing a
+separate fuzzing runtime. Dedicated coverage-guided campaigns remain follow-up work.
+
+## WAD performance baseline
+
+Run the asset-free benchmark in an optimized build:
+
+```powershell
+cargo bench -p rs_wad --bench selection --locked
+cargo bench -p rs_wad --bench selection --features parallel --locked
+cargo test -p rs_wad --bench selection --all-features --locked -- --test
+```
+
+The stable-Rust harness uses synthetic archives of 1,000, 10,000, and 50,000 stored
+128-byte chunks. It reports CSV timings for 256 evenly distributed linear lookups,
+the same lookups against a prebuilt borrowed index, index construction, selected
+extraction, and full extraction. Archive construction and correctness assertions
+are outside the timed region. Index construction has its own measurement; lookup
+timings do not include it. Extraction includes allocating and dropping its results.
+
+There is one warm-up and at least 250 ms of sampling per case. The last command runs
+a short smoke check, also included in CI. Compare matching toolchains, feature flags, machines, and workloads;
+the harness deliberately has no CI timing threshold. Stored chunks isolate lookup,
+selection, and copying costs: these figures do not predict zstd, disk I/O, live WAD
+loading, or large-payload performance. No benchmark dependency or game data is needed.
+
+All fixture references use the workspace directory spelling `Sample-Files` so that
+the same paths also resolve on case-sensitive filesystems. This is path consistency,
+not a claim that Linux/macOS build or corpus coverage has been established.

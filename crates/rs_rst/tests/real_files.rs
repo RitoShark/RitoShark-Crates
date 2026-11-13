@@ -5,7 +5,7 @@ use rs_rst::Rst;
 
 fn sample_path(name: &str) -> Option<PathBuf> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../sample-files")
+        .join("../../Sample-Files")
         .join(name);
     path.exists().then_some(path)
 }

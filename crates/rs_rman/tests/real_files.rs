@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use rs_io::Parse;
 use rs_rman::Rman;
 
-/// Locate a sample `.manifest` under the workspace's flat `sample-files` directory.
+/// Locate a sample `.manifest` under the workspace's flat `Sample-Files` directory.
 /// Returns `None` (so the test skips) when the file is absent.
 fn sample(name: &str) -> Option<PathBuf> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../sample-files")
+        .join("../../Sample-Files")
         .join(name);
     if path.is_file() { Some(path) } else { None }
 }

@@ -96,10 +96,10 @@ excluded from equality (two tables are equal when version, font config, mode, an
 
 - `tests/roundtrip.rs` — in-memory round-trip per version (v2 font config, v4 mode byte, v5),
   dedup, lookups, error cases.
-- `tests/real_files.rs` — parses real `.stringtable` samples from `../../sample-files`
+- `tests/real_files.rs` — parses real `.stringtable` samples from `../../Sample-Files`
   (skipped if absent), asserts entry count > 0, byte-exact round-trip, and non-empty lookups.
 
-Drop real fixtures into the gitignored workspace `sample-files/` directory to exercise them.
+Drop real fixtures into the gitignored workspace `Sample-Files/` directory to exercise them.
 
 ```
 cargo test -p rs_rst

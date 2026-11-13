@@ -119,11 +119,11 @@ cargo test -p rs_bin
   null-pointer, PTCH-header, PTCH-patches, text-printer, and text round-trip / idempotence checks.
 - `tests/real_files.rs` — for each real sample `.bin`: binary byte-exact round-trip **and** the full
   text round-trip `from_path → to_text → from_text → to_bytes == original`, plus a
-  `text → from_text → to_text` idempotence check. Sample files live in `sample-files/` at the
+  `text → from_text → to_text` idempotence check. Sample files live in `Sample-Files/` at the
   workspace root and are **gitignored**; the tests skip (and print `skip`) when a file is absent, so
   the suite stays green without them.
 
-Drop real `.bin` files into `RitoShark-Crates/sample-files/` to exercise the real-file suite.
+Drop real `.bin` files into `RitoShark-Crates/Sample-Files/` to exercise the real-file suite.
 
 ## Four- and eight-byte Hash values
 

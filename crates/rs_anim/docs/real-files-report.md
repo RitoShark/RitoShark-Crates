@@ -1,7 +1,7 @@
 # Animation fixture coverage
 
 Verified 2026-09-28 with `cargo test -p rs_anim -- --nocapture`: 46 tests passed.
-Game assets remain local and gitignored under `sample-files/`.
+Game assets remain local and gitignored under `Sample-Files/`.
 
 ## Real files
 

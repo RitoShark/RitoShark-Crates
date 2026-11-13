@@ -63,6 +63,8 @@ jobs:
       - name: Test required-corpus runner (synthetic files only)
         shell: pwsh
         run: ./scripts/test-corpus-runner.ps1
+      - name: Smoke-test WAD benchmark (synthetic data only)
+        run: cargo test -p rs_wad --bench selection --all-features --locked -- --test
       - name: Test optional WAD parallel and RMAN verification features
         run: cargo test -p rs_wad -p rs_rman --all-features --locked
       - name: Check minimal facade

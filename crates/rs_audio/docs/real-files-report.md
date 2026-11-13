@@ -1,6 +1,6 @@
 # rs_audio — real-files report
 
-Validation of `rs_audio` against real League `.bnk` and `.wpk` samples in `sample-files/`.
+Validation of `rs_audio` against real League `.bnk` and `.wpk` samples in `Sample-Files/`.
 Tests live in `crates/rs_audio/tests/real_files.rs` and skip gracefully when a file is absent.
 
 ## Codec census — what League actually ships

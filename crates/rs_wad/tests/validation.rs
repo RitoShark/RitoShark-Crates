@@ -14,6 +14,52 @@ fn archive() -> Vec<u8> {
 }
 
 #[test]
+fn impossible_chunk_counts_are_rejected_before_allocating() {
+    for (major, minor, trailer) in [(2, 0, 96), (3, 3, 264), (3, 4, 264)] {
+        for count in [1u32, u32::MAX] {
+            let mut data = vec![b'R', b'W', major, minor];
+            data.resize(4 + trailer, 0);
+            data.extend_from_slice(&count.to_le_bytes());
+            data.extend_from_slice(&[0; 31]);
+            let error = Wad::from_bytes(&data).unwrap_err().to_string();
+            assert!(error.contains("WAD table declares"), "{error}");
+            assert!(Wad::from_reader_toc(&mut Cursor::new(data)).is_err());
+        }
+    }
+}
+
+#[test]
+fn toc_preflight_preserves_reader_position_and_does_not_capture_payload() {
+    let bytes = archive();
+    let mut prefixed = vec![0xaa; 9];
+    prefixed.extend_from_slice(&bytes);
+    let mut reader = Cursor::new(prefixed);
+    reader.set_position(9);
+    let wad = Wad::from_reader_toc(&mut reader).unwrap();
+    assert_eq!(wad.chunks.len(), 1);
+    assert!(wad.data.is_empty());
+    assert_eq!(reader.position(), 9 + wad.data_start());
+}
+
+#[test]
+fn wad_header_mutations_and_truncated_tables_do_not_panic() {
+    let valid = archive();
+    let table_end = Wad::from_bytes(&valid).unwrap().data_start() as usize;
+    for end in 0..table_end {
+        assert!(Wad::from_bytes(&valid[..end]).is_err(), "prefix {end}");
+        assert!(Wad::from_reader_toc(&mut Cursor::new(&valid[..end])).is_err());
+    }
+    for offset in 0..table_end {
+        for value in [0, 1, 127, 255] {
+            let mut mutated = valid.clone();
+            mutated[offset] = value;
+            let _ = Wad::from_bytes(&mutated);
+            let _ = Wad::from_reader_toc(&mut Cursor::new(mutated));
+        }
+    }
+}
+
+#[test]
 fn changing_provider_with_equal_compressed_lengths_is_rejected() {
     assert_eq!(
         compress(b"A", WadCompression::Zstd, 3).unwrap().len(),

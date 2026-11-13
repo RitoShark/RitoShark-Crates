@@ -1,6 +1,6 @@
 # rs_wad — real-file validation report
 
-Validation of `rs_wad` against the two real sample archives in `sample-files/`, plus a
+Validation of `rs_wad` against the two real sample archives in `Sample-Files/`, plus a
 cross-check against the reference implementations. Reproduce with:
 
 ```

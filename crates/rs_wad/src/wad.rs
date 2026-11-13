@@ -31,35 +31,9 @@ impl Wad {
     yields [`Error::UnsupportedVersion`]. The data section is read from the end of the table to the
     end of the stream, so chunk byte ranges stay addressable by their absolute offsets. */
     pub fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self> {
-        let magic = reader.read_u16()?;
-        if magic != MAGIC {
-            return Err(Error::InvalidMagic);
-        }
-        let major = reader.read_u8()?;
-        let minor = reader.read_u8()?;
-
-        let trailer_len = match major {
-            2 => V2_TRAILER_LEN,
-            3 => V3_TRAILER_LEN,
-            _ => return Err(Error::UnsupportedVersion(major, minor)),
-        };
-        let header_trailer = reader.read_bytes(trailer_len)?;
-
-        let v3_4_plus = major == 3 && minor >= 4;
-        let chunk_count = reader.read_u32()? as usize;
-        let mut chunks = Vec::with_capacity(chunk_count);
-        for _ in 0..chunk_count {
-            chunks.push(read_chunk(reader, v3_4_plus)?);
-        }
-
-        let data = read_to_end(reader)?;
-
-        Ok(Self {
-            version: (major, minor),
-            chunks,
-            header_trailer,
-            data,
-        })
+        let mut wad = Self::from_reader_toc(reader)?;
+        wad.data = read_to_end(reader)?;
+        Ok(wad)
     }
 
     /** Parses only the header and chunk table, leaving the data section on disk. Pair with
@@ -89,7 +63,27 @@ impl Wad {
 
         let v3_4_plus = major == 3 && minor >= 4;
         let chunk_count = reader.read_u32()? as usize;
-        let mut chunks = Vec::with_capacity(chunk_count);
+        let table_start = reader.stream_position().map_err(rs_io::Error::from)?;
+        let end = reader.seek(SeekFrom::End(0)).map_err(rs_io::Error::from)?;
+        reader
+            .seek(SeekFrom::Start(table_start))
+            .map_err(rs_io::Error::from)?;
+        let available = end.saturating_sub(table_start);
+        if chunk_count as u64 > available / CHUNK_ENTRY_LEN as u64 {
+            return Err(rs_io::Error::from(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!(
+                    "WAD table declares {chunk_count} chunks but only {available} bytes remain"
+                ),
+            ))
+            .into());
+        }
+        let mut chunks = Vec::new();
+        chunks.try_reserve_exact(chunk_count).map_err(|e| {
+            rs_io::Error::from(std::io::Error::other(format!(
+                "WAD table allocation failed: {e}"
+            )))
+        })?;
         for _ in 0..chunk_count {
             chunks.push(read_chunk(reader, v3_4_plus)?);
         }

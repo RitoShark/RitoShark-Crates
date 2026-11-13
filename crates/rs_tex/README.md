@@ -229,5 +229,5 @@ byte-for-byte via `to_writer`.
 ## Fixtures
 
 Real game textures are **gitignored**. The integration tests in `tests/real_files.rs` look for
-sample files in `../../sample-files` relative to this crate and skip cleanly when they are
+sample files in `../../Sample-Files` relative to this crate and skip cleanly when they are
 absent. Decoded PNGs are written to the OS temp dir (never into the repo) for eyeballing.

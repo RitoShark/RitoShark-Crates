@@ -10,7 +10,7 @@ Run with:
 cargo test -p rs_tex -- --nocapture --test-threads=1
 ```
 
-Samples live in `sample-files/` (gitignored); the test skips any missing file.
+Samples live in `Sample-Files/` (gitignored); the test skips any missing file.
 
 ## Per-file results
 

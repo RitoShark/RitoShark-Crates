@@ -14,7 +14,7 @@ use rs_rman::{FileEntry, Rman};
 
 fn sample(name: &str) -> Option<PathBuf> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../sample-files")
+        .join("../../Sample-Files")
         .join(name);
     path.is_file().then_some(path)
 }

@@ -5,7 +5,7 @@ use rs_io::Parse;
 use rs_math::Mat4;
 
 fn sample_dir() -> Option<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sample-files");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Sample-Files");
     dir.is_dir().then_some(dir)
 }
 
@@ -47,7 +47,7 @@ and 5e-3 on the rotation block, against 7.75e-7 for a single-joint rig with no c
 #[test]
 fn rest_pose_skinning_matrices_are_identity_on_real_rigs() {
     let Some(dir) = sample_dir() else {
-        eprintln!("sample-files directory missing; skipping real .skl pose tests");
+        eprintln!("Sample-Files directory missing; skipping real .skl pose tests");
         return;
     };
 
@@ -101,7 +101,7 @@ fn rest_pose_skinning_matrices_are_identity_on_real_rigs() {
 #[test]
 fn rest_pose_globals_are_finite_on_real_rigs() {
     let Some(dir) = sample_dir() else {
-        eprintln!("sample-files directory missing; skipping");
+        eprintln!("Sample-Files directory missing; skipping");
         return;
     };
 
@@ -133,7 +133,7 @@ keyframe must reproduce that keyframe rather than drifting through the interpola
 #[test]
 fn sampling_real_animations_is_well_formed() {
     let Some(dir) = sample_dir() else {
-        eprintln!("sample-files directory missing; skipping real .anm sampling tests");
+        eprintln!("Sample-Files directory missing; skipping real .anm sampling tests");
         return;
     };
 
@@ -199,7 +199,7 @@ every joint the clip does not drive falls back to its bind transform. */
 #[test]
 fn posing_with_a_foreign_clip_keeps_the_bind_pose() {
     let Some(dir) = sample_dir() else {
-        eprintln!("sample-files directory missing; skipping");
+        eprintln!("Sample-Files directory missing; skipping");
         return;
     };
 

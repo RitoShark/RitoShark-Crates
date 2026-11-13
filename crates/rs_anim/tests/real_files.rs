@@ -4,7 +4,7 @@ use rs_anim::{Animation, Skeleton};
 use rs_io::{Parse, Serialize};
 
 fn sample_dir() -> Option<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sample-files");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Sample-Files");
     dir.is_dir().then_some(dir)
 }
 
@@ -114,7 +114,7 @@ fn check_anm(name: &str, path: &Path, expected_magic: &[u8; 8]) {
 #[test]
 fn anm_real_files_parse() {
     let Some(dir) = sample_dir() else {
-        eprintln!("sample-files directory missing; skipping real .anm tests");
+        eprintln!("Sample-Files directory missing; skipping real .anm tests");
         return;
     };
 

@@ -6,7 +6,7 @@
 > reader (including the preserved uninterpreted file fields) is unchanged.
 
 Results of running `Rman::from_path` over the real `.manifest` samples in
-`sample-files/`, plus a cross-check of our body walk against the cdragon-rman
+`Sample-Files/`, plus a cross-check of our body walk against the cdragon-rman
 reference (Rust). Run with:
 
 ```

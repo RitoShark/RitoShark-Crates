@@ -1,4 +1,4 @@
-//! Detailed verification sweep over every real fixture in `sample-files/`.
+//! Detailed verification sweep over every real fixture in `Sample-Files/`.
 //!
 //! Real game audio is never committed, so every test here skips when its fixtures are absent —
 //! the same contract the rest of the suite follows. When the fixtures are present these are the
@@ -12,7 +12,7 @@ use rs_audio::{Bnk, PcmAudio, Wem, WemCodec, Wpk, encode_pcm};
 use rs_io::{Parse, Serialize};
 
 fn dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sample-files")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Sample-Files")
 }
 
 fn containers(extension: &str) -> Vec<PathBuf> {

@@ -69,6 +69,28 @@ fn binary_round_trip_is_byte_exact() {
 }
 
 #[test]
+fn prop_and_ptch_byte_mutations_and_truncation_do_not_panic() {
+    let prop = sample_prop();
+    let mut patch = b"PTCH".to_vec();
+    patch.extend_from_slice(&[0; 8]);
+    patch.extend_from_slice(&prop);
+    patch.extend_from_slice(&0u32.to_le_bytes());
+    for valid in [prop, patch] {
+        assert!(Bin::from_bytes(&valid).is_ok());
+        for end in 0..valid.len() {
+            assert!(Bin::from_bytes(&valid[..end]).is_err(), "prefix {end}");
+        }
+        for offset in 0..valid.len() {
+            for value in [0, 1, 127, 255] {
+                let mut mutated = valid.clone();
+                mutated[offset] = value;
+                let _ = Bin::from_bytes(&mutated);
+            }
+        }
+    }
+}
+
+#[test]
 fn parsed_structure_matches_expectations() {
     let bin = Bin::from_bytes(&sample_prop()).expect("parse");
     assert!(!bin.is_patch);

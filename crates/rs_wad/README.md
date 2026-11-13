@@ -189,6 +189,11 @@ sample archives).
 
 ## Tests / fixtures
 
-Real game archives are gitignored. Drop `.wad.client` files into `../../sample-files/` (workspace
-`sample-files/`); `tests/real_files.rs` skips automatically when a sample is absent. See
+Both full and TOC-only readers check that the declared chunk table fits in the
+remaining stream before allocating its entries. TOC-only mounts still leave payloads
+on disk. See the [test and performance baseline](../../docs/testing.md#wad-performance-baseline)
+for synthetic mutation checks and the asset-free lookup/extraction benchmark.
+
+Real game archives are gitignored. Drop `.wad.client` files into `../../Sample-Files/` (workspace
+`Sample-Files/`); `tests/real_files.rs` skips automatically when a sample is absent. See
 `docs/real-files-report.md` for measured results and cross-library comparison.

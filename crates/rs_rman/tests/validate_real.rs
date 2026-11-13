@@ -16,7 +16,7 @@ use rs_rman::{Rman, validate_chunk};
 #[cfg(feature = "verify")]
 fn sample(name: &str) -> Option<PathBuf> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../sample-files")
+        .join("../../Sample-Files")
         .join(name);
     if path.is_file() { Some(path) } else { None }
 }

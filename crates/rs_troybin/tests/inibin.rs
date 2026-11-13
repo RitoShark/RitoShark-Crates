@@ -7,7 +7,7 @@ use rs_troybin::{
 };
 
 fn sample_dir() -> Option<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sample-files");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Sample-Files");
     dir.is_dir().then_some(dir)
 }
 
@@ -24,7 +24,7 @@ const INIBIN_FILES: &[&str] = &[
 #[test]
 fn real_files_round_trip_byte_exact_through_inibin_api() {
     let Some(dir) = sample_dir() else {
-        eprintln!("sample-files directory missing; skipping real inibin tests");
+        eprintln!("Sample-Files directory missing; skipping real inibin tests");
         return;
     };
 

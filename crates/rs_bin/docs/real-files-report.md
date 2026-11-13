@@ -5,7 +5,7 @@ the canonical/oracle implementations (ritobin C++, LeagueToolkit C#, pyritofile 
 
 ## Step 2 — real-file results
 
-Samples live in `RitoShark-Crates/sample-files/` (gitignored). Tests in
+Samples live in `RitoShark-Crates/Sample-Files/` (gitignored). Tests in
 `crates/rs_bin/tests/real_files.rs`.
 
 | File | Magic / version | Entries | Parses? | Byte-exact round-trip? | Text printer? |

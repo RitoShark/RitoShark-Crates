@@ -16,3 +16,7 @@ rs_hash = { workspace = true }
 zstd = { workspace = true }
 flate2 = { workspace = true }
 rayon = { workspace = true, optional = true }
+
+[[bench]]
+name = "selection"
+harness = false

@@ -169,7 +169,7 @@ clips, quaternion signs, random seeks, wide cache indices, subframe interpolatio
 hierarchy errors, invalid inputs and protected saves. V5 tests cover exact vector preservation,
 independent binary decoding, quaternion packing and palette boundaries.
 Python tests also evaluate the output with an independent channel-based decoder.
-Local game fixtures are gitignored under `../../sample-files/`; missing fixtures are skipped.
+Local game fixtures are gitignored under `../../Sample-Files/`; missing fixtures are skipped.
 See the [fixture report](docs/real-files-report.md) for coverage and its limits.
 
 ## References
