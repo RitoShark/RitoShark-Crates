@@ -17,6 +17,76 @@ fn tags(bnk: &Bnk) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn batch_replacement_preserves_real_container_metadata_and_other_media() {
+    for name in [
+        "aatrox_base_sfx_audio.bnk",
+        "bank_v134_audio.bnk",
+        "bank_v145_audio.bnk",
+    ] {
+        let Some(path) = sample(name) else {
+            eprintln!("skipping {name}: sample file missing");
+            continue;
+        };
+        let original = Bnk::from_path(path).unwrap();
+        let entries = original.wems();
+        assert!(entries.len() >= 2);
+        let updates = [
+            (entries[0].0, entries[1].1.to_vec()),
+            (entries[1].0, entries[0].1.to_vec()),
+        ];
+        let mut bank = original.clone();
+        bank.replace_wems(updates.clone()).unwrap();
+        let parsed = Bnk::from_bytes(&bank.to_bytes().unwrap()).unwrap();
+        assert_eq!(tags(&parsed), tags(&original));
+        for (before, after) in original.sections.iter().zip(&parsed.sections) {
+            if !matches!(&before.tag, b"DIDX" | b"DATA") {
+                assert_eq!(before.data, after.data);
+            }
+        }
+        for &(id, bytes) in &entries {
+            let expected = updates
+                .iter()
+                .find(|(key, _)| *key == id)
+                .map_or(bytes, |(_, bytes)| bytes.as_slice());
+            assert_eq!(parsed.wem(id).unwrap(), expected, "{name}: {id}");
+        }
+        let mut no_op = original.clone();
+        no_op
+            .replace_wems(entries.iter().map(|&(id, data)| (id, data.to_vec())))
+            .unwrap();
+        assert_eq!(no_op.to_bytes().unwrap(), original.to_bytes().unwrap());
+    }
+    let name = "audio_package_37.wpk";
+    let Some(path) = sample(name) else {
+        eprintln!("skipping {name}: sample file missing");
+        return;
+    };
+    let original = Wpk::from_path(path).unwrap();
+    assert!(original.entries.len() >= 2);
+    let first = original.entries[0].id().unwrap();
+    let second = original.entries[1].id().unwrap();
+    let mut package = original.clone();
+    package
+        .replace_wems([
+            (first, original.entries[1].data.clone()),
+            (second, original.entries[0].data.clone()),
+        ])
+        .unwrap();
+    let parsed = Wpk::from_bytes(&package.to_bytes().unwrap()).unwrap();
+    assert_eq!(parsed, package);
+    assert_eq!(parsed.dead_slots, original.dead_slots);
+    assert_eq!(parsed.version, original.version);
+    assert_eq!(parsed.entries[0].data, original.entries[1].data);
+    assert_eq!(parsed.entries[1].data, original.entries[0].data);
+    for (index, (before, after)) in original.entries.iter().zip(&parsed.entries).enumerate() {
+        assert_eq!(before.name, after.name);
+        if index >= 2 {
+            assert_eq!(before, after);
+        }
+    }
+}
+
 fn check_round_trip(name: &str) {
     let Some(path) = sample(name) else {
         eprintln!("skipping {name}: sample file missing");

@@ -124,6 +124,40 @@ bank.to_path("champion_vo_audio.bnk")?;
 meaning is not established carries a value the engine already accepts. Use `encode_vorbis` when
 there is no reference to clone, and `encode_pcm` when size does not matter and simplicity does.
 
+### Replace several sounds in one transaction
+
+```rust,no_run
+use rs_audio::Bnk;
+use rs_io::{Parse, Serialize};
+
+let mut bank = Bnk::from_path("champion_sfx_audio.bnk")?;
+bank.replace_wems([
+    (225608650, std::fs::read("first.wem")?),
+    (123456789, std::fs::read("second.wem")?),
+])?;
+bank.to_path("edited.bnk")?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`Bnk::replace_wems` validates the complete batch before changing the bank, then
+rebuilds DIDX/DATA once. It borrows unchanged payloads instead of cloning every WEM
+into a temporary owned list. `Wpk::replace_wems` provides the same transaction rule
+while preserving entry names, ordering, version, and dead slots. These are Rust
+library APIs; application batch workflows and CLI/Python wrappers are not added.
+
+All requested IDs must already exist. A missing ID leaves the container unchanged.
+Repeated request IDs use the last supplied bytes, and duplicate IDs within a
+container target only the first match, consistent with `replace_wem`. Empty batches
+do nothing. A BNK batch whose final payloads are byte-identical preserves the original
+DIDX/DATA bytes, including unusual padding. Changed BNK media uses the existing
+16-byte alignment; unrelated sections remain verbatim and in order.
+
+Replacement accepts raw bytes without decoding or checking codec compatibility.
+Encode/validate audio before calling it. Nonempty BNK replacement rejects truncated
+or out-of-range DIDX entries, missing DIDX/DATA pairs, and duplicate media sections,
+so rebuilding cannot silently drop unreadable entries. The single-item BNK
+`replace_wem` uses this same checked path. Insert/remove behavior is unchanged.
+
 ### Find which sounds an event plays
 
 ```rust

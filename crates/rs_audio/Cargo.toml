@@ -19,3 +19,7 @@ ogg = { workspace = true }
 
 [dev-dependencies]
 ww2ogg = { workspace = true }
+
+[[bench]]
+name = "batch_replace"
+harness = false

@@ -65,6 +65,8 @@ jobs:
         run: ./scripts/test-corpus-runner.ps1
       - name: Smoke-test WAD benchmark (synthetic data only)
         run: cargo test -p rs_wad --bench selection --all-features --locked -- --test
+      - name: Smoke-test batch audio benchmark (synthetic data only)
+        run: cargo test -p rs_audio --bench batch_replace --locked -- --test
       - name: Test optional WAD parallel and RMAN verification features
         run: cargo test -p rs_wad -p rs_rman --all-features --locked
       - name: Check minimal facade

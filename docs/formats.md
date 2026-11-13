@@ -83,6 +83,7 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 
 - **Read / write:** **byte-exact** at the container level. `.bnk` preserves every section verbatim (including the `HIRC` event hierarchy), and `.wem` audio is extracted from `DIDX` / `DATA`.
 - **Audio:** WEM decoding to playable Ogg/WAV, PCM/Vorbis encoding, replacement and silence helpers are available.
+- **Batch replacement:** `Bnk::replace_wems` and `Wpk::replace_wems` validate all requested existing IDs before changing anything. BNK media is rebuilt once; unrelated sections and WPK names/slots survive. This Rust-only operation replaces payloads without adding/removing IDs or validating their codecs.
 - **Hierarchy:** supported HIRC objects expose event-to-WEM relationships; unknown/unsupported data stays opaque. This is not a complete Wwise authoring model. See [audio APIs and limits](../crates/rs_audio/README.md).
 - **CLI:** `rs_cli read`, `rs_cli audio extract`.
 

@@ -225,3 +225,24 @@ loading, or large-payload performance. No benchmark dependency or game data is n
 All fixture references use the workspace directory spelling `Sample-Files` so that
 the same paths also resolve on case-sensitive filesystems. This is path consistency,
 not a claim that Linux/macOS build or corpus coverage has been established.
+
+## Batch audio replacement
+
+`rs_audio/tests/batch_edit.rs` checks transactional failure, repeated request IDs,
+duplicate container IDs, untouched media/metadata, empty payloads, exact no-op padding
+preservation, and malformed BNK media tables. The existing required `real_files` target
+also swaps media in three pinned BNK fixtures (v134/v145) and one WPK, validating
+serialization, unrelated data, names, and slots. It needs no new fixture files.
+
+```powershell
+cargo test -p rs_audio --lib --test batch_edit --test real_files --locked
+cargo bench -p rs_audio --bench batch_replace --locked
+cargo test -p rs_audio --bench batch_replace --locked -- --test
+```
+
+The synthetic benchmark replaces all payloads in 32/128/512-entry banks with 4 KiB
+stored byte buffers. It compares repeated `replace_wem` calls against one
+`replace_wems` call and verifies identical results. Setup/cloning and result disposal
+are outside the timer. The output averages ten operations per method; CI runs one
+smoke iteration without a timing threshold. This measures container edits only,
+not audio encoding, disk saves, WPK behavior, or general real-bank performance.

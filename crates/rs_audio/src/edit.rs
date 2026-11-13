@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::bnk::{Bnk, BnkSection};
 use crate::error::{Error, Result};
 use crate::wem::{PcmAudio, Wem, WemCodec, encode_pcm, encode_vorbis_like};
@@ -14,6 +16,35 @@ const DATA_ALIGN: usize = 16;
 /** How much silence [`Bnk::silence_wem`] and [`Wpk::silence_wem`] write. A few milliseconds is
 enough to mute a sound while leaving a real, decodable stream in place. */
 const SILENCE_FRAMES: usize = 1024;
+
+fn media_sections<'a>(
+    entries: impl IntoIterator<Item = (u32, &'a [u8])>,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    let mut index = Vec::new();
+    let mut blob = Vec::new();
+    for (id, bytes) in entries {
+        let offset = blob
+            .len()
+            .checked_add(DATA_ALIGN - 1)
+            .map(|size| size / DATA_ALIGN * DATA_ALIGN)
+            .ok_or(Error::Wem("DATA section size overflow"))?;
+        let end = offset
+            .checked_add(bytes.len())
+            .filter(|&size| size <= u32::MAX as usize)
+            .ok_or(Error::Wem("DATA section is larger than 4 GiB"))?;
+        if index.len() > u32::MAX as usize - 12 {
+            return Err(Error::Wem("DIDX section is larger than 4 GiB"));
+        }
+        blob.try_reserve(end - blob.len())
+            .map_err(std::io::Error::other)?;
+        blob.resize(offset, 0);
+        blob.extend_from_slice(bytes);
+        index.extend_from_slice(&id.to_le_bytes());
+        index.extend_from_slice(&(offset as u32).to_le_bytes());
+        index.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    }
+    Ok((index, blob))
+}
 
 /** Builds a replacement stream that is silent but keeps the original's rate, channel count **and
 codec**, so whatever the engine expects to mix still lines up.
@@ -54,13 +85,70 @@ impl Bnk {
     its version and bank id, and the object hierarchy and every unknown section pass through
     untouched. Only DIDX and DATA are rewritten, because only they changed. */
     pub fn replace_wem(&mut self, id: u32, bytes: Vec<u8>) -> Result<()> {
-        let mut entries = self.owned_wems();
-        let slot = entries
-            .iter_mut()
-            .find(|(k, _)| *k == id)
-            .ok_or(Error::NoSuchWem(id))?;
-        slot.1 = bytes;
-        self.set_wems(entries)
+        self.replace_wems([(id, bytes)])
+    }
+
+    /** Replaces existing payloads in one transaction and rebuilds DIDX/DATA once. Any missing
+    id or invalid media layout leaves the bank unchanged. Repeated request ids use the last
+    payload; duplicate ids in the bank target the first entry, matching `replace_wem`.
+    Empty or byte-identical batches preserve the original sections, including padding. */
+    pub fn replace_wems(
+        &mut self,
+        replacements: impl IntoIterator<Item = (u32, Vec<u8>)>,
+    ) -> Result<()> {
+        let mut replacements = replacements.into_iter().peekable();
+        if replacements.peek().is_none() {
+            return Ok(());
+        }
+        let entries = self.checked_wems()?;
+        let mut positions = HashMap::with_capacity(entries.len());
+        for (position, &(id, _)) in entries.iter().enumerate() {
+            positions.entry(id).or_insert(position);
+        }
+        let mut updates = HashMap::new();
+        for (id, bytes) in replacements {
+            let position = *positions.get(&id).ok_or(Error::NoSuchWem(id))?;
+            updates.insert(position, bytes);
+        }
+        if updates
+            .iter()
+            .all(|(&position, bytes)| entries[position].1 == bytes)
+        {
+            return Ok(());
+        }
+        let (index, blob) =
+            media_sections(entries.iter().enumerate().map(|(position, &(id, bytes))| {
+                (id, updates.get(&position).map_or(bytes, Vec::as_slice))
+            }))?;
+        self.write_section(DIDX, index);
+        self.write_section(DATA, blob);
+        Ok(())
+    }
+
+    fn checked_wems(&self) -> Result<Vec<(u32, &[u8])>> {
+        let index_count = self
+            .sections
+            .iter()
+            .filter(|section| section.tag == DIDX)
+            .count();
+        let data_count = self
+            .sections
+            .iter()
+            .filter(|section| section.tag == DATA)
+            .count();
+        if index_count > 1 || data_count > 1 {
+            return Err(Error::Unsupported("editing duplicate DIDX/DATA sections"));
+        }
+        if index_count != data_count {
+            return Err(Error::Truncated);
+        }
+        let entries = self.wems();
+        if let Some(section) = self.sections.iter().find(|section| section.tag == DIDX)
+            && (!section.data.len().is_multiple_of(12) || entries.len() != section.data.len() / 12)
+        {
+            return Err(Error::Truncated);
+        }
+        Ok(entries)
     }
 
     /** Replaces a sound with silence at its original sample rate and channel count.
@@ -117,26 +205,8 @@ impl Bnk {
             return Ok(());
         }
 
-        let mut index = Vec::with_capacity(entries.len() * 12);
-        let mut blob = Vec::new();
-
-        for (id, bytes) in &entries {
-            let offset = blob.len().next_multiple_of(DATA_ALIGN);
-            blob.resize(offset, 0);
-
-            let length: u32 = bytes
-                .len()
-                .try_into()
-                .map_err(|_| Error::Wem("embedded wem is larger than 4 GiB"))?;
-            let offset32: u32 = offset
-                .try_into()
-                .map_err(|_| Error::Wem("DATA section is larger than 4 GiB"))?;
-
-            index.extend_from_slice(&id.to_le_bytes());
-            index.extend_from_slice(&offset32.to_le_bytes());
-            index.extend_from_slice(&length.to_le_bytes());
-            blob.extend_from_slice(bytes);
-        }
+        let (index, blob) =
+            media_sections(entries.iter().map(|(id, bytes)| (*id, bytes.as_slice())))?;
 
         self.write_section(DIDX, index);
         self.write_section(DATA, blob);
@@ -158,6 +228,34 @@ impl Bnk {
 }
 
 impl Wpk {
+    /** Replaces existing payloads atomically, keeping names, entry order, and dead slots.
+    Missing ids leave the package unchanged. Repeated request ids use the last payload;
+    duplicate numeric names target the first matching entry, as with `replace_wem`. */
+    pub fn replace_wems(
+        &mut self,
+        replacements: impl IntoIterator<Item = (u32, Vec<u8>)>,
+    ) -> Result<()> {
+        let mut replacements = replacements.into_iter().peekable();
+        if replacements.peek().is_none() {
+            return Ok(());
+        }
+        let mut positions = HashMap::with_capacity(self.entries.len());
+        for (position, entry) in self.entries.iter().enumerate() {
+            if let Some(id) = entry.id() {
+                positions.entry(id).or_insert(position);
+            }
+        }
+        let mut updates = HashMap::new();
+        for (id, bytes) in replacements {
+            let position = *positions.get(&id).ok_or(Error::NoSuchWem(id))?;
+            updates.insert(position, bytes);
+        }
+        for (position, bytes) in updates {
+            self.entries[position].data = bytes;
+        }
+        Ok(())
+    }
+
     /** Swaps one entry's payload, keeping its name, its position in the offset table and every
     other entry untouched. */
     pub fn replace_wem(&mut self, id: u32, bytes: Vec<u8>) -> Result<()> {
