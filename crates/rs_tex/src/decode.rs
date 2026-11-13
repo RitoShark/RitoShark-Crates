@@ -3,6 +3,40 @@ use image::RgbaImage;
 use crate::error::{Error, Result};
 use crate::texture::{TexFormat, Texture};
 
+pub(crate) fn surface_bytes(width: u32, height: u32, block: usize, bytes: usize) -> Result<usize> {
+    if width == 0 || height == 0 {
+        return Err(Error::Decode("texture dimensions must be nonzero".into()));
+    }
+    (width as usize)
+        .div_ceil(block)
+        .checked_mul((height as usize).div_ceil(block))
+        .and_then(|count| count.checked_mul(bytes))
+        .ok_or_else(|| Error::Decode("texture surface size overflow".into()))
+}
+
+pub(crate) fn validate_surface(
+    width: u32,
+    height: u32,
+    block: usize,
+    bytes: usize,
+    data: &[u8],
+) -> Result<usize> {
+    let expected = surface_bytes(width, height, block, bytes)?;
+    if data.len() < expected {
+        return Err(Error::Decode(format!(
+            "texture payload too small: have {}, need {expected}",
+            data.len()
+        )));
+    }
+    let output_bytes = surface_bytes(width, height, 1, 4)?;
+    if output_bytes > isize::MAX as usize {
+        return Err(Error::Decode(
+            "texture image exceeds allocation limits".into(),
+        ));
+    }
+    Ok(output_bytes / 4)
+}
+
 /// Reorder a decoded BGRA `u32` buffer into an RGBA8 image of the given size.
 fn bgra_u32_to_rgba_image(width: u32, height: u32, pixels: &[u32]) -> Result<RgbaImage> {
     let mut rgba = Vec::with_capacity(pixels.len() * 4);
@@ -127,7 +161,22 @@ pub(crate) fn decode_block_format(
     data: &[u8],
 ) -> Result<RgbaImage> {
     let (w, h) = (width as usize, height as usize);
-    let mut out = vec![0u32; w.max(1) * h.max(1)];
+    let pixels = validate_surface(
+        width,
+        height,
+        format.block_size(),
+        format.bytes_per_block(),
+        data,
+    )?;
+    match format {
+        TexFormat::Bgra8 => return bgra_bytes_to_rgba_image(width, height, data),
+        TexFormat::Rgba16Snorm => return rgba16_snorm_to_rgba_image(width, height, data),
+        _ => {}
+    }
+    let mut out = Vec::new();
+    out.try_reserve_exact(pixels)
+        .map_err(|e| Error::Decode(format!("texture image allocation failed: {e}")))?;
+    out.resize(pixels, 0u32);
     let res: core::result::Result<(), &'static str> = match format {
         // BC1 can encode 1-bit punch-through alpha (when a block's color0 <=
         // color1, the 4th palette entry is TRANSPARENT, not opaque black).

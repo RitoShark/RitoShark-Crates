@@ -43,6 +43,19 @@ of every TEX in that archive or the installation.
 
 ## Library behavior
 
+### Expanded live check
+
+A follow-up payload scan inspected all 177 format-23 entries found in Map22 (161),
+Map12 (5), Map30 (10), and Map453 (1). Every file has the same header, zero-filled
+payload, and SHA-256 listed above. These are additional path entries, not additional
+distinct layouts. Two chunks larger than 64 MiB were skipped across those archives;
+there were no chunk-read errors. Extracts remain ignored under `Sample-Files/tex-remaining`.
+This closes the earlier header-only limitation for these 177 entries but supplies
+no new evidence for pixel interpretation. The combined five-map sample contains 203
+identical entries; it is not an exhaustive search of the installed game.
+
+### Current API
+
 `TextureHeader` exposes `tex_format_code`, `tex_depth`, `tex_resource_type`, and
 `tex_flags` as raw `Option<u8>` fields. All four are present for TEX and absent for
 DDS. Inspection still reads only the header, preserves unknown values, and reports

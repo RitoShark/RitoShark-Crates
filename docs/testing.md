@@ -184,3 +184,11 @@ surplus bytes, allocation preflight, and explicit largest-mip extraction. The
 [audit results and coverage limits](../crates/rs_tex/docs/mip-layout-audit.md).
 Keep adding small synthetic reproductions alongside fixes; reserve real fixtures
 for compatibility questions that synthetic data cannot answer.
+
+Texture decode-boundary tests cover zero/extreme dimensions, short encoded payloads,
+invalid DDS mip/array counts, exact rectangular mip offsets, DX10 cube arrays, and
+single-surface DDS-to-TEX adoption. A deterministic sweep exercises every truncated
+prefix of a synthetic DDS plus 592 single-byte header mutations through the public
+decoders. These tests run in ordinary CI without assets or a fuzzing toolchain; they
+are bounded regression checks, not a claim of coverage-guided fuzzing or exhaustive
+malformed-input safety.

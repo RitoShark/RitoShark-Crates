@@ -8,7 +8,7 @@ into RGBA, while uncompressed BGRA8/RGBA16_SNORM are reordered directly, all yie
 `RgbaImage`. The encoder block-compresses an `RgbaImage` into BC1/BC3/BC5/BC7, generating a
 Lanczos-3 mip chain on request, to produce a valid `.tex`. DDS parsing reads the header, resolves
 the pixel format, and decodes every surface (including all six cubemap faces and array layers);
-the DDS writer emits either an uncompressed RGBA8 surface or a block-compressed BC1/BC3/BC5/BC7
+the DDS writer emits either an uncompressed RGBA8 surface or a block-compressed BC1/BC3
 surface.
 */
 

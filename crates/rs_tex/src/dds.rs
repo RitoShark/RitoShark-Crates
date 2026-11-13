@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use ddsfile::{Caps2, D3DFormat, Dds, DxgiFormat, MiscFlag, NewD3dParams};
+use ddsfile::{Caps2, D3D10ResourceDimension, D3DFormat, Dds, DxgiFormat, MiscFlag, NewD3dParams};
 use image::RgbaImage;
 
-use crate::decode::{decode_bc5_snorm, decode_block_format};
+use crate::decode::{decode_bc5_snorm, decode_block_format, surface_bytes, validate_surface};
 use crate::error::{Error, Result};
 use crate::texture::{TexFormat, Texture};
 
@@ -18,6 +18,62 @@ enum DdsKind {
     Bc7,
     Bgra8,
     Rgba8,
+}
+
+impl DdsKind {
+    fn block_layout(self) -> (usize, usize) {
+        match self {
+            Self::Bc1 => (4, 8),
+            Self::Bc2 | Self::Bc3 | Self::Bc5 | Self::Bc5Snorm | Self::Bc7 => (4, 16),
+            Self::Bgra8 | Self::Rgba8 => (1, 4),
+        }
+    }
+}
+
+fn surface_layout(dds: &Dds) -> Result<(usize, usize, u32)> {
+    let (width, height) = (dds.get_width(), dds.get_height());
+    if dds.header.depth.unwrap_or(1) > 1 || dds.header.caps2.contains(Caps2::VOLUME) {
+        return Err(Error::UnsupportedFormat("DDS volume textures".into()));
+    }
+    if let Some(header) = &dds.header10 {
+        match header.resource_dimension {
+            D3D10ResourceDimension::Texture2D => {}
+            D3D10ResourceDimension::Texture1D if height == 1 => {}
+            other => return Err(Error::UnsupportedFormat(format!("DDS resource {other:?}"))),
+        }
+    }
+    let (block, bytes) = classify(dds)?.block_layout();
+    let base = surface_bytes(width, height, block, bytes)?;
+    let levels = dds.get_num_mipmap_levels().max(1);
+    let max_levels = u32::BITS - width.max(height).leading_zeros();
+    if levels > max_levels {
+        return Err(Error::Decode(format!(
+            "DDS mip count {levels} exceeds {max_levels}"
+        )));
+    }
+    let mut stride = 0usize;
+    for level in 0..levels {
+        let size = surface_bytes(
+            (width >> level).max(1),
+            (height >> level).max(1),
+            block,
+            bytes,
+        )?;
+        stride = stride
+            .checked_add(size)
+            .ok_or_else(|| Error::Decode("DDS mip-chain size overflow".into()))?;
+    }
+    let faces = surface_count(dds)?;
+    let expected = stride
+        .checked_mul(faces as usize)
+        .ok_or_else(|| Error::Decode("DDS array size overflow".into()))?;
+    if dds.data.len() < expected {
+        return Err(Error::Decode(format!(
+            "DDS payload too small: have {}, need {expected}",
+            dds.data.len()
+        )));
+    }
+    Ok((base, stride, faces))
 }
 
 fn classify(dds: &Dds) -> Result<DdsKind> {
@@ -70,7 +126,10 @@ fn decode_dds_surface(dds: &Dds, data: &[u8]) -> Result<RgbaImage> {
     let height = dds.get_height();
     let (w, h) = (width as usize, height as usize);
 
-    match classify(dds)? {
+    let kind = classify(dds)?;
+    let (block, bytes) = kind.block_layout();
+    let pixels = validate_surface(width, height, block, bytes, data)?;
+    match kind {
         DdsKind::Bc1 => decode_block_format(TexFormat::Bc1, width, height, data),
         DdsKind::Bc3 => decode_block_format(TexFormat::Bc3, width, height, data),
         DdsKind::Bc5 => decode_block_format(TexFormat::Bc5, width, height, data),
@@ -88,17 +147,15 @@ fn decode_dds_surface(dds: &Dds, data: &[u8]) -> Result<RgbaImage> {
                 .ok_or_else(|| Error::Decode("rgba8 dds buffer mismatch".into()))
         }
         DdsKind::Bc2 => {
-            let mut out = vec![0u32; w.max(1) * h.max(1)];
+            let mut out = Vec::new();
+            out.try_reserve_exact(pixels)
+                .map_err(|e| Error::Decode(format!("DDS image allocation failed: {e}")))?;
+            out.resize(pixels, 0u32);
             texture2ddecoder::decode_bc2(data, w, h, &mut out)
                 .map_err(|e| Error::Decode(e.to_string()))?;
             u32_bgra_to_image(width, height, &out)
         }
-        DdsKind::Bc7 => {
-            let mut out = vec![0u32; w.max(1) * h.max(1)];
-            texture2ddecoder::decode_bc7(data, w, h, &mut out)
-                .map_err(|e| Error::Decode(e.to_string()))?;
-            u32_bgra_to_image(width, height, &out)
-        }
+        DdsKind::Bc7 => decode_block_format(TexFormat::Bc7, width, height, data),
     }
 }
 
@@ -114,10 +171,17 @@ fn u32_bgra_to_image(width: u32, height: u32, pixels: &[u32]) -> Result<RgbaImag
 
 impl Texture {
     /// Parse a DDS buffer into a [`Texture`], mapping its pixel format onto [`TexFormat`] and
-    /// carrying the main image data as the single full-resolution mip. Formats with no League
-    /// `.tex` equivalent (BC2, BC5) are rejected; decode those with [`read_dds_bytes`].
+    /// carrying only the main image data as the single full-resolution mip. Arrays, cubemaps,
+    /// volumes, and formats without supported adoption (BC2, BC5) are rejected. Lower mips are
+    /// validated then discarded; use [`read_dds_faces_bytes`] to decode multiple surfaces.
     pub fn from_dds_bytes(bytes: &[u8]) -> Result<Texture> {
         let dds = Dds::read(bytes)?;
+        let (base, _, faces) = surface_layout(&dds)?;
+        if faces != 1 {
+            return Err(Error::UnsupportedFormat(
+                "DDS-to-TEX adoption requires one surface".into(),
+            ));
+        }
         let width = dds.get_width();
         let height = dds.get_height();
         let format = match classify(&dds)? {
@@ -131,7 +195,12 @@ impl Texture {
                 )));
             }
         };
-        Ok(Texture::new(width, height, format, dds.data))
+        Ok(Texture::new(
+            width,
+            height,
+            format,
+            dds.data[..base].to_vec(),
+        ))
     }
 
     /// Serialize this texture's full-resolution mip into a standalone `.dds` byte buffer. The
@@ -265,38 +334,38 @@ pub fn save_dds(img: &RgbaImage, path: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
-fn surface_count(dds: &Dds) -> u32 {
-    let layers = dds.get_num_array_layers().max(1);
+fn surface_count(dds: &Dds) -> Result<u32> {
+    let layers = dds.get_num_array_layers();
+    if layers == 0 {
+        return Err(Error::Decode("DDS array size must be nonzero".into()));
+    }
     let dx10_cube = dds
         .header10
         .as_ref()
         .is_some_and(|h| h.misc_flag.contains(MiscFlag::TEXTURECUBE));
     // A DX10 cubemap counts its six faces as ONE array slot, so the header's layer
     // count is a sixth of the surfaces actually stored.
-    if dx10_cube { layers * 6 } else { layers }
+    if dx10_cube {
+        layers
+            .checked_mul(6)
+            .ok_or_else(|| Error::Decode("DDS cube array size overflow".into()))
+    } else {
+        Ok(layers)
+    }
 }
 
 /// Decode every surface of a DDS buffer to RGBA8: a 2D texture yields one image; a cubemap
 /// yields its six faces (+X, -X, +Y, -Y, +Z, -Z) and an array texture yields one image per
-/// layer. The full-resolution mip of each layer is decoded.
+/// layer. The full-resolution mip of each layer is decoded after validating all declared mip
+/// payloads. Volume textures are unsupported. Extra trailing bytes do not change surface offsets.
 pub fn read_dds_faces_bytes(bytes: &[u8]) -> Result<Vec<RgbaImage>> {
     let dds = Dds::read(bytes)?;
-    let faces = surface_count(&dds);
-    let stride = dds.data.len() / faces.max(1) as usize;
+    let (base, stride, faces) = surface_layout(&dds)?;
 
     let mut images = Vec::with_capacity(faces as usize);
     for face in 0..faces {
-        let data = match dds.get_data(face) {
-            Ok(data) => data,
-            // The DX10 face indices above the array count are not addressable through the
-            // header; the payload still holds them back to back at an even stride.
-            Err(_) => {
-                let start = stride * face as usize;
-                dds.data
-                    .get(start..start + stride)
-                    .ok_or_else(|| Error::Decode(format!("dds face {face} out of bounds")))?
-            }
-        };
+        let start = stride * face as usize;
+        let data = &dds.data[start..start + base];
         images.push(decode_dds_surface(&dds, data)?);
     }
     Ok(images)
@@ -326,7 +395,7 @@ pub fn dds_is_cubemap(bytes: &[u8]) -> Result<bool> {
 /// texture, 1 for an ordinary 2D texture. Anything above 1 cannot be represented by a single
 /// image, so callers that edit pixels in place must refuse it.
 pub fn dds_surface_count(bytes: &[u8]) -> Result<u32> {
-    Ok(surface_count(&Dds::read(bytes)?))
+    surface_count(&Dds::read(bytes)?)
 }
 
 /// Decode a DDS byte buffer straight to an RGBA8 image, including formats with no `.tex`
@@ -334,10 +403,8 @@ pub fn dds_surface_count(bytes: &[u8]) -> Result<u32> {
 /// the first surface; use [`read_dds_faces_bytes`] for all of them.
 pub fn read_dds_bytes(bytes: &[u8]) -> Result<RgbaImage> {
     let dds = Dds::read(bytes)?;
-    let data = dds
-        .get_data(0)
-        .map_err(|e| Error::Decode(format!("dds layer 0: {e}")))?;
-    decode_dds_surface(&dds, data)
+    let (base, _, _) = surface_layout(&dds)?;
+    decode_dds_surface(&dds, &dds.data[..base])
 }
 
 /// Decode a DDS file at `path` to an RGBA8 image (first surface only).

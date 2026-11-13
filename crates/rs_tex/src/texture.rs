@@ -57,12 +57,8 @@ impl TexFormat {
     /// Number of bytes one encoded block (or, for uncompressed formats, one pixel) occupies.
     pub fn bytes_per_block(self) -> usize {
         match self {
-            TexFormat::Etc1 | TexFormat::Bc1 | TexFormat::Bc1Alt => 8,
-            TexFormat::Etc2Eac
-            | TexFormat::Etc2
-            | TexFormat::Bc3
-            | TexFormat::Bc7
-            | TexFormat::Bc5 => 16,
+            TexFormat::Etc1 | TexFormat::Etc2 | TexFormat::Bc1 | TexFormat::Bc1Alt => 8,
+            TexFormat::Etc2Eac | TexFormat::Bc3 | TexFormat::Bc7 | TexFormat::Bc5 => 16,
             TexFormat::Bgra8 => 4,
             TexFormat::Rgba16Snorm => 8,
         }

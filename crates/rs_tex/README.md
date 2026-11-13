@@ -141,6 +141,15 @@ Parsed via `ddsfile`. The pixel format is resolved from either the DXGI header (
 R8G8B8A8, B8G8R8A8/X8) or the legacy D3D9 `FourCC`/mask header (DXT1–5, A8R8G8B8, A8B8G8R8).
 The main image is decoded to RGBA8.
 
+Decoders validate nonzero dimensions, checked byte counts, and sufficient encoded
+payload before allocating image buffers. DDS layer offsets are calculated from each
+mip's dimensions and block rounding, including rectangular and partial-block images;
+they are not inferred by dividing the file length. All declared mip/layer bytes must
+be present, even when reading only the first surface. Extra trailing bytes are ignored
+for decoding. Impossible mip counts, empty/overflowing arrays, and volume textures
+return errors. Supported uncompressed DDS layouts are tightly packed 32-bit pixels;
+header pitch/linear-size hints do not override the calculated layout.
+
 `BC5_SNorm` uses signed endpoints and interpolation through `bcdec_rs`; `BC5_UNorm`
 and `BC5_Typeless` retain unsigned decoding. Both produce an opaque normal-map preview:
 R/G contain the two channels mapped to display bytes, and blue reconstructs positive Z.
@@ -204,7 +213,8 @@ Key items:
   `Texture::to_dds_bytes_bc` / `Texture::save_dds_bc` — write a block-compressed
   (BC1/BC3) `.dds`.
 - `Texture::from_dds_bytes` — adopt a DDS payload as a `Texture` when its format maps onto a
-  `.tex` format.
+  `.tex` format. This requires one surface, validates the declared mip chain, and retains
+  only the full-resolution mip. Arrays, cubemaps, and volumes are rejected.
 
 ## Encoding notes
 
