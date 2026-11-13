@@ -310,7 +310,7 @@ rs_cli wad extract -o out/ -x "characters/aatrox" --hashes hashes/ champion.wad.
 
 ### `tex info`
 
-Print texture metadata.
+Print TEX or DDS header metadata without loading or decoding pixel data.
 
 ```
 rs_cli tex info [--json] <INPUT>
@@ -318,11 +318,15 @@ rs_cli tex info [--json] <INPUT>
 
 | Argument / flag | Description |
 |----------------|-------------|
-| `<INPUT>` | `.tex` file to inspect |
-| `--json` | Output `{"width", "height", "format", "mips"}` as JSON |
+| `<INPUT>` | TEX or DDS file to inspect (detected by magic) |
+| `--json` | Output `width`, `height`, `format`, `mips`, `container`, `has_mipmaps`, `block_compressed`, `unknown_format`, and `dxgi_format` |
 
-Without `--json`, prints one `key: value` line per field. `format` is the internal format name
-(e.g. `Bc3`, `Bc1`, `Rgba8`).
+Without `--json`, prints dimensions, format, mip count, container, and mip flag as
+`key: value` lines. `format` is a TEX/DXGI name, DDS FourCC, or an unknown-code label.
+`mips` is `null` in JSON (`unknown` in text) for mipmapped TEX: the header stores a
+flag but no count. Non-mipmapped TEX reports one; DDS reports its declared count,
+defaulting to one. This differs from the previous TEX-only command, which parsed
+the payload to count mip blocks. Successful inspection does not validate pixel data.
 
 **Example**
 

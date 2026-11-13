@@ -33,20 +33,31 @@ fn parse_format(name: &str) -> Result<EncodeFormat> {
 
 pub fn info(input: &Path, json: bool) -> Result<()> {
     use ritoshark::prelude::*;
-    let tex = ritoshark::tex::Texture::from_path(input)?;
+    let tex = ritoshark::tex::TextureHeader::from_path(input)?;
     if json {
         println!(
             "{}",
             serde_json::json!({
                 "width": tex.width, "height": tex.height,
-                "format": format!("{:?}", tex.format), "mips": tex.mips.len(),
+                "format": tex.format, "mips": tex.mip_count,
+                "container": format!("{:?}", tex.container),
+                "has_mipmaps": tex.has_mipmaps,
+                "block_compressed": tex.block_compressed,
+                "unknown_format": tex.unknown_format,
+                "dxgi_format": tex.dxgi_format,
             })
         );
     } else {
         println!("width: {}", tex.width);
         println!("height: {}", tex.height);
-        println!("format: {:?}", tex.format);
-        println!("mips: {}", tex.mips.len());
+        println!("format: {}", tex.format);
+        println!(
+            "mips: {}",
+            tex.mip_count
+                .map_or_else(|| "unknown".into(), |n| n.to_string())
+        );
+        println!("container: {:?}", tex.container);
+        println!("has_mipmaps: {}", tex.has_mipmaps);
     }
     Ok(())
 }

@@ -5,6 +5,43 @@ reads and writes `.dds` containers, decoding either to an `image::RgbaImage`. It
 `image::RgbaImage` into a valid BC1/BC3/BC5/BC7 `.tex` (with a generated mip chain) and serialize
 any decoded image to either an uncompressed or a block-compressed (BC1/BC3/BC5/BC7) `.dds`.
 
+## Header inspection
+
+```rust,no_run
+use rs_io::Parse;
+use rs_tex::TextureHeader;
+
+let header = TextureHeader::from_path("texture.dds")?;
+println!("{} x {}: {}", header.width, header.height, header.format);
+# Ok::<(), rs_tex::Error>(())
+```
+
+`TextureHeader::from_reader`, `from_bytes`, and `from_path` detect TEX or DDS by
+magic. They read only 12 bytes for TEX, 128 for legacy DDS, or 148 for DX10 DDS.
+The path method opens a file directly; it does not map or load the pixel payload.
+This API accepts a complete header with no payload, so success does not establish
+that the texture can be decoded or that its mip data is complete.
+
+| Field | Meaning |
+|---|---|
+| `container` | `TextureContainer::Tex` or `Dds` |
+| `width`, `height` | Declared dimensions |
+| `format` | Known TEX/DXGI name, DDS FourCC, or a label retaining an unknown format code |
+| `unknown_format` | This build cannot name/classify the declared format; not a decoder-support flag |
+| `block_compressed` | Recognized as block compressed; false is inconclusive when the format is unknown |
+| `has_mipmaps` | TEX header flag, or DDS count greater than one |
+| `mip_count` | `Some(1)` for non-mipmapped TEX; `None` for mipmapped TEX; declared DDS count, using one when absent or zero |
+| `dx10`, `dxgi_format` | Whether a DDS DX10 extension is present, and its raw format code |
+
+DDS structure sizes and the full DX10 extension length are checked. Format flags
+determine whether FourCC bytes are meaningful. Unknown format codes remain
+inspectable. Dimensions, surface topology, and payload validity are not validated
+by this metadata API. DDS layout references: [pixel format](https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-pixelformat)
+and [DX10 extension](https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-header-dxt10).
+
+`rs_cli tex info` uses this API for both containers. Its JSON `mips` value is `null`
+for a mipmapped TEX because the header alone does not establish the count.
+
 ## Formats
 
 ### `.tex` (League extended texture)
@@ -22,9 +59,11 @@ any decoded image to either an uncompressed or a block-compressed (BC1/BC3/BC5/B
 | 11     | 1    | has_mipmaps   | bool                                             |
 | 12     | …    | payload       | mip chain, **smallest mip first**, full-res last |
 
-When `has_mipmaps` is set and the format has a known block layout, the payload is a full
-mip chain stored smallest-to-largest; mip count is `floor(log2(max(w, h))) + 1`. Otherwise
-the payload is a single full-resolution image and is read to end-of-file.
+When `has_mipmaps` is set and the format has a known block layout, the current full
+reader assumes a smallest-to-largest chain with `floor(log2(max(w, h))) + 1` levels.
+The header itself stores no count. Non-square VFX chains reported by tools still need
+fixture-based investigation; use header inspection for metadata without relying on
+this assumption. Otherwise the full reader retains the remaining payload as one block.
 
 Supported `.tex` format bytes:
 

@@ -12,6 +12,7 @@ rs_io = { workspace = true }
 rs_math = { workspace = true }
 image = { workspace = true }
 ddsfile = "0.5"
+num-traits = { workspace = true }
 texture2ddecoder = "0.1"
 texpresso = "2.0.2"
 intel_tex_2 = "=0.4.0"

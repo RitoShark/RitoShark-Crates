@@ -41,6 +41,7 @@ bytemuck = { version = "1", features = ["derive"] }
 thiserror = "2"
 miette = { version = "7", features = ["fancy"] }
 num_enum = "0.7"
+num-traits = "0.2"
 rayon = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "webp"] }
 clap = { version = "4", features = ["derive"] }

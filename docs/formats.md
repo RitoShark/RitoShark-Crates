@@ -22,6 +22,7 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 ## `.tex`, `.dds` — textures — `rs_tex`
 
 - **`.tex` read / write:** **byte-exact**.
+- **Header inspection:** `TextureHeader` reads TEX/DDS dimensions and declared format without reading pixel data, including unknown formats. A mipmapped TEX has no header-level count; `mip_count` is `None`. Metadata success does not validate the payload. See [header inspection](../crates/rs_tex/README.md#header-inspection).
 - **Decode:** BC1–BC7, ETC1 / ETC2 / ETC2-EAC, RGBA8 / BGRA8, RGBA16_SNORM → `image::RgbaImage`. Cubemaps and multi-surface DDS decode all faces.
 - **Encode:** BC1 / BC3 / BC5 (pure-Rust) and BC7, with full mip-chain generation; writes both `.tex` and compressed or uncompressed `.dds`.
 - **Limits:** no ETC encoder (none exists in pure Rust), no RGBA16_SNORM encode; the DDS writer re-compresses rather than copying original blocks.

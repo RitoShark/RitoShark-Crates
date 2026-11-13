@@ -16,6 +16,7 @@ mod dds;
 mod decode;
 mod encode;
 mod error;
+mod header;
 mod read;
 mod texture;
 mod write;
@@ -25,5 +26,6 @@ pub use dds::{
     read_dds_faces_bytes, save_dds, save_dds_bc, write_dds_bytes, write_dds_bytes_bc,
 };
 pub use error::{Error, Result};
+pub use header::{TextureContainer, TextureHeader};
 pub use read::TEX_MAGIC;
 pub use texture::{TexFormat, Texture};
