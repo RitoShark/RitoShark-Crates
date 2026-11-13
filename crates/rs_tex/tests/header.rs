@@ -97,6 +97,43 @@ fn unknown_formats_remain_inspectable() {
 }
 
 #[test]
+fn tex_raw_fields_survive_unknown_formats_and_flag_bits() {
+    let mut bytes = tex(23, false);
+    bytes[4..6].copy_from_slice(&64u16.to_le_bytes());
+    bytes[6..8].copy_from_slice(&64u16.to_le_bytes());
+    bytes[10] = 3;
+    let header = TextureHeader::from_bytes(&bytes).unwrap();
+    assert_eq!((header.width, header.height), (64, 64));
+    assert_eq!(header.tex_format_code, Some(23));
+    assert_eq!(header.tex_depth, Some(1));
+    assert_eq!(header.tex_resource_type, Some(3));
+    assert_eq!(header.tex_flags, Some(0));
+    assert!(header.unknown_format);
+    bytes[8] = 0;
+    bytes[10] = 255;
+    bytes[11] = 0xa5;
+    let header = TextureHeader::from_bytes(&bytes).unwrap();
+    assert_eq!(header.tex_depth, Some(0));
+    assert_eq!(header.tex_resource_type, Some(255));
+    assert_eq!(header.tex_flags, Some(0xa5));
+    assert!(matches!(
+        Texture::from_bytes(&bytes),
+        Err(rs_tex::Error::UnsupportedFormat(_))
+    ));
+}
+
+#[test]
+fn dds_headers_do_not_invent_tex_fields() {
+    for bytes in [dds(*b"DXT1"), dx10(98)] {
+        let header = TextureHeader::from_bytes(&bytes).unwrap();
+        assert_eq!(header.tex_format_code, None);
+        assert_eq!(header.tex_depth, None);
+        assert_eq!(header.tex_resource_type, None);
+        assert_eq!(header.tex_flags, None);
+    }
+}
+
+#[test]
 fn dds_reports_legacy_and_dx10_formats() {
     let header = TextureHeader::from_bytes(&dds(*b"DXT5")).unwrap();
     assert_eq!(header.container, TextureContainer::Dds);

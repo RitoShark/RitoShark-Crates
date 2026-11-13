@@ -63,7 +63,8 @@ World-space MAPGEO tests cover rotation/translation, non-uniform scale, shear,
 reflected winding, split half-float streams, and invalid export inputs. A fixture
 test exports the first model of each available map sample without changing its source.
 Texture-header tests verify bounded reads, all truncated header prefixes, DDS flags
-and structure sizes, and unknown format handling. CLI tests inspect TEX/DDS headers
+and structure sizes, unknown format handling, and raw TEX metadata retention,
+including the observed format-23 volume header. CLI tests inspect TEX/DDS headers
 without pixel payloads and verify that an unknown TEX mip count is JSON `null`.
 TEX mip-layout regressions cover valid rectangular chains, ambiguous short payloads,
 surplus bytes, allocation preflight, and explicit largest-mip extraction. The

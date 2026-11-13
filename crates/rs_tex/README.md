@@ -32,12 +32,22 @@ that the texture can be decoded or that its mip data is complete.
 | `has_mipmaps` | TEX header flag, or DDS count greater than one |
 | `mip_count` | `Some(1)` for non-mipmapped TEX; `None` for mipmapped TEX; declared DDS count, using one when absent or zero |
 | `dx10`, `dxgi_format` | Whether a DDS DX10 extension is present, and its raw format code |
+| `tex_format_code` | Raw TEX format byte, including unknown codes; `None` for DDS |
+| `tex_depth` | Raw TEX byte at offset 8, conventionally depth/reserved; no zero-to-one normalization; `None` for DDS |
+| `tex_resource_type` | Raw TEX resource byte at offset 10; `None` for DDS |
+| `tex_flags` | Raw TEX flag byte at offset 11, including unrecognized bits; `None` for DDS |
 
 DDS structure sizes and the full DX10 extension length are checked. Format flags
 determine whether FourCC bytes are meaningful. Unknown format codes remain
 inspectable. Dimensions, surface topology, and payload validity are not validated
 by this metadata API. DDS layout references: [pixel format](https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-pixelformat)
 and [DX10 extension](https://learn.microsoft.com/en-us/windows/win32/direct3ddds/dds-header-dxt10).
+
+For example, the [format-23 investigation](docs/format23-audit.md) found live files
+with `tex_depth = Some(1)` and `tex_resource_type = Some(3)`. These fields retain the
+declared bytes even when the format is unsupported. They do not promise volume or
+array decoding. Adding these fields means downstream struct literals must supply
+them; constructing metadata through the parsing API requires no changes.
 
 `rs_cli tex info` uses this API for both containers. Its JSON `mips` value is `null`
 for a mipmapped TEX because the header alone does not establish the count.
@@ -53,9 +63,9 @@ for a mipmapped TEX because the header alone does not establish the count.
 | 0      | 4    | magic         | `"TEX\0"` = `0x00584554`                          |
 | 4      | 2    | width         | `u16`                                            |
 | 6      | 2    | height        | `u16`                                            |
-| 8      | 1    | unknown1      | reserved; Riot/tooling write `1`                 |
+| 8      | 1    | unknown1      | raw depth/reserved byte; retained as read        |
 | 9      | 1    | format        | format byte (see table below)                    |
-| 10     | 1    | unknown2      | reserved; written `0`                            |
+| 10     | 1    | unknown2      | raw resource byte; `0` for 2D, `3` observed for volume |
 | 11     | 1    | has_mipmaps   | bool                                             |
 | 12     | …    | payload       | mip chain, **smallest mip first**, full-res last |
 

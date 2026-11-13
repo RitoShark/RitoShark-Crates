@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fs::File, io::BufReader};
 
 use ritoshark::{
     prelude::*,
-    tex::{Error, Texture},
+    tex::{Error, Texture, TextureHeader},
     wad::Wad,
 };
 
@@ -37,6 +37,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(texture) if texture.to_bytes()? == bytes => passed += 1,
                 Err(Error::UnsupportedFormat(_)) if bytes.len() >= 12 => {
                     *unsupported.entry(bytes[9]).or_default() += 1;
+                    let header = TextureHeader::from_bytes(&bytes)?;
+                    eprintln!(
+                        "{:016x}: unsupported TEX format={} dimensions={}x{} depth={} resource={} flags={:#04x} payload_bytes={}",
+                        chunk.path_hash,
+                        bytes[9],
+                        header.width,
+                        header.height,
+                        bytes[8],
+                        bytes[10],
+                        bytes[11],
+                        bytes.len() - 12
+                    );
                 }
                 result => {
                     malformed += 1;

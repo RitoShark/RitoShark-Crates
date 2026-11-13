@@ -26,6 +26,10 @@ pub struct TextureHeader {
     pub mip_count: Option<u32>,
     pub dx10: bool,
     pub dxgi_format: Option<u32>,
+    pub tex_format_code: Option<u8>,
+    pub tex_depth: Option<u8>,
+    pub tex_resource_type: Option<u8>,
+    pub tex_flags: Option<u8>,
 }
 
 impl Parse for TextureHeader {
@@ -50,6 +54,10 @@ impl Parse for TextureHeader {
                 mip_count: (!has_mipmaps).then_some(1),
                 dx10: false,
                 dxgi_format: None,
+                tex_format_code: Some(bytes[5]),
+                tex_depth: Some(bytes[4]),
+                tex_resource_type: Some(bytes[6]),
+                tex_flags: Some(bytes[7]),
             });
         }
         if magic != u32::from_le_bytes(*b"DDS ") {
@@ -123,6 +131,10 @@ impl Parse for TextureHeader {
             mip_count: Some(mip_count),
             dx10,
             dxgi_format,
+            tex_format_code: None,
+            tex_depth: None,
+            tex_resource_type: None,
+            tex_flags: None,
         })
     }
 
