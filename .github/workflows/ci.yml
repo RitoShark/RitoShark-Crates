@@ -25,6 +25,9 @@ jobs:
         run: cargo build --workspace --exclude rs_python --locked
       - name: Test default features (available fixtures only)
         run: cargo test --workspace --exclude rs_python --locked
+      - name: Test required-corpus runner (synthetic files only)
+        shell: pwsh
+        run: ./scripts/test-corpus-runner.ps1
       - name: Test optional WAD parallel and RMAN verification features
         run: cargo test -p rs_wad -p rs_rman --all-features --locked
       - name: Check minimal facade

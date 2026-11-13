@@ -1,0 +1,397 @@
+{
+  "version": 1,
+  "packages": [
+    {
+      "name": "rs_anim",
+      "tests": [
+        "real_files",
+        "pose"
+      ],
+      "fixtures": [
+        {
+          "name": "aatrox__skin07_ult_attack1.anm",
+          "bytes": 127022,
+          "sha256": "f7243f4cde37803cf6c4dd6696b9efd40fb2c1735eaa1acf0265b5693f09e838"
+        },
+        {
+          "name": "aatrox_sheath_run_haste.anm",
+          "bytes": 36670,
+          "sha256": "f65c7857bf0d57cfc6845ebf5234a1eedeff79e47762258401c09a031c3ef695"
+        },
+        {
+          "name": "azir.skl",
+          "bytes": 23424,
+          "sha256": "b90d694ffba4edd970831c1af325fc9d74bed56842e9fa2f490b8ed82c0a16f2"
+        },
+        {
+          "name": "azir_small.skl",
+          "bytes": 192,
+          "sha256": "2dbdf1e479f3d3d1ae4f03627b87c4e3d45ce02009a5de04179460c429ce942b"
+        },
+        {
+          "name": "azirpair.skl",
+          "bytes": 19664,
+          "sha256": "6bde1cf7a922cea17676333421b2db016373a296d17f80c3ebc25e71166e8b3e"
+        },
+        {
+          "name": "compressed_507c1f34b053b389.anm",
+          "bytes": 46338,
+          "sha256": "5ddeaf3a371b500f40a6b6d17a624c7f6dd822f8136fb5f8ba4e349ce01a2aa8"
+        },
+        {
+          "name": "compressed_e63f4f2e8c074937.anm",
+          "bytes": 7916,
+          "sha256": "af13bfdecb8c3adf8ada8f46cc3e5ff70acd558325585fda6fb7cc623ea5d1b3"
+        },
+        {
+          "name": "compressed_e890878834c561be.anm",
+          "bytes": 14418,
+          "sha256": "a7d94a231895141ebded00029a0bcf4832214466e6eefbc4ec147b6d1e6ad0bc"
+        },
+        {
+          "name": "dance_windup.anm",
+          "bytes": 28758,
+          "sha256": "f739fd18bf60452f457355b8fb3b01e2a856b94357eea8dd98d07a370e14ac6d"
+        },
+        {
+          "name": "janna_skin67.skl",
+          "bytes": 45684,
+          "sha256": "4e5fa7d9e120996c17e72be1bad3555b05de58568ee36a37e711815838cffd6f"
+        }
+      ]
+    },
+    {
+      "name": "rs_audio",
+      "tests": [
+        "real_files",
+        "wem",
+        "hirc",
+        "encode_vorbis",
+        "sweep"
+      ],
+      "fixtures": [
+        {
+          "name": "aatrox_base_sfx_audio.bnk",
+          "bytes": 3017860,
+          "sha256": "949184c3268ca174ae274f4893ba26daec537951fc666d7a00bdda6ffd8a7c43"
+        },
+        {
+          "name": "aatrox_base_sfx_events.bnk",
+          "bytes": 30821,
+          "sha256": "01eaf89c82dca45e435017d3f101b1bb6174d62f9be66e22739dbf9cb06be0ce"
+        },
+        {
+          "name": "audio_package_37.wpk",
+          "bytes": 25922933,
+          "sha256": "7d7174dd8bbef00f09dcfc365abf3cf1fc55b9583439937abd0f9d871e892f86"
+        },
+        {
+          "name": "audio_package_4.wpk",
+          "bytes": 544983,
+          "sha256": "26a44adbb67542b3c748884eb403301dcab84872d00c8615135162d597ceffec"
+        },
+        {
+          "name": "bank_v134_audio.bnk",
+          "bytes": 108066,
+          "sha256": "b5e9e001a5d3d1b45275615c126bd5c98dfbead31b8993754a36c688a2f6720d"
+        },
+        {
+          "name": "bank_v134_bare.bnk",
+          "bytes": 32,
+          "sha256": "4fb71f270be8e0257b2da6703a1b0033766192081010712900a934bae9bb70e4"
+        },
+        {
+          "name": "bank_v134_events.bnk",
+          "bytes": 1983,
+          "sha256": "30505c3898c34c73e58a927c95a1adcf8346541009ef93139f8cb17eaa931a71"
+        },
+        {
+          "name": "bank_v145_audio.bnk",
+          "bytes": 23211,
+          "sha256": "2b443d63342d245a9f4b53901f20e779b2f4f9dcf4acca74ac72a650afa64b53"
+        },
+        {
+          "name": "bank_v145_bare.bnk",
+          "bytes": 48,
+          "sha256": "4524d2edd96177616c5ec9bddddeb9d4530d3a79659fe1d31d50149357fbf124"
+        },
+        {
+          "name": "bank_v145_events.bnk",
+          "bytes": 577,
+          "sha256": "595620169ee03254403f59e8b1e89bd09e0bc11f591a38b5bcfd9538f8ee7d03"
+        },
+        {
+          "name": "bank_v145_init.bnk",
+          "bytes": 80170,
+          "sha256": "256a0795126cc7c4a52ae9ce696d236e97239f0dc9ca47936d77eb7d1e78ef9a"
+        },
+        {
+          "name": "olaf_base_vo_audio.bnk",
+          "bytes": 48,
+          "sha256": "ca40eb31c2422302439f9e3c23eae4a3092487e953b1b2d7d1a9aee72c804054"
+        },
+        {
+          "name": "olaf_base_vo_events.bnk",
+          "bytes": 4692,
+          "sha256": "7d5927c938e52be42caecebd2c13c3c9543300d677bafcbf22ed6009033b360f"
+        }
+      ]
+    },
+    {
+      "name": "rs_bin",
+      "tests": [
+        "real_files"
+      ],
+      "fixtures": [
+        {
+          "name": "aatrox.bin",
+          "bytes": 25574,
+          "sha256": "a3774be91c6a5be15ebd848b646183dca333c4a40228f217a17d393eb0bd1594"
+        },
+        {
+          "name": "aatrox_multi_skins_skin0_skins_skin2_skins_skin20_skins_skin3_skins_skin4_skins_skin40_skins_skin5_skins_skin6_skins_skin7_skins_skin8.bin",
+          "bytes": 21768,
+          "sha256": "8b624e853fadbd913becaa631dbe9eaff3250a9712cf43b503658a10e8072ab4"
+        },
+        {
+          "name": "aatrox_multi_skins_skin33_skins_skin34_skins_skin35_skins_skin36_skins_skin37_skins_skin38_skins_skin39.bin",
+          "bytes": 525317,
+          "sha256": "361b3a1e5a5cf92ba3ede024979af0a283795c07e5bef56e44e6c7b48cb8c4e2"
+        }
+      ]
+    },
+    {
+      "name": "rs_luabin",
+      "tests": [
+        "roundtrip"
+      ],
+      "fixtures": [
+        {
+          "name": "charscriptazirsundisc.luabin64",
+          "bytes": 60,
+          "sha256": "97754539b1e1a1fa249fdfa473f0c339d383af9bcd05e0e86d0fd38421454023"
+        },
+        {
+          "name": "electrocute.luabin64",
+          "bytes": 199,
+          "sha256": "946aa635517128bbb5e585b4f89349af7d0a4ddf1d02a30c5eefa6ea3f4ae9d7"
+        },
+        {
+          "name": "perksglobalbuff.luabin64",
+          "bytes": 98,
+          "sha256": "555deb06a31b918896aac04a956b0e2b801a9daf8c2d05ddaab133bc0961c8c9"
+        }
+      ]
+    },
+    {
+      "name": "rs_mapgeo",
+      "tests": [
+        "real_files",
+        "edit"
+      ],
+      "fixtures": [
+        {
+          "name": "bloom.mapgeo",
+          "bytes": 42881463,
+          "sha256": "fbd711c4c3d67c9aba83de6458fc1b8ac4de60ad0e19988849ba249e5d8fa3b4"
+        },
+        {
+          "name": "spectator_only_banners.mapgeo",
+          "bytes": 92592365,
+          "sha256": "116e263a9e8dca6142cbb35ae52d7da4c29a7c11ded442585380d5795a155a6d"
+        },
+        {
+          "name": "ultbook.mapgeo",
+          "bytes": 20045042,
+          "sha256": "744fe752fae4928d8e23f3608fd687f6db985e04986b41385870184b527f318d"
+        }
+      ]
+    },
+    {
+      "name": "rs_mesh",
+      "tests": [
+        "real_files"
+      ],
+      "fixtures": [
+        {
+          "name": "aatrox.skn",
+          "bytes": 337944,
+          "sha256": "d01787866fcc651837b9850630d1635715440274854c4aee89e0446aa478d262"
+        },
+        {
+          "name": "aatrox_base_q_cone_blast.scb",
+          "bytes": 22112,
+          "sha256": "823250479287b0c684114331476e9e0f6c9b3bd433f8cd63e4ab2115bea72d8b"
+        },
+        {
+          "name": "aatrox_skin01.skn",
+          "bytes": 433260,
+          "sha256": "030507afc26bd5d2cc344921ef3d8ee26bcc2ebef0f7292e06495b5e6728310a"
+        },
+        {
+          "name": "aatrox_skin02.skn",
+          "bytes": 1296648,
+          "sha256": "f3ebe2b84b8765e52b30a27460ea0e4931e3eb622548e41b9acfa43dd89d113a"
+        },
+        {
+          "name": "aatrox_skin11_swipemesh02.scb",
+          "bytes": 11416,
+          "sha256": "fbc5ded02d81c926f30351c6bdccd7f9e35eaea25248e0cd527fa1a1e76cc7b4"
+        },
+        {
+          "name": "blitzcrank_skin47_lighting_cyl_02.scb",
+          "bytes": 14736,
+          "sha256": "100b4d353a802b6e89fc66f17eaa77e739610992d02d43e701e8236284c37dac"
+        },
+        {
+          "name": "floorslash.scb",
+          "bytes": 5592,
+          "sha256": "e68ad6c956e98d02be8a2efb81569691f9ab65f9b27a01b2155b1daacc1c80f9"
+        },
+        {
+          "name": "janna_skin67.skn",
+          "bytes": 1615686,
+          "sha256": "d96418d2dd951905064dcafdf67da408809a40a6a797ffb1615dda522e43e649"
+        }
+      ]
+    },
+    {
+      "name": "rs_rman",
+      "tests": [
+        "real_files",
+        "parameters",
+        "file_size_width"
+      ],
+      "fixtures": [
+        {
+          "name": "7D6C65378829C6AA.manifest",
+          "bytes": 16075600,
+          "sha256": "60a4cc557c05f3f335b2abddca53f0a7914942c91bdcd1e1fcabd473a5b63efa"
+        },
+        {
+          "name": "DAFB5FDD5647079F.manifest",
+          "bytes": 16170759,
+          "sha256": "1e3584a66f2964fa5865477dc98ae0630835887d007ae446eab10f28a8606db0"
+        },
+        {
+          "name": "F8FBA48750270222.manifest",
+          "bytes": 2033011,
+          "sha256": "48ddb376eb732f093024ba856158c89e94a33fd1f08c1e6c4f585afa79f22b02"
+        }
+      ]
+    },
+    {
+      "name": "rs_rst",
+      "tests": [
+        "real_files"
+      ],
+      "fixtures": [
+        {
+          "name": "bootstrap.stringtable",
+          "bytes": 14381,
+          "sha256": "906a0fd43c2c3499077d8999b0f98d2bd50ebb8748b538c9a86a1cdda1d5f999"
+        },
+        {
+          "name": "lol.stringtable",
+          "bytes": 18430243,
+          "sha256": "ed196a536ddc60772a5b6a8437028976047f6178a6c822c31c0048fe791b1131"
+        }
+      ]
+    },
+    {
+      "name": "rs_tex",
+      "tests": [
+        "real_files"
+      ],
+      "fixtures": [
+        {
+          "name": "aatrox_base_sword_tx_cm.tex",
+          "bytes": 87420,
+          "sha256": "f97f3379f80afa02831967a09757859c0ac283db28a52c566a77f85e661ebb55"
+        },
+        {
+          "name": "aatrox_circle.tex",
+          "bytes": 16396,
+          "sha256": "4c6c075284e979422610cfbc517cad520c73d609205058d05f9c43638f20240f"
+        },
+        {
+          "name": "aatrox_cubemap.dds",
+          "bytes": 24704,
+          "sha256": "057d147fc7e25067a1793d504868c25e91c7ab5274af5c1d0d5f062d5bd77749"
+        },
+        {
+          "name": "aatrox_q.dds",
+          "bytes": 2176,
+          "sha256": "4665d30cf5ce3923ea526dc16b36c78853fe5eb7c87e9019bb16e483f41fec84"
+        },
+        {
+          "name": "aatrox_wings_tx_cm.tex",
+          "bytes": 43716,
+          "sha256": "5ef59a41e6ad0298f71593d6fb96742d13b9230f3e70d533f3923593e9a4c2d8"
+        },
+        {
+          "name": "icons_ahri_e.dds",
+          "bytes": 2176,
+          "sha256": "932899c24ad4e6201e60acb28c4db2ad0aa3545437932a4112459c70bc014017"
+        },
+        {
+          "name": "kayle_p.dds",
+          "bytes": 2176,
+          "sha256": "5d9c4a62b02a800ce6a7b9baa0571b51905d9874228b0b9a4204cfd9faf9bc01"
+        }
+      ]
+    },
+    {
+      "name": "rs_troybin",
+      "tests": [
+        "roundtrip",
+        "inibin"
+      ],
+      "fixtures": [
+        {
+          "name": "ahribotsummonerspellspracticetool.inibin",
+          "bytes": 107,
+          "sha256": "c8704df01230ef316df353e85acdc7b52546b53a74c74791edca5f563fa16405"
+        },
+        {
+          "name": "alistarbotsummonerspellsclassic.inibin",
+          "bytes": 139,
+          "sha256": "8c53bfba5d152ae6d2711922948bc07bd17ee4c36b849fe17c2b31578c1d06a2"
+        },
+        {
+          "name": "slime_environmentminion_idle.troybin",
+          "bytes": 1486,
+          "sha256": "bfab8f8cebef3672541d7e9d981345434685ed8afb216b01504b52f6481ce360"
+        },
+        {
+          "name": "sru_airdragon_ba_impact.troybin",
+          "bytes": 1401,
+          "sha256": "5b7bc9cf98db71d44f5336916bc56b1b263a2c5d699f14118c0656e3d018c8c9"
+        },
+        {
+          "name": "sru_baron_spawn_sound.troybin",
+          "bytes": 143,
+          "sha256": "914af00af6ee90fdd769d0841cc6fb1314858086a4657d3f4376e7b966d272c9"
+        }
+      ]
+    },
+    {
+      "name": "rs_wad",
+      "tests": [
+        "real_files"
+      ],
+      "fixtures": [
+        {
+          "name": "Azir.wad.client",
+          "bytes": 71149229,
+          "sha256": "7771f06791ad73b27d365655dc404b34ccf582fa8979e7c6f288439c6862df78"
+        },
+        {
+          "name": "DATA.wad.client",
+          "bytes": 56134208,
+          "sha256": "08873d7d5752e7884f7193439997bf924ac6e50a9ccfa249a9f21e8bae3ce7b8"
+        }
+      ]
+    }
+  ]
+}

@@ -8,6 +8,7 @@
 | Optional features (core job) | Same | `rs_wad/parallel` and `rs_rman/verify` tests |
 | Facade (core job) | Same | Compile `ritoshark` with no default features, then with only `bin,wad` |
 | Lints (core job) | Same | All-target/all-feature Clippy excluding Python; workspace rustfmt |
+| Corpus runner checks (core job) | Windows, PowerShell | Synthetic checks for preflight failures, cargo failures, skipped coverage, and empty/incomplete runs; no private corpus |
 | Python (`python-bindings.yml`) | Windows, Python 3.11 | Build and install a wheel, then run pytest |
 
 Python checks are deliberately separate from the core Rust job because building
@@ -43,12 +44,81 @@ Some tests are explicitly ignored; notably the BIN PBE hash-width probe is not p
 of an ordinary test run. Review the test output and fixture paths before claiming
 coverage for a specific version.
 
-For corpus validation, provision the files referenced by each crate's
-`tests/real_files.rs` and related tests, then run the suite with `-- --nocapture` and
-check skip messages. There is currently no required corpus runner or fixture manifest
-that fails the build when those assets are missing. Add that lane when a maintained,
-legally available fixture set and runner are ready. Test coverage here describes
+For required corpus validation, use the runner below. Test coverage here describes
 which checks run; no line/branch coverage percentage is currently measured.
+
+## Required corpus mode
+
+From the workspace root on Windows:
+
+```powershell
+./scripts/test-corpus.ps1
+./scripts/test-corpus.ps1 -Crate rs_tex,rs_mapgeo
+./scripts/test-corpus.ps1 -CheckOnly
+```
+
+If local script execution is disabled, a process-only invocation is available:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-corpus.ps1
+```
+
+[The manifest](fixtures.json) pins 59 reference files by name, byte length, and
+SHA-256, and lists 20 integration-test targets across 11 format crates. Provision
+your own permitted copies under the workspace's ignored `Sample-Files/` directory,
+using the exact names in the manifest. Current live files may differ from these
+reference snapshots; renaming a newer file does not make it an equivalent fixture.
+The runner reads reference files in place without downloading or publishing assets.
+Existing tests may write derived outputs to temporary directories.
+
+Preflight verifies every selected crate's files before running any tests. Missing,
+unreadable, wrong-sized, or changed files fail with their paths. Unknown crate names
+and missing test targets also fail. `-CheckOnly` stops after preflight and explicitly
+does **not** claim compatibility-test success.
+
+The runner invokes each crate's listed targets with `--all-features --locked`,
+`--nocapture`, and one test thread. Cargo failures, reported skips, and absent or
+zero-test summaries fail the run. This reuses the existing binary/text round-trip,
+decode, edit, pose, and container tests; ordinary `cargo test` still permits absent
+private fixtures. Captured skip diagnostics are a secondary check, not a general
+proof that every branch of a test ran.
+
+| Crate | Required test targets |
+|---|---|
+| `rs_anim` | `real_files`, `pose` |
+| `rs_audio` | `real_files`, `wem`, `hirc`, `encode_vorbis`, `sweep` |
+| `rs_bin` | `real_files` |
+| `rs_luabin` | `roundtrip` |
+| `rs_mapgeo` | `real_files`, `edit` |
+| `rs_mesh` | `real_files` |
+| `rs_rman` | `real_files`, `parameters`, `file_size_width` |
+| `rs_rst` | `real_files` |
+| `rs_tex` | `real_files` |
+| `rs_troybin` | `roundtrip`, `inibin` |
+| `rs_wad` | `real_files` |
+
+This is a named baseline, not every private test in the repository. It excludes
+the ignored BIN PBE probe, BIN blend-key/private absolute-path fixtures, the local
+malformed-TEX project collection, CLI/Python fixtures, and opt-in network tests.
+The audio sweep additionally examines other `.bnk`/`.wpk` files in `Sample-Files/`;
+only the baseline files are pinned by the manifest. WAD tests inspect selected
+payloads, not every file in the live installation.
+
+When adding a corpus-backed test, add its target and all required files to the
+manifest in the same change. When replacing a snapshot, review the expected
+behavior before updating its size/hash, then run the affected crate's corpus tests.
+Do not update fingerprints merely to silence a failure. File fingerprints establish
+identity, not format correctness; the integration tests establish the tested behavior.
+
+Hosted CI tests the runner using temporary synthetic files and a stub cargo command:
+
+```powershell
+./scripts/test-corpus-runner.ps1
+```
+
+The actual private-corpus run is currently local. A private runner with provisioned
+assets can invoke the same command, but no such hosted/self-hosted job is configured
+or claimed here. Neither the private corpus nor its captured output is uploaded.
 
 ## Regression priorities
 
