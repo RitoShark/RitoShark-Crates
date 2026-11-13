@@ -12,6 +12,13 @@ pub enum Error {
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),
 
+    #[error("invalid TEX mip payload: expected {expected} bytes for {levels} levels, got {actual}")]
+    InvalidMipPayload {
+        expected: u64,
+        actual: u64,
+        levels: u32,
+    },
+
     #[error("decode error: {0}")]
     Decode(String),
 

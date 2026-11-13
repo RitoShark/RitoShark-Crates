@@ -38,3 +38,7 @@ rman-verify = ["rman", "rs_rman/verify"]
 audio = ["dep:rs_audio"]
 troybin = ["dep:rs_troybin"]
 luabin = ["dep:rs_luabin"]
+
+[[example]]
+name = "audit_tex_mips"
+required-features = ["tex", "wad"]

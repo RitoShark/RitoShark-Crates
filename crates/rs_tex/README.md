@@ -59,11 +59,47 @@ for a mipmapped TEX because the header alone does not establish the count.
 | 11     | 1    | has_mipmaps   | bool                                             |
 | 12     | …    | payload       | mip chain, **smallest mip first**, full-res last |
 
-When `has_mipmaps` is set and the format has a known block layout, the current full
-reader assumes a smallest-to-largest chain with `floor(log2(max(w, h))) + 1` levels.
-The header itself stores no count. Non-square VFX chains reported by tools still need
-fixture-based investigation; use header inspection for metadata without relying on
-this assumption. Otherwise the full reader retains the remaining payload as one block.
+When `has_mipmaps` is set and the format has a known block layout, the full reader
+expects a smallest-to-largest chain with `floor(log2(max(w, h))) + 1` levels. Each
+compressed mip rounds each dimension up to a whole block independently. The payload
+must match that total exactly; short or surplus data produces `InvalidMipPayload`
+with expected/actual byte counts before allocating mip buffers. The header itself
+stores no mip count. Otherwise the full reader retains the remaining payload as one block.
+The reader's EOF must mark the end of this texture; use a bounded stream for an
+embedded TEX.
+
+The [non-square mip audit](docs/mip-layout-audit.md) found correct full chains in the
+checked live files and undersized exported chains in a local project. A payload can
+match the length of a shorter chain while still containing incorrectly sized levels,
+so the parser does not guess a replacement count from its length.
+
+### Explicit largest-mip extraction
+
+For callers that deliberately want just the full-resolution image:
+
+```rust,no_run
+use std::fs::File;
+use rs_io::Serialize;
+use rs_tex::Texture;
+
+let texture = Texture::from_reader_largest_mip(&mut File::open("source.tex")?)?;
+let image = texture.decode_rgba()?;
+texture.to_path("single-mip.tex")?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+This reads the TEX header and the final full-resolution block, skipping lower mips.
+The returned texture has one stored mip and `has_mipmaps = false`; writing it drops
+the original lower-mip bytes. It is an extraction operation, not a lossless parse or
+mip-chain repair. It assumes a complete full-resolution mip ends at the stream's EOF;
+it cannot detect a damaged top mip or an appended trailer. Bound a reader to one
+texture when working within a larger stream. Use the normal `Parse` API when validating
+or preserving the complete file.
+
+Extraction supports the known BC and uncompressed layouts for 2D resources (header
+resource byte zero and depth/reserved byte zero or one). Zero dimensions, insufficient
+base-image bytes, other resource kinds, and ETC layouts are rejected. Metadata-only
+inspection remains available through `TextureHeader` even when full parsing fails.
 
 Supported `.tex` format bytes:
 

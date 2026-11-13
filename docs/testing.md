@@ -65,5 +65,9 @@ test exports the first model of each available map sample without changing its s
 Texture-header tests verify bounded reads, all truncated header prefixes, DDS flags
 and structure sizes, and unknown format handling. CLI tests inspect TEX/DDS headers
 without pixel payloads and verify that an unknown TEX mip count is JSON `null`.
+TEX mip-layout regressions cover valid rectangular chains, ambiguous short payloads,
+surplus bytes, allocation preflight, and explicit largest-mip extraction. The
+`audit_tex_mips` example supports read-only checks against supplied WADs; see the
+[audit results and coverage limits](../crates/rs_tex/docs/mip-layout-audit.md).
 Keep adding small synthetic reproductions alongside fixes; reserve real fixtures
 for compatibility questions that synthetic data cannot answer.
