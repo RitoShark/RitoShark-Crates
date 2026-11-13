@@ -122,3 +122,26 @@ fn attribute_reads_reject_truncated_or_overflowing_ranges() {
         Some(vec![])
     );
 }
+
+#[test]
+fn half_float_overflow_rejects_the_whole_attribute_write() {
+    for format in [
+        ElementFormat::XyPacked1616,
+        ElementFormat::XyzPacked161616,
+        ElementFormat::XyzwPacked16161616,
+    ] {
+        let description = layout(format);
+        for overflow in [100_000.0, -100_000.0, f32::MAX] {
+            let mut data = vec![0xa5; format.byte_size() * 2];
+            let original = data.clone();
+            let mut values = vec![1.0; format.component_count() * 2];
+            *values.last_mut().unwrap() = overflow;
+            assert!(
+                description
+                    .write_attribute(&mut data, ElementName::Texcoord0, &values)
+                    .is_err()
+            );
+            assert_eq!(data, original);
+        }
+    }
+}

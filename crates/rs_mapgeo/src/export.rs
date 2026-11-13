@@ -64,25 +64,6 @@ impl MapGeometry {
             ));
         }
         geometry.validate()?;
-        if geometry.indices.len() % 3 != 0 {
-            return Err(Error::InvalidData(
-                "index buffer contains an incomplete triangle".into(),
-            ));
-        }
-        for submesh in 0..geometry.submeshes.len() {
-            let _ = geometry.submesh_triangles(submesh)?;
-        }
-        if geometry
-            .positions
-            .iter()
-            .chain(&geometry.normals)
-            .chain(&geometry.uvs)
-            .any(|v| !v.is_finite())
-        {
-            return Err(Error::InvalidData(
-                "geometry contains non-finite attributes".into(),
-            ));
-        }
         let normal_transform = transform.inverse().transpose();
         if !normal_transform.is_finite() {
             return Err(Error::InvalidData(

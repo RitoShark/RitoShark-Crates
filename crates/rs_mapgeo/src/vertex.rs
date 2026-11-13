@@ -214,6 +214,19 @@ impl VertexDescription {
             )));
         }
 
+        if matches!(
+            format,
+            ElementFormat::XyPacked1616
+                | ElementFormat::XyzPacked161616
+                | ElementFormat::XyzwPacked16161616
+        ) && values
+            .iter()
+            .any(|&value| value.is_finite() && !half::f16::from_f32(value).is_finite())
+        {
+            return Err(Error::InvalidData(format!(
+                "{name:?} contains a finite value that overflows half-float encoding"
+            )));
+        }
         for i in 0..vertex_count {
             let base = i * stride + offset;
             format.encode(

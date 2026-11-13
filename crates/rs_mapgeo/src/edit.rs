@@ -76,7 +76,10 @@ impl Geometry {
         self.positions.len() / 3
     }
 
-    pub(crate) fn validate(&self) -> Result<()> {
+    /** Checks editable geometry: finite attributes, matching component counts, addressable
+    vertices, and complete triangle ranges. Overlapping ranges, gaps, empty draw ranges, and
+    degenerate triangles are allowed. Target vertex encoding is checked separately during edits. */
+    pub fn validate(&self) -> Result<()> {
         if self.positions.is_empty() {
             return Err(Error::InvalidData("geometry has no positions".to_string()));
         }
@@ -108,8 +111,27 @@ impl Geometry {
                 self.uvs.len()
             )));
         }
+        for (name, values) in [
+            ("positions", &self.positions),
+            ("normals", &self.normals),
+            ("uvs", &self.uvs),
+        ] {
+            if values.iter().any(|value| !value.is_finite()) {
+                return Err(Error::InvalidData(format!(
+                    "{name} contains non-finite values"
+                )));
+            }
+        }
         if self.indices.is_empty() {
             return Err(Error::InvalidData("geometry has no indices".to_string()));
+        }
+        if !self.indices.len().is_multiple_of(3) {
+            return Err(Error::InvalidData(
+                "index buffer contains an incomplete triangle".into(),
+            ));
+        }
+        if u32::try_from(self.indices.len()).is_err() {
+            return Err(Error::InvalidData("index count exceeds u32".into()));
         }
         if vertex_count > usize::from(u16::MAX) + 1 {
             return Err(Error::InvalidData(format!(
@@ -129,6 +151,12 @@ impl Geometry {
             return Err(Error::InvalidData("geometry has no submeshes".to_string()));
         }
         for submesh in &self.submeshes {
+            if !submesh.index_start.is_multiple_of(3) || !submesh.index_count.is_multiple_of(3) {
+                return Err(Error::InvalidData(format!(
+                    "submesh {:?} is not aligned to complete triangles",
+                    submesh.name
+                )));
+            }
             let end = (submesh.index_start as usize).checked_add(submesh.index_count as usize);
             if end.is_none_or(|end| end > self.indices.len()) {
                 return Err(Error::InvalidData(format!(
@@ -285,12 +313,13 @@ impl MapGeometry {
             .layer;
 
         let descriptions: Vec<VertexDescription> = layouts.into_iter().map(|(_, d)| d).collect();
+        let new_index_id = i32::try_from(self.index_buffers.len())
+            .map_err(|_| Error::InvalidData("index buffer id exceeds i32".into()))?;
         let new_vertex_ids = self.write_vertex_buffers(&descriptions, geometry, &buffer_layers)?;
         self.index_buffers.push(IndexBuffer {
             layer: index_layer,
             indices: geometry.indices.clone(),
         });
-        let new_index_id = (self.index_buffers.len() - 1) as i32;
 
         let model = &mut self.models[index];
         model.vertex_count = geometry.vertex_count() as u32;
@@ -318,20 +347,21 @@ impl MapGeometry {
         geometry.validate()?;
 
         let description = default_description();
-        let description_id = match self
+        let existing_description = self
             .vertex_descriptions
             .iter()
-            .position(|existing| *existing == description)
-        {
-            Some(id) => id,
-            None => {
-                self.vertex_descriptions.push(description.clone());
-                self.vertex_descriptions.len() - 1
-            }
-        } as u32;
+            .position(|existing| *existing == description);
+        let description_id =
+            u32::try_from(existing_description.unwrap_or(self.vertex_descriptions.len()))
+                .map_err(|_| Error::InvalidData("vertex description id exceeds u32".into()))?;
+        let index_buffer_id = i32::try_from(self.index_buffers.len())
+            .map_err(|_| Error::InvalidData("index buffer id exceeds i32".into()))?;
 
         let vertex_buffer_ids =
             self.write_vertex_buffers(std::slice::from_ref(&description), geometry, &[0])?;
+        if existing_description.is_none() {
+            self.vertex_descriptions.push(description);
+        }
         self.index_buffers.push(IndexBuffer {
             layer: 0,
             indices: geometry.indices.clone(),
@@ -343,7 +373,7 @@ impl MapGeometry {
             vertex_description_id: description_id,
             vertex_buffer_ids,
             index_count: geometry.indices.len() as u32,
-            index_buffer_id: (self.index_buffers.len() - 1) as i32,
+            index_buffer_id,
             layer,
             unknown_v18: 0,
             bucket_grid_hash: 0,

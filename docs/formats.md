@@ -64,6 +64,7 @@ Detailed support for every format, including versions and known limits. "Byte-ex
 - **Export geometry:** `geometry_world` applies placement, transforms normals with the inverse transpose, and reverses triangle winding for reflected models. `Geometry::submesh_triangles` provides validated material-range triangles. See [export behavior and limits](../crates/rs_mapgeo/README.md#geometry-for-export). Scene-graph generation and FBX serialization are not provided.
 - **Vertex codec:** 16-bit packed components use half-floats; 8-bit packed colors use normalized channels. Half-float reads/writes preserve signed and out-of-unit-range values instead of clamping them to `0..=1`.
 - **Edit validation:** missing vertex/index buffer references return errors. `replace_geometry` prepares all vertex streams before appending them, so an encoding failure in a later stream leaves the map unchanged.
+- **Geometry preflight:** public `Geometry::validate` checks finite attributes, editable counts, vertex references, and complete triangle ranges. Add/replace/world export share it. Finite values that overflow half-float encoding are rejected before attribute writes, preserving the map on failed replacement.
 - **Unsupported:** versions 8, 10, and 16 — these revisions were skipped by Riot and are absent from every reference, so rather than guess a layout they return an unsupported-version error.
 - **CLI:** `rs_cli read` only.
 

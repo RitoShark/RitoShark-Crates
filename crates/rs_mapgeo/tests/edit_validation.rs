@@ -1,4 +1,7 @@
-use rs_mapgeo::{ElementFormat, Geometry, MapGeometry, VertexDescription, VertexUsage};
+use rs_mapgeo::{
+    ElementFormat, ElementName, Geometry, MapGeometry, VertexDescription, VertexElement,
+    VertexUsage,
+};
 use rs_math::Mat4;
 
 fn triangle() -> Geometry {
@@ -90,4 +93,77 @@ fn valid_replacement_retains_shared_buffers_and_other_models() {
     assert_eq!(map.models[1], before.models[1]);
     assert_eq!(map.vertex_buffers[0], before.vertex_buffers[0]);
     assert_eq!(map.index_buffers[0], before.index_buffers[0]);
+}
+
+#[test]
+fn malformed_geometry_is_rejected_before_add_or_replace_mutates_the_map() {
+    for case in 0..7 {
+        let mut geometry = triangle();
+        match case {
+            0 => geometry.positions[0] = f32::NAN,
+            1 => geometry.normals[1] = f32::INFINITY,
+            2 => geometry.uvs[0] = f32::NEG_INFINITY,
+            3 => geometry.indices.push(0),
+            4 => geometry.submeshes[0].index_count = 2,
+            5 => {
+                geometry.indices.extend([0, 1, 2]);
+                geometry.submeshes[0].index_start = 1;
+            }
+            6 => geometry.positions[4] = f32::INFINITY,
+            _ => unreachable!(),
+        }
+        let mut map = map();
+        let before = map.clone();
+        assert!(
+            map.replace_geometry(0, &geometry).is_err(),
+            "replace case {case}"
+        );
+        assert_eq!(map, before);
+        assert!(
+            map.add_model("bad", &geometry, Mat4::IDENTITY, 0).is_err(),
+            "add case {case}"
+        );
+        assert_eq!(map, before);
+    }
+}
+
+#[test]
+fn half_float_overflow_in_a_later_stream_preserves_the_entire_map() {
+    let mut map = map();
+    map.vertex_descriptions.push(VertexDescription {
+        usage: VertexUsage::Static,
+        elements: vec![VertexElement {
+            name: ElementName::Texcoord0,
+            format: ElementFormat::XyPacked1616,
+        }],
+    });
+    map.models[0].vertex_buffer_ids.push(0);
+    let before = map.clone();
+    let mut geometry = triangle();
+    *geometry.uvs.last_mut().unwrap() = 100_000.0;
+    assert!(
+        geometry.validate().is_ok(),
+        "generic geometry is valid before target encoding"
+    );
+    assert!(map.replace_geometry(0, &geometry).is_err());
+    assert_eq!(map, before);
+}
+
+#[test]
+fn validation_retains_supported_draw_ranges_and_attribute_values() {
+    let mut geometry = triangle();
+    geometry.normals.fill(0.0);
+    geometry.uvs[0] = -2.0;
+    geometry.uvs[1] = 3.0;
+    geometry.indices.extend([0, 0, 0]);
+    geometry.submeshes.push(geometry.submeshes[0].clone());
+    geometry.submeshes.push(rs_mapgeo::SubmeshRange {
+        name: "unused".into(),
+        index_start: 6,
+        index_count: 0,
+    });
+    geometry.validate().unwrap();
+    let mut map = map();
+    map.replace_geometry(0, &geometry).unwrap();
+    assert_eq!(map.geometry(0).unwrap(), geometry);
 }

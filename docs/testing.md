@@ -174,6 +174,11 @@ edits preserving the complete map, including shared buffers.
 World-space MAPGEO tests cover rotation/translation, non-uniform scale, shear,
 reflected winding, split half-float streams, and invalid export inputs. A fixture
 test exports the first model of each available map sample without changing its source.
+MAPGEO edit regressions also reject non-finite attributes and incomplete triangles
+before either add or replace changes a map. Half-float overflow tests cover all three
+packed layouts and failure in a later stream without partial mutation. Positive
+checks retain tiled UVs, zero normals, overlapping/empty draw ranges, and gaps;
+existing codec tests retain explicit half NaNs/infinities and subnormals.
 Texture-header tests verify bounded reads, all truncated header prefixes, DDS flags
 and structure sizes, unknown format handling, and raw TEX metadata retention,
 including the observed format-23 volume header. CLI tests inspect TEX/DDS headers
