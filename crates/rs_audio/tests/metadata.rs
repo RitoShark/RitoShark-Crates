@@ -68,3 +68,14 @@ fn validates_media_bounds_duplicates_and_sections() {
     assert!(bank.validate_media().is_err());
     Bnk::new().validate_media().unwrap();
 }
+
+#[test]
+fn final_odd_audio_chunk_is_not_metadata() {
+    let samples = (0..44100)
+        .map(|i| ((i as f32 * 0.073).sin() * 24000.0) as i16)
+        .collect();
+    let bytes = rs_audio::encode_vorbis(&PcmAudio::new(44100, 1, samples), 0.9).unwrap();
+    let wem = Wem::new(&bytes).unwrap();
+    assert!(!wem.has_extra_chunks());
+    assert!(!wem.to_pcm().unwrap().is_empty());
+}

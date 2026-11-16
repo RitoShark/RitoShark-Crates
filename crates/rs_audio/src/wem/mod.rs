@@ -194,7 +194,7 @@ impl<'a> Wem<'a> {
             data_size,
             vorb,
             smpl_offset,
-            has_extra_chunks: has_extra_chunks || at != riff_end,
+            has_extra_chunks: has_extra_chunks || at < riff_end,
         })
     }
 
