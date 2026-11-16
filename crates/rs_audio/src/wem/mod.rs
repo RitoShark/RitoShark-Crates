@@ -81,6 +81,7 @@ pub struct Wem<'a> {
     data_size: usize,
     vorb: Option<VorbLocation>,
     smpl_offset: Option<usize>,
+    has_extra_chunks: bool,
 }
 
 fn le_u16(data: &[u8], at: usize) -> Result<u16> {
@@ -120,6 +121,7 @@ impl<'a> Wem<'a> {
         let mut vorb: Option<(usize, usize)> = None;
         let mut audio: Option<(usize, usize)> = None;
         let mut smpl_offset = None;
+        let mut has_extra_chunks = declared.checked_add(8) != Some(data.len());
 
         let mut at = 12usize;
         while at + 8 <= riff_end {
@@ -134,11 +136,23 @@ impl<'a> Wem<'a> {
             }
 
             match tag {
-                b"fmt " => fmt = Some((body, len)),
-                b"vorb" => vorb = Some((body, len)),
-                b"data" => audio = Some((body, len)),
-                b"smpl" => smpl_offset = Some(body),
-                _ => {}
+                b"fmt " => {
+                    has_extra_chunks |= fmt.is_some();
+                    fmt = Some((body, len));
+                }
+                b"vorb" => {
+                    has_extra_chunks |= vorb.is_some();
+                    vorb = Some((body, len));
+                }
+                b"data" => {
+                    has_extra_chunks |= audio.is_some();
+                    audio = Some((body, len));
+                }
+                b"smpl" => {
+                    smpl_offset = Some(body);
+                    has_extra_chunks = true;
+                }
+                _ => has_extra_chunks = true,
             }
 
             at = next.saturating_add(len & 1);
@@ -180,7 +194,12 @@ impl<'a> Wem<'a> {
             data_size,
             vorb,
             smpl_offset,
+            has_extra_chunks: has_extra_chunks || at != riff_end,
         })
+    }
+
+    pub fn has_extra_chunks(&self) -> bool {
+        self.has_extra_chunks
     }
 
     pub fn format(&self) -> &WemFormat {

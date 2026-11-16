@@ -125,6 +125,17 @@ impl Bnk {
         Ok(())
     }
 
+    pub fn validate_media(&self) -> Result<()> {
+        let media = self.checked_wems()?;
+        let mut ids = std::collections::HashSet::new();
+        for (id, _) in media {
+            if !ids.insert(id) {
+                return Err(Error::Bank("duplicate media ID"));
+            }
+        }
+        Ok(())
+    }
+
     fn checked_wems(&self) -> Result<Vec<(u32, &[u8])>> {
         let index_count = self
             .sections

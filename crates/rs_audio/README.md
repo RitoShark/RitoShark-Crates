@@ -443,3 +443,5 @@ index rather than embedding it.
 Part of [RitoShark](https://github.com/RitoShark/RitoShark-Crates), a Rust workspace for reading and
 writing League of Legends file formats: `.bin`/PROP, `.wad`, `.tex`, `.skn`, `.skl`, `.anm`,
 `.mapgeo`, `.stringtable`, `.manifest` and more.
+
+`Wem::has_extra_chunks()` identifies streams carrying metadata beyond the encoded format/audio chunks, duplicate chunks, or unmatched RIFF bytes. Callers that re-encode audio can preserve these streams unchanged to avoid losing loop/cue metadata. `Bnk::validate_media()` checks media index lengths, bounds, duplicate IDs, and duplicate media sections before editing.

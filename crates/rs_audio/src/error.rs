@@ -19,6 +19,8 @@ pub enum Error {
     Hirc(&'static str),
     #[error("no embedded wem with id {0}")]
     NoSuchWem(u32),
+    #[error("malformed bank: {0}")]
+    Bank(&'static str),
     #[error("codebook {0} is not in the library")]
     UnknownCodebook(u32),
 }
