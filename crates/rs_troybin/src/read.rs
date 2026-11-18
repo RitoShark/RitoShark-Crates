@@ -42,9 +42,24 @@ fn read_v1<R: Read>(r: &mut R) -> Result<TroybinV1> {
 fn read_v2<R: Read>(r: &mut R) -> Result<TroybinV2> {
     let strings_length = r.read_u16()?;
     let mut flags = r.read_u16()?;
-    let flags_zero_prefix = flags == 0;
-    if flags_zero_prefix {
-        flags = r.read_u16()?;
+    let mut flags_zero_prefix = false;
+    if flags == 0 {
+        let mut extra = Vec::with_capacity(2);
+        r.take(2).read_to_end(&mut extra)?;
+        match extra.as_slice() {
+            [] => {}
+            &[lo, hi] => {
+                flags_zero_prefix = true;
+                flags = u16::from_le_bytes([lo, hi]);
+            }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "truncated troybin flags",
+                )
+                .into());
+            }
+        }
     }
 
     let mut buckets = Vec::new();

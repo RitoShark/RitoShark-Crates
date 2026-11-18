@@ -116,6 +116,18 @@ fn unknown_version_is_error() {
     ));
 }
 
+#[test]
+fn empty_v2_round_trips() {
+    let bytes = [2u8, 0, 0, 0, 0];
+    let parsed = Troybin::from_bytes(&bytes).expect("parse empty v2");
+    let TroybinBody::V2(body) = &parsed.body else {
+        panic!("expected v2");
+    };
+    assert!(!body.flags_zero_prefix);
+    assert!(body.buckets.is_empty());
+    assert_eq!(parsed.to_bytes().expect("write empty v2"), bytes);
+}
+
 /// Build the synthetic v2 file (bit-0 i32 + bit-12 strings) used by several edit tests.
 fn synthetic_v2_bytes() -> Vec<u8> {
     let mut bytes = vec![2u8];
